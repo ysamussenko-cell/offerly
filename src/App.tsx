@@ -5,7 +5,7 @@ import { InstallButton } from './install';
 import Resume, { ProfileCard } from './screens/Resume';
 import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 import { BankCard } from './screens/Bank';
-import Assessment, { TestCard } from './screens/Assessment';
+import Assessment, { TestCard, type Mode } from './screens/Assessment';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -18,7 +18,7 @@ export default function App() {
   /** Анкета: 'auto' — открыть сразу после разбора резюме, 'open' — по кнопке, 'closed' — отложена или сохранена. */
   const [survey, setSurvey] = useState<'auto' | 'open' | 'closed'>('auto');
   /** Экран теста уровня открыт; счётчик — чтобы карточка перечитала состояние после закрытия. */
-  const [testing, setTesting] = useState(false);
+  const [testing, setTesting] = useState<Mode | null>(null);
   const [testRuns, setTestRuns] = useState(0);
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(false); return; }
+    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); return; }
     api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
   }, [auth.state]);
 
@@ -85,12 +85,12 @@ export default function App() {
       )}
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && testing && (
-        <Assessment onClose={() => { setTesting(false); setTestRuns(n => n + 1); }} />
+        <Assessment mode={testing} onClose={() => { setTesting(null); setTestRuns(n => n + 1); }} />
       )}
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && (
         <div className="stack" style={{ marginTop: 0 }}>
-          {ready.analyzed && <TestCard onOpen={() => setTesting(true)} refreshKey={testRuns} />}
+          {ready.analyzed && <TestCard onOpen={setTesting} refreshKey={testRuns} />}
           {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
           <ProfileCard profile={ready} onReplace={() => setReplacing(true)}
             onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}

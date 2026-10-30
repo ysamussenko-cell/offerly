@@ -105,7 +105,8 @@ jobs:
           ASG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/assessment")
           AST=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/assessment/start")
           ASA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"attemptId":"x","answer":"A"}' "$P/api/assessment/answer")
-          echo "::notice title=assessment::GET /api/assessment без cookie → $ASG; POST /api/assessment/start → $AST; POST /api/assessment/answer → $ASA (ждём 401 везде)"
+          ASS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/assessment/score")
+          echo "::notice title=assessment::GET /api/assessment без cookie → $ASG; POST /api/assessment/start → $AST; POST /api/assessment/answer → $ASA; POST /api/assessment/score → $ASS (ждём 401 везде)"
           [ "$ASG" = "401" ] && [ "$AST" = "401" ] && [ "$ASA" = "401" ] || { echo "::error title=assessment::неожиданные коды ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"

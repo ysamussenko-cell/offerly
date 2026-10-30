@@ -86,3 +86,53 @@ fieldset.field legend { padding: 0; margin-bottom: 6px; }
 .level-badge { font-family: Manrope, Inter, sans-serif; font-weight: 800; font-size: 32px; letter-spacing: -0.02em; color: var(--graphite); background: var(--amber); border-radius: 14px; padding: 6px 14px; line-height: 1.2; }
 .facts-list { margin: 0 0 16px; padding-left: 18px; font-size: 15px; }
 .facts-list li { margin: 4px 0; }
+
+/* результат теста: лестница, радар, оси, примеры ошибок */
+.result-h { font-size: 16px; margin: 24px 0 10px; }
+.ladder { margin-top: 4px; }
+.ladder-track { position: relative; height: 10px; border-radius: 999px; background: var(--line); margin: 26px 0 0; }
+.ladder-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--amber); border-radius: 999px; }
+.ladder-tick { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--card); }
+.ladder-mark { position: absolute; top: -26px; transform: translateX(-50%); font-family: Manrope, Inter, sans-serif; font-size: 13px; font-weight: 800; color: var(--ink); }
+.ladder-mark::after { content: ''; position: absolute; left: 50%; bottom: -8px; width: 2px; height: 8px; margin-left: -1px; background: var(--graphite); }
+@media (prefers-color-scheme: dark) { .ladder-mark::after { background: var(--amber); } }
+.ladder-steps { position: relative; height: 44px; margin-top: 6px; }
+.ladder-step { position: absolute; top: 0; display: flex; flex-direction: column; align-items: center; padding-top: 4px; border-top: 2px solid var(--line); color: var(--muted); }
+.ladder-step b { font-family: Manrope, Inter, sans-serif; font-size: 14px; color: var(--ink); }
+.ladder-step small { font-size: 11px; line-height: 1.2; text-align: center; }
+.ladder-step.passed { border-top-color: var(--amber); }
+.ladder-step.current { border-top-color: var(--graphite); }
+.ladder-step.current b { color: var(--graphite); }
+@media (prefers-color-scheme: dark) { .ladder-step.current { border-top-color: var(--amber); } .ladder-step.current b { color: var(--amber); } }
+.result-grid { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 12px 24px; align-items: center; }
+@media (max-width: 640px) { .result-grid { grid-template-columns: 1fr; } }
+.radar { margin: 0; max-width: 340px; width: 100%; }
+.radar svg { display: block; overflow: visible; }
+.radar-ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.radar-axis { stroke: var(--line); stroke-width: 1; }
+.radar-axis.off { stroke-dasharray: 3 4; }
+.radar-level { font-size: 10px; fill: var(--muted); font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.radar-area { fill: var(--amber); fill-opacity: .22; stroke: var(--amber); stroke-width: 2; stroke-linejoin: round; }
+.radar-dot { fill: var(--amber); stroke: var(--card); stroke-width: 2; }
+.radar-label { font-size: 12px; fill: var(--ink); font-weight: 500; }
+.radar-label.off { fill: var(--muted); }
+.radar-value { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; fill: var(--muted); font-size: 11px; }
+.axes { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.axes div { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.axes dt { font-size: 14px; color: var(--ink); }
+.axes div.off dt { color: var(--muted); }
+.axes dd { margin: 0; display: flex; align-items: center; gap: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; }
+.axis-bar { flex: 1; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.axis-bar span { display: block; height: 100%; background: var(--amber); border-radius: 999px; }
+.axes-mini { list-style: none; margin: 4px 0 14px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 16px; font-size: 13px; }
+.axes-mini li { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 3px 0; }
+.axes-mini li span { color: var(--muted); }
+.axes-mini li b { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.axes-mini li.off b { color: var(--muted); font-weight: 500; }
+.examples { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; counter-reset: ex; }
+.examples li { position: relative; border: 1px solid var(--line); border-left: 3px solid var(--coral); border-radius: 12px; padding: 12px 14px 12px 14px; background: var(--paper); }
+.ex-src { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.ex-quote { margin: 6px 0 2px; font-size: 14px; color: var(--coral-text); }
+.ex-quote s { text-decoration-color: var(--coral); }
+.ex-fix { margin: 0; font-size: 14px; color: var(--mint-text); font-weight: 600; }
+.ex-note { margin: 6px 0 0; font-size: 13px; color: var(--muted); }

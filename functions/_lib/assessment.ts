@@ -4,11 +4,15 @@
  *  задание прямо сейчас через тот же конвейер генерации с проверкой. Каждое выданное задание сразу записывается
  *  в attempts без ответа — это точка продолжения: тест можно прервать и открыть снова с того же места.
  *  Проверка ответов — сравнением с эталоном из банка: буква варианта, буквы двух вопросов, исправленное предложение.
- *  Письмо здесь только сохраняется; оценка по пяти осям и экран результата — задача 2.6. */
+ *  После последнего ответа письмо оценивает модель по рубрике и образцу, считаются пять осей и уровень (scoring.ts). */
 import type { Env as ProviderEnv } from './providers';
 import {
   LEVELS, TOPICS, KIND_LABELS, WRITING_WORDS, generateItems, type Domain, type Item, type ItemStore, type Kind, type Level, type ReadingQuestion, type GenerateOpts,
 } from './items';
+import {
+  AXES, AXIS_LABELS, LEVEL_THRESHOLD, BAND, computeAxes, errorExamples, evaluateWriting, nextStep, parseWritingEval,
+  type Axes, type Axis, type ErrorExample, type WritingEval,
+} from './scoring';
 
 export const ADAPTIVE_COUNT = 12;
 export const TOTAL = ADAPTIVE_COUNT + 2; // + чтение + письмо
@@ -37,6 +41,13 @@ export interface Assessment {
   /** Уровень, с которого берётся следующее адаптивное задание. */
   currentLevel: Level;
   updatedAt: string;
+  /** Пять осей 0–100 после оценки; беглость речи до голоса — null. */
+  axes: Axes | null;
+  /** Сводный балл 0–100, из которого выведен уровень. */
+  overall: number | null;
+  scoredAt: string | null;
+  /** Почему письмо не оценено (ошибка модели); null — оценка полная. */
+  scoringNote: string | null;
 }
 
 export interface Attempt {
@@ -53,17 +64,22 @@ export interface Attempt {
   /** Проценты: mcq и исправление — 0/100, чтение — 0/50/100, письмо — null до оценки в 2.6. */
   score: number | null;
   feedback: string | null;
+  /** JSON оценки письма моделью (WritingEval); у остальных заданий null. */
+  detail: string | null;
   createdAt: string;
   answeredAt: string | null;
 }
 
+export type AssessmentPatch = Partial<Pick<Assessment, 'status' | 'currentLevel' | 'level' | 'finishedAt' | 'updatedAt' | 'axes' | 'overall' | 'scoredAt' | 'scoringNote'>>;
+export type AttemptPatch = Partial<Pick<Attempt, 'answer' | 'correct' | 'score' | 'feedback' | 'detail' | 'answeredAt'>>;
+
 export interface AssessmentStore {
   createAssessment(a: Assessment): Promise<void>;
-  updateAssessment(id: string, patch: Partial<Pick<Assessment, 'status' | 'currentLevel' | 'level' | 'finishedAt' | 'updatedAt'>>): Promise<void>;
+  updateAssessment(id: string, patch: AssessmentPatch): Promise<void>;
   activeAssessment(userId: string): Promise<Assessment | null>;
   latestAssessment(userId: string): Promise<Assessment | null>;
   insertAttempt(a: Attempt): Promise<void>;
-  updateAttempt(id: string, patch: Partial<Pick<Attempt, 'answer' | 'correct' | 'score' | 'feedback' | 'answeredAt'>>): Promise<void>;
+  updateAttempt(id: string, patch: AttemptPatch): Promise<void>;
   /** Попытки теста по порядку позиций. */
   listAttempts(assessmentId: string): Promise<Attempt[]>;
   /** Все задания, которые пользователь когда-либо видел (любой тест) — не показывать снова. */
@@ -186,6 +202,45 @@ export interface View {
   levelLabel: string | null;
   /** После завершения: верные ответы адаптивной части, очки за чтение (0/50/100) и длина письма. */
   summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
+  /** После завершения: пять осей, лестница и примеры ошибок; null — оценка ещё не считалась (тест 0.6.0). */
+  result: Result | null;
+}
+
+export interface Result {
+  axes: { id: Axis; label: string; score: number | null }[];
+  overall: number;
+  level: Level;
+  /** Лестница: ступени с нижними порогами и следующая ступень с остатком баллов. */
+  ladder: { steps: { level: Level; label: string; from: number }[]; next: { level: Level; points: number } | null };
+  examples: ErrorExample[];
+  writing: { level: Level; summary: string; rewrite: string | null; errors: number } | null;
+  scoredAt: string | null;
+  /** Почему письмо не оценено; null — всё посчитано. */
+  scoringNote: string | null;
+}
+
+
+/** Задания теста по id — для сводки и примеров ошибок. */
+async function itemsOf(store: Store, attempts: Attempt[]): Promise<Map<string, Item>> {
+  const m = new Map<string, Item>();
+  for (const a of attempts) { if (!m.has(a.itemId)) { const it = await store.getItem(a.itemId); if (it) m.set(a.itemId, it); } }
+  return m;
+}
+
+export const ladderSteps = () => LEVELS.map((level, i) => ({ level, label: LEVEL_LABELS[level], from: i === 0 ? 0 : i * BAND + LEVEL_THRESHOLD }));
+
+export function buildResult(a: Assessment, attempts: Attempt[], items: Map<string, Item>): Result | null {
+  if (!a.axes || a.overall == null || !a.level) return null;
+  const writingAttempt = attempts.find(x => x.position === ADAPTIVE_COUNT + 2);
+  const writing = parseWritingEval(writingAttempt?.detail);
+  return {
+    axes: AXES.map(id => ({ id, label: AXIS_LABELS[id], score: a.axes![id] })),
+    overall: a.overall, level: a.level,
+    ladder: { steps: ladderSteps(), next: nextStep(a.overall) },
+    examples: errorExamples(attempts, items, writing),
+    writing: writing ? { level: writing.level, summary: writing.summary, rewrite: writing.rewrite, errors: writing.errors.length } : null,
+    scoredAt: a.scoredAt, scoringNote: a.scoringNote,
+  };
 }
 
 export async function view(store: Store, a: Assessment, attempts?: Attempt[]): Promise<View> {
@@ -198,15 +253,17 @@ export async function view(store: Store, a: Assessment, attempts?: Attempt[]): P
     if (item) current = testItem(item, pending.id, pending.position);
   }
   let summary: View['summary'] = null;
+  let result: Result | null = null;
   if (a.status === 'finished') {
     const adaptive = list.filter(x => x.position <= ADAPTIVE_COUNT && x.correct != null);
     const reading = list.find(x => x.position === ADAPTIVE_COUNT + 1);
     const writing = list.find(x => x.position === ADAPTIVE_COUNT + 2);
     summary = { adaptiveTotal: adaptive.length, adaptiveCorrect: adaptive.filter(x => x.correct === 1).length, readingScore: reading?.score ?? null, writingWords: writing?.answer ? countWords(writing.answer) : null };
+    result = buildResult(a, list, await itemsOf(store, list));
   }
   return {
     id: a.id, status: a.status, total: TOTAL, answered, current, startedAt: a.startedAt, finishedAt: a.finishedAt,
-    level: a.level, levelLabel: a.level ? LEVEL_LABELS[a.level] : null, summary,
+    level: a.level, levelLabel: a.level ? LEVEL_LABELS[a.level] : null, summary, result,
   };
 }
 
@@ -261,7 +318,7 @@ async function serveNext(env: ProviderEnv, store: Store, a: Assessment, attempts
   if (!item) throw new AssessmentError('bank_empty', `в банке нет принятых заданий вида «${KIND_LABELS[kind]}» ни на одном уровне`);
   const attempt: Attempt = {
     id: id(), userId: a.userId, assessmentId: a.id, itemId: item.id, position, level: item.level,
-    answer: null, correct: null, score: null, feedback: null, createdAt: now(), answeredAt: null,
+    answer: null, correct: null, score: null, feedback: null, detail: null, createdAt: now(), answeredAt: null,
   };
   await store.insertAttempt(attempt);
   return attempt;
@@ -274,7 +331,7 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
   let a = await store.activeAssessment(userId);
   if (!a) {
     const ts = now();
-    a = { id: id(), userId, kind: 'placement', status: 'active', startedAt: ts, finishedAt: null, level: null, currentLevel: START_LEVEL, updatedAt: ts };
+    a = { id: id(), userId, kind: 'placement', status: 'active', startedAt: ts, finishedAt: null, level: null, currentLevel: START_LEVEL, updatedAt: ts, axes: null, overall: null, scoredAt: null, scoringNote: null };
     await store.createAssessment(a);
   }
   const attempts = await store.listAttempts(a.id);
@@ -307,12 +364,56 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, att
     a.currentLevel = nextLevel(pending.level, g.correct === 1);
   }
   if (pending.position >= TOTAL) {
+    // Сначала тест закрывается с предварительным уровнем по адаптивной части — если оценка письма упадёт, тест всё равно завершён.
     a.status = 'finished'; a.finishedAt = ts; a.level = estimateLevel(attempts); a.updatedAt = ts;
     await store.updateAssessment(a.id, { status: 'finished', finishedAt: ts, level: a.level, currentLevel: a.currentLevel, updatedAt: ts });
+    await score(env, store, a, attempts, opts);
     return view(store, a, attempts);
   }
   await store.updateAssessment(a.id, { currentLevel: a.currentLevel, updatedAt: ts });
   attempts.push(await serveNext(env, store, a, attempts, domain, opts));
+  return view(store, a, attempts);
+}
+
+/** Оценка завершённого теста: письмо — моделью по рубрике и образцу (если ещё не оценено или force), затем пять осей
+ *  и уровень по сводному баллу. Ошибка модели не роняет тест: оси считаются по остальным заданиям, причина — в scoringNote. */
+export async function score(env: ProviderEnv, store: Store, a: Assessment, attempts: Attempt[], opts: RunOpts = {}, force = false): Promise<Assessment> {
+  const now = opts.now ?? (() => new Date().toISOString());
+  const items = new Map<string, Item>();
+  for (const x of attempts) { if (!items.has(x.itemId)) { const it = await store.getItem(x.itemId); if (it) items.set(x.itemId, it); } }
+  const wa = attempts.find(x => x.position === ADAPTIVE_COUNT + 2 && x.answeredAt != null);
+  let writing: WritingEval | null = force ? null : parseWritingEval(wa?.detail);
+  let note: string | null = null;
+  if (wa && !writing) {
+    const item = items.get(wa.itemId);
+    if (!item || !wa.answer) note = 'письмо не найдено';
+    else {
+      try {
+        writing = await evaluateWriting(env, item, wa.answer, opts);
+        const w = writing.axes;
+        const wScore = Math.round((w.grammar + w.vocabulary + w.coherence + w.taskResponse) / 4);
+        const patch: AttemptPatch = { detail: JSON.stringify(writing), score: wScore, feedback: writing.summary };
+        await store.updateAttempt(wa.id, patch);
+        Object.assign(wa, patch);
+      } catch (e) {
+        note = `письмо не оценено: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`;
+      }
+    }
+  } else if (!wa) note = 'письмо не сдано';
+  const s = computeAxes(attempts, items, writing, ADAPTIVE_COUNT);
+  const ts = now();
+  const patch: AssessmentPatch = { axes: s.axes, overall: s.overall, level: s.level, scoredAt: ts, scoringNote: note, updatedAt: ts };
+  await store.updateAssessment(a.id, patch);
+  Object.assign(a, patch);
+  return a;
+}
+
+/** Пересчитать последний завершённый тест: письмо оценивается заново, если прошлая оценка не удалась (или force). */
+export async function rescore(env: ProviderEnv, store: Store, userId: string, opts: RunOpts = {}, force = false): Promise<View> {
+  const a = await store.latestAssessment(userId);
+  if (!a || a.status !== 'finished') throw new AssessmentError('assessment_none', 'завершённого теста нет');
+  const attempts = await store.listAttempts(a.id);
+  await score(env, store, a, attempts, opts, force);
   return view(store, a, attempts);
 }
 
@@ -335,19 +436,29 @@ export async function current(store: Store, userId: string): Promise<View | null
 // ---------- хранилище D1 ----------
 
 export function d1AssessmentStore(db: D1Database): AssessmentStore {
+  const n = (v: unknown) => v == null ? null : Number(v);
   const toA = (r: any): Assessment => ({
     id: r.id, userId: r.user_id, kind: r.kind, status: (STATUSES as readonly string[]).includes(r.status) ? r.status : 'active',
     startedAt: r.started_at, finishedAt: r.finished_at ?? null, level: r.level ?? null, currentLevel: r.current_level ?? START_LEVEL, updatedAt: r.updated_at ?? r.started_at,
+    axes: r.scored_at ? { grammar: n(r.grammar), vocabulary: n(r.vocabulary), coherence: n(r.coherence), taskResponse: n(r.task_response), fluency: n(r.fluency) } : null,
+    overall: n(r.overall), scoredAt: r.scored_at ?? null, scoringNote: r.scoring_note ?? null,
   });
   const toT = (r: any): Attempt => ({
     id: r.id, userId: r.user_id, assessmentId: r.assessment_id, itemId: r.item_id, position: Number(r.position), level: r.level,
     answer: r.answer ?? null, correct: r.correct == null ? null : Number(r.correct), score: r.score == null ? null : Number(r.score),
-    feedback: r.feedback ?? null, createdAt: r.created_at, answeredAt: r.answered_at ?? null,
+    feedback: r.feedback ?? null, detail: r.detail ?? null, createdAt: r.created_at, answeredAt: r.answered_at ?? null,
   });
-  const COLS: Record<string, string> = { status: 'status', currentLevel: 'current_level', level: 'level', finishedAt: 'finished_at', updatedAt: 'updated_at', answer: 'answer', correct: 'correct', score: 'score', feedback: 'feedback', answeredAt: 'answered_at' };
+  const COLS: Record<string, string> = {
+    status: 'status', currentLevel: 'current_level', level: 'level', finishedAt: 'finished_at', updatedAt: 'updated_at', overall: 'overall', scoredAt: 'scored_at', scoringNote: 'scoring_note',
+    grammar: 'grammar', vocabulary: 'vocabulary', coherence: 'coherence', taskResponse: 'task_response', fluency: 'fluency',
+    answer: 'answer', correct: 'correct', score: 'score', feedback: 'feedback', detail: 'detail', answeredAt: 'answered_at',
+  };
   const setClause = (patch: Record<string, unknown>) => {
-    const keys = Object.keys(patch).filter(k => patch[k] !== undefined && COLS[k]);
-    return { sql: keys.map(k => `${COLS[k]} = ?`).join(', '), args: keys.map(k => patch[k]) };
+    // Оси разворачиваются в отдельные колонки assessments.
+    const flat: Record<string, unknown> = { ...patch };
+    if (flat.axes && typeof flat.axes === 'object') { Object.assign(flat, flat.axes); delete flat.axes; }
+    const keys = Object.keys(flat).filter(k => flat[k] !== undefined && COLS[k]);
+    return { sql: keys.map(k => `${COLS[k]} = ?`).join(', '), args: keys.map(k => flat[k]) };
   };
   return {
     async createAssessment(a) {
@@ -367,8 +478,8 @@ export function d1AssessmentStore(db: D1Database): AssessmentStore {
       return r ? toA(r) : null;
     },
     async insertAttempt(t) {
-      await db.prepare('INSERT INTO attempts (id, user_id, assessment_id, item_id, position, level, answer, correct, score, feedback, created_at, answered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(t.id, t.userId, t.assessmentId, t.itemId, t.position, t.level, t.answer, t.correct, t.score, t.feedback, t.createdAt, t.answeredAt).run();
+      await db.prepare('INSERT INTO attempts (id, user_id, assessment_id, item_id, position, level, answer, correct, score, feedback, detail, created_at, answered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(t.id, t.userId, t.assessmentId, t.itemId, t.position, t.level, t.answer, t.correct, t.score, t.feedback, t.detail, t.createdAt, t.answeredAt).run();
     },
     async updateAttempt(id, patch) {
       const s = setClause(patch); if (!s.sql) return;

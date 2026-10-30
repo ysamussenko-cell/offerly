@@ -9,7 +9,7 @@ import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normal
 import { analyzeResume, d1ProfileStore, publicProfile, SELF_TEST_RESUME, type ProfileStore } from './profile';
 import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onboarding';
 import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_LABELS, LEVELS, TOPICS, DEFAULT_COUNT, MAX_COUNT, type ItemStore, type Kind, type Level, type Status, STATUSES } from './items';
-import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
+import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
@@ -255,10 +255,19 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     catch (e) { return assessmentFail(c, e); }
   });
 
-  /** Ответ на текущее задание: {attemptId, answer}. Ответ проверяется сравнением с эталоном; письмо только сохраняется. */
+  /** Ответ на текущее задание: {attemptId, answer}. Ответ проверяется сравнением с эталоном; после последнего (письма)
+   *  модель оценивает письмо по рубрике и образцу, считаются пять осей и уровень — ответ приходит с result. */
   app.post('/assessment/answer', requireAuth, async (c) => {
     const body = await c.req.json().catch(() => ({}));
     try { return c.json({ ok: true, assessment: await answerAssessment(c.env, c.get('store'), c.get('auth')!.user.id, body.attemptId, body.answer, await domainOf(c)) }); }
+    catch (e) { return assessmentFail(c, e); }
+  });
+
+  /** Пересчитать оценку последнего завершённого теста: письмо оценивается заново, если прошлый раз модель не ответила
+   *  (или {force: true}); оси и уровень считаются заново. Для тестов, пройденных до появления оценки. */
+  app.post('/assessment/score', requireAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json({ ok: true, assessment: await rescore(c.env, c.get('store'), c.get('auth')!.user.id, {}, body?.force === true) }); }
     catch (e) { return assessmentFail(c, e); }
   });
 

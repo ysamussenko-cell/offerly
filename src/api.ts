@@ -31,6 +31,17 @@ export type Assessment = {
   id: string; status: AssessmentStatus; total: number; answered: number; current: TestItem | null;
   startedAt: string; finishedAt: string | null; level: Level | null; levelLabel: string | null;
   summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
+  result: AssessmentResult | null;
+};
+export type AxisId = 'grammar' | 'vocabulary' | 'coherence' | 'taskResponse' | 'fluency';
+export type ErrorExample = { source: 'writing' | 'correction' | 'mcq' | 'reading'; quote: string; correction: string; note: string | null; topicLabel: string | null };
+export type AssessmentResult = {
+  axes: { id: AxisId; label: string; score: number | null }[];
+  overall: number; level: Level;
+  ladder: { steps: { level: Level; label: string; from: number }[]; next: { level: Level; points: number } | null };
+  examples: ErrorExample[];
+  writing: { level: Level; summary: string; rewrite: string | null; errors: number } | null;
+  scoredAt: string | null; scoringNote: string | null;
 };
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
@@ -74,6 +85,7 @@ export const api = {
   startAssessment: () => post<{ ok: true; assessment: Assessment }>('/assessment/start', {}),
   answerAssessment: (attemptId: string, answer: string | string[]) => post<{ ok: true; assessment: Assessment }>('/assessment/answer', { attemptId, answer }),
   abandonAssessment: () => post<{ ok: true; abandoned: boolean }>('/assessment/abandon', {}),
+  scoreAssessment: (force = false) => post<{ ok: true; assessment: Assessment }>('/assessment/score', { force }),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -97,7 +109,7 @@ export const ERRORS: Record<string, string> = {
   onboarding_invalid: 'В анкете есть ответ, который сервер не принял. Проверьте поля.',
   items_invalid: 'Сервер не принял параметры: уровень, тема или вид задания вне списка.',
   items_failed: 'Модель не вернула задания. Попробуйте ещё раз через минуту.',
-  assessment_none: 'Начатого теста нет. Нажмите «Начать тест».',
+  assessment_none: 'Теста нет: ни начатого, ни завершённого. Нажмите «Начать тест».',
   assessment_stale: 'Это задание уже закрыто — экран обновлён, ответьте на текущее.',
   assessment_finished: 'Тест уже завершён.',
   answer_invalid: 'Ответ не принят: проверьте, что он заполнен.',

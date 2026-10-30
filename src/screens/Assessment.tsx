@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText, type Assessment as View, type TestItem } from '../api';
+import { api, errorText, type Assessment as View } from '../api';
 import { longDate, plural } from '../text';
+import ResultView from './Result';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
-type CardProps = { onOpen: () => void; refreshKey?: number };
+type CardProps = { onOpen: (mode: Mode) => void; refreshKey?: number };
+export type Mode = 'test' | 'result';
 
-/** Карточка на главном экране: начать, продолжить или посмотреть предварительный уровень. */
+/** Карточка на главном экране: начать, продолжить или открыть разбор завершённого теста. */
 export function TestCard({ onOpen, refreshKey }: CardProps) {
   const [state, setState] = useState<{ loaded: boolean; a: View | null }>({ loaded: false, a: null });
   const [busy, setBusy] = useState(false);
@@ -17,7 +19,7 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
 
   async function restart() {
     setBusy(true); setError(null);
-    try { await api.abandonAssessment(); onOpen(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+    try { await api.abandonAssessment(); onOpen('test'); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
 
   const a = state.a;
@@ -31,14 +33,14 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
             Двенадцать заданий на грамматику и лексику в вашей специальности, короткий текст с двумя вопросами на подтекст и письмо на 60–80 слов.
             Сложность подстраивается после каждого ответа. Это 12–15 минут; тест можно прервать и продолжить с того же места.
           </p>
-          <button className="btn" type="button" onClick={onOpen}>Начать тест</button>
+          <button className="btn" type="button" onClick={() => onOpen('test')}>Начать тест</button>
         </>
       )}
       {state.loaded && a?.status === 'active' && (
         <>
           <p style={{ marginTop: 0 }}>Тест начат: отвечено {a.answered} из {a.total}.</p>
           <div className="row">
-            <button className="btn" type="button" onClick={onOpen} disabled={busy}>Продолжить</button>
+            <button className="btn" type="button" onClick={() => onOpen('test')} disabled={busy}>Продолжить</button>
             <button className="link" type="button" onClick={restart} disabled={busy}>Начать заново</button>
           </div>
         </>
@@ -48,12 +50,20 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
           <div className="level-row">
             <span className="level-badge">{a.level}</span>
             <div>
-              <p style={{ margin: 0, fontWeight: 600 }}>{a.levelLabel && a.levelLabel[0].toUpperCase() + a.levelLabel.slice(1)} — предварительно</p>
+              <p style={{ margin: 0, fontWeight: 600 }}>{a.levelLabel && a.levelLabel[0].toUpperCase() + a.levelLabel.slice(1)}{a.result ? ` · ${a.result.overall} из 100` : ' — предварительно'}</p>
               <p className="muted" style={{ margin: 0, fontSize: 14 }}>{a.finishedAt ? longDate(a.finishedAt.slice(0, 10)) : ''}{a.summary ? ` · грамматика и лексика: ${a.summary.adaptiveCorrect} из ${a.summary.adaptiveTotal}` : ''}</p>
             </div>
           </div>
-          <p className="muted" style={{ fontSize: 14 }}>Разбор по пяти осям, лестница уровней и примеры ваших ошибок появятся в следующем обновлении.</p>
-          <button className="btn secondary" type="button" onClick={onOpen}>Пройти заново</button>
+          {a.result && (
+            <ul className="axes-mini">
+              {a.result.axes.map(x => <li key={x.id} className={x.score == null ? 'off' : ''}><span>{x.label}</span><b>{x.score == null ? '—' : x.score}</b></li>)}
+            </ul>
+          )}
+          {!a.result && <p className="muted" style={{ fontSize: 14 }}>Тест пройден до появления оценки по осям. Откройте разбор — оси и уровень посчитаются по сохранённым ответам.</p>}
+          <div className="row">
+            <button className="btn" type="button" onClick={() => onOpen('result')}>{a.result ? 'Открыть разбор' : 'Рассчитать оценку'}</button>
+            <button className="btn secondary" type="button" onClick={() => onOpen('test')}>Пройти заново</button>
+          </div>
         </>
       )}
       {error && <p className="error" role="alert">{error}</p>}
@@ -61,12 +71,13 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
   );
 }
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; mode?: Mode };
 
-/** Экран теста: одно задание на экране, прогресс сверху, ответ — кнопками или текстом. */
-export default function Assessment({ onClose }: Props) {
+/** Экран теста: одно задание на экране, прогресс сверху, ответ — кнопками или текстом.
+ *  В режиме result показывает разбор последнего завершённого теста (считая оценку, если её ещё нет). */
+export default function Assessment({ onClose, mode = 'test' }: Props) {
   const [view, setView] = useState<View | null>(null);
-  const [busy, setBusy] = useState<'start' | 'answer' | null>('start');
+  const [busy, setBusy] = useState<'start' | 'answer' | 'score' | null>('start');
   const [error, setError] = useState<string | null>(null);
   const [choice, setChoice] = useState<string | null>(null);
   const [pair, setPair] = useState<(string | null)[]>([null, null]);
@@ -74,8 +85,26 @@ export default function Assessment({ onClose }: Props) {
   const startedFor = useRef<string | null>(null);
 
   useEffect(() => {
+    if (mode === 'result') {
+      // Разбор: если оси ещё не считались (тест пройден до 2.6), сервер считает их сейчас.
+      api.assessment().then(async r => {
+        if (r.assessment?.status === 'finished' && !r.assessment.result) { setBusy('score'); return (await api.scoreAssessment()).assessment; }
+        return r.assessment;
+      }).then(setView).catch(e => setError(errorText(e))).finally(() => setBusy(null));
+      return;
+    }
     api.startAssessment().then(r => setView(r.assessment)).catch(e => setError(errorText(e))).finally(() => setBusy(null));
-  }, []);
+  }, [mode]);
+
+  async function rescore() {
+    setBusy('score'); setError(null);
+    try { setView((await api.scoreAssessment()).assessment); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  }
+
+  async function restart() {
+    setBusy('start'); setError(null); setView(null);
+    try { setView((await api.startAssessment()).assessment); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+  }
 
   const cur = view?.current ?? null;
   // Новое задание — чистые поля; для исправления в поле подставляется исходное предложение.
@@ -123,7 +152,19 @@ export default function Assessment({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (view?.status === 'finished') return <Finished view={view} onClose={onClose} />;
+  if (view?.status === 'finished') return <Finished view={view} onClose={onClose} onRestart={restart} onRescore={rescore} busy={busy} error={error} />;
+  if (mode === 'result' && !view) {
+    return (
+      <section className="card">
+        <h2>Разбор теста</h2>
+        {busy === 'score' && <p className="muted">Считаю оси и оцениваю письмо по рубрике — до минуты.</p>}
+        {busy === 'start' && <p className="muted">Открываю результат…</p>}
+        {!busy && !error && <p className="muted">Завершённого теста нет.</p>}
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="row" style={{ marginTop: 16 }}><button className="btn secondary" type="button" onClick={onClose}>На главную</button></div>
+      </section>
+    );
+  }
 
   const progress = view ? (view.answered / view.total) * 100 : 0;
   return (
@@ -181,10 +222,11 @@ export default function Assessment({ onClose }: Props) {
       {cur && cur.kind === 'writing' && <WritingInput prompt={cur.prompt} words={cur.words!} text={text} setText={setText} disabled={busy != null} />}
 
       <div className="row" style={{ marginTop: 20 }}>
-        <button className="btn" type="button" onClick={send} disabled={!canSend}>{busy === 'answer' ? (cur?.position === view?.total ? 'Завершаю…' : 'Принимаю…') : 'Ответить'}</button>
+        <button className="btn" type="button" onClick={send} disabled={!canSend}>{busy === 'answer' ? (cur?.position === view?.total ? 'Оцениваю…' : 'Принимаю…') : 'Ответить'}</button>
         <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'}>Прервать — продолжу позже</button>
       </div>
-      {busy === 'answer' && <p className="muted hint">Следующее задание подбирается из банка; если там пусто, модель напишет его — до минуты.</p>}
+      {busy === 'answer' && cur?.position !== view?.total && <p className="muted hint">Следующее задание подбирается из банка; если там пусто, модель напишет его — до минуты.</p>}
+      {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">Письмо проверяется по рубрике и образцу, считаются пять осей — до минуты.</p>}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
@@ -206,26 +248,41 @@ function WritingInput({ prompt, words, text, setText, disabled }: { prompt: stri
   );
 }
 
-function Finished({ view, onClose }: { view: View; onClose: () => void }) {
+type FinishedProps = { view: View; onClose: () => void; onRestart: () => void; onRescore: () => void; busy: string | null; error: string | null };
+
+function Finished({ view, onClose, onRestart, onRescore, busy, error }: FinishedProps) {
   const s = view.summary;
+  const r = view.result;
   return (
     <section className="card">
-      <h2>Тест пройден</h2>
-      <div className="level-row">
-        <span className="level-badge">{view.level}</span>
-        <div>
-          <p style={{ margin: 0, fontWeight: 600, fontSize: 18 }}>{view.levelLabel && view.levelLabel[0].toUpperCase() + view.levelLabel.slice(1)} — предварительный уровень</p>
-          <p className="muted" style={{ margin: 0, fontSize: 14 }}>По адаптивной части: самый высокий уровень, на котором верна хотя бы половина ответов.</p>
-        </div>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h2 style={{ margin: 0 }}>Результат теста</h2>
+        {view.finishedAt && <span className="muted" style={{ fontSize: 14 }}>{longDate(view.finishedAt.slice(0, 10))}</span>}
       </div>
+      {r ? (
+        <ResultView result={r} levelLabel={view.levelLabel} finishedAt={view.finishedAt} onRescore={onRescore} rescoring={busy === 'score'} />
+      ) : (
+        <>
+          <div className="level-row" style={{ marginTop: 12 }}>
+            <span className="level-badge">{view.level}</span>
+            <p style={{ margin: 0, fontWeight: 600 }}>{view.levelLabel && view.levelLabel[0].toUpperCase() + view.levelLabel.slice(1)} — предварительно, по адаптивной части</p>
+          </div>
+          <p className="muted">Оси и уровень ещё не посчитаны.</p>
+          <button className="btn secondary" type="button" onClick={onRescore} disabled={busy != null}>{busy === 'score' ? 'Считаю…' : 'Рассчитать оценку'}</button>
+        </>
+      )}
       {s && (
-        <ul className="facts-list">
+        <ul className="facts-list" style={{ marginTop: 16 }}>
           <li>Грамматика и лексика: верно {s.adaptiveCorrect} из {s.adaptiveTotal}.</li>
           <li>Чтение: {s.readingScore == null ? 'не оценено' : s.readingScore === 100 ? 'оба вопроса верно' : s.readingScore === 50 ? 'один вопрос из двух' : 'оба вопроса неверно'}.</li>
-          <li>Письмо: {s.writingWords == null ? 'не сдано' : `${wordsText(s.writingWords)}, сохранено`}. Оценка по пяти осям — в следующем обновлении.</li>
+          <li>Письмо: {s.writingWords == null ? 'не сдано' : wordsText(s.writingWords)}.</li>
         </ul>
       )}
-      <button className="btn" type="button" onClick={onClose}>На главную</button>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn" type="button" onClick={onClose} disabled={busy != null}>На главную</button>
+        <button className="link" type="button" onClick={onRestart} disabled={busy != null}>Пройти тест заново</button>
+      </div>
     </section>
   );
 }

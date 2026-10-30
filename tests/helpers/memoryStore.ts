@@ -78,7 +78,7 @@ export function memoryStore() {
     },
 
     async createAssessment(a) { assessments.push({ ...a }); },
-    async updateAssessment(id, patch) { const a = assessments.find(x => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); },
+    async updateAssessment(id, patch) { const a = assessments.find(x => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === 'axes' && v ? { ...(v as object) } : v]))); },
     async activeAssessment(userId) { const a = assessments.filter(x => x.userId === userId && x.status === 'active').sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
     async latestAssessment(userId) { const a = assessments.filter(x => x.userId === userId).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
     async insertAttempt(t) { attempts.push({ ...t }); },
