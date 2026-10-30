@@ -74,8 +74,9 @@ export function memoryStore() {
     },
     async getItem(id) { const i = items.find(x => x.id === id); return i ? { ...i } : null; },
     async randomItems(kind, level, limit) {
+      // Без перемешивания: случайность в тестах задаётся rng из opts (pickItem выбирает из кандидатов сам),
+      // иначе ход теста зависит от Math.random и тест «14 заданий» падает через раз.
       const list = items.filter(i => i.status === 'verified' && i.kind === kind && i.level === level).map(i => ({ ...i }));
-      for (let k = list.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [list[k], list[j]] = [list[j], list[k]]; }
       return list.slice(0, limit);
     },
 
