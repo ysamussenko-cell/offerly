@@ -96,3 +96,4 @@ jobs:
           curl -fsS "$P/api/health?deep=1" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
+          node -e 'const h=require("./deep.json"); if(h.ai_chat!=="ok"){console.log("::warning title=ai_chat::"+h.ai_chat)}'

@@ -56,4 +56,8 @@ export const ERRORS: Record<string, string> = {
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 
-export const errorText = (e: unknown) => (e instanceof ApiError && ERRORS[e.code]) || ERRORS.request_failed;
+export const errorText = (e: unknown) => {
+  const base = (e instanceof ApiError && ERRORS[e.code]) || ERRORS.request_failed;
+  const detail = e instanceof ApiError && typeof e.body?.detail === 'string' ? e.body.detail : '';
+  return detail ? `${base} Ответ сервера: ${detail}` : base;
+};

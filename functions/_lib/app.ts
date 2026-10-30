@@ -52,7 +52,14 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     if (c.env.AI) ai = 'ok';
     const out: Record<string, unknown> = { ok: db === 'ok' && ai === 'ok', version, db, ai, mail: c.env.RESEND_API_KEY ? 'ok' : 'missing' };
     // ?deep=1 — прогон извлечения текста на крошечных встроенных PDF и DOCX: проверяет, что pdf.js и zip работают в этой среде.
-    if (c.req.query('deep') === '1') out.extract = await selfTestExtract();
+    if (c.req.query('deep') === '1') {
+      out.extract = await selfTestExtract();
+      // и один короткий вызов встроенной модели — ловит ошибки Workers AI (лимиты, имя модели, формат ответа)
+      try {
+        const reply = await chat(c.env, [{ role: 'user', content: 'Reply with the single word: ok' }], { maxTokens: 8 });
+        out.ai_chat = reply.trim() ? 'ok' : 'error: empty reply';
+      } catch (e) { out.ai_chat = `error: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`; }
+    }
     return c.json(out);
   });
 
@@ -156,9 +163,10 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       const a = await analyzeResume(c.env, text);
       await c.get('store').saveAnalysis(userId, a, new Date().toISOString());
     } catch (e) {
-      console.error('profile analysis failed', e instanceof Error ? e.message : e);
+      const detail = String(e instanceof Error ? e.message : e).slice(0, 300);
+      console.error('profile analysis failed', detail);
       const p = await c.get('store').getProfile(userId);
-      return c.json({ ok: false, error: 'profile_failed', profile: p ? publicProfile(p) : null }, 502);
+      return c.json({ ok: false, error: 'profile_failed', detail, profile: p ? publicProfile(p) : null }, 502);
     }
     const p = await c.get('store').getProfile(userId);
     return c.json({ ok: true, profile: p ? publicProfile(p) : null });
