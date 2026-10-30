@@ -57,10 +57,18 @@ jobs:
         run: npx wrangler d1 migrations apply offerly --remote
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy dist --project-name offerly --branch main --commit-dirty=true
+        id: deploy
+        run: |
+          OUT=$(npx wrangler pages deploy dist --project-name offerly --branch main --commit-dirty=true 2>&1 | tee deploy.log | tr "\n\r" "  ")
+          echo "::notice title=deploy::${OUT:0:800}"
+          PREVIEW=$(grep -oE 'https://[a-z0-9.-]+\.pages\.dev' deploy.log | tail -1)
+          HOST=${PREVIEW#https://}
+          PROD="https://${HOST#*.}"
+          echo "::notice title=url::production=$PROD preview=$PREVIEW"
+          echo "prod=$PROD" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test
         run: |
           sleep 20
-          curl -fsS https://offerly.pages.dev/api/health | tee health.json
+          curl -fsS "${{ steps.deploy.outputs.prod }}/api/health" | tee health.json
           node -e 'const h=require("./health.json"); if(!h.ok){console.error("health not ok", h); process.exit(1)}'
