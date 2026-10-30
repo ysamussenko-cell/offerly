@@ -8,7 +8,12 @@
  *  растяжка); если в банке пусто — модель пишет задание через обычный конвейер с проверкой. Задания, уже виденные
  *  в тестах и занятиях, не повторяются. После последнего шага день программы отмечается пройденным с баллом.
  *  Неверное исправление или выбор варианта в разминке и ошибки письма заводят карточки журнала (cards.ts);
- *  повтор карточки переносит её по FSRS (fsrs.ts), три верных подряд гасят. */
+ *  повтор карточки переносит её по FSRS (fsrs.ts), три верных подряд гасят.
+ *  Переменная награда (концепт §4): иногда после занятия предлагается бонусная задача — одно исправление ошибки
+ *  по теме дня ступенью выше уровня ученика. Предложение решается детерминированно по хешу id занятия
+ *  (BONUS_CHANCE), чтобы не зависеть от перезагрузок; верный ответ удваивает вклад занятия в готовность
+ *  (dashboard.ts, BONUS_MULTIPLIER), неверный ничего не отнимает — только заводит карточку. На балл занятия
+ *  и день программы бонус не влияет. */
 import type { Env as ProviderEnv } from './providers';
 import { KIND_LABELS, LEVELS, WRITING_WORDS, generateItems, topicById, type Domain, type Item, type ItemStore, type Kind, type Level, type GenerateOpts } from './items';
 import { grade, levelFallbacks, type AssessmentStore } from './assessment';
@@ -28,10 +33,19 @@ export const REVIEW_MAX = 5;
 export const DEFAULT_LEVEL: Level = 'B1';
 /** Источник карточек, заведённых из ошибок занятия. */
 export const CARD_SOURCE = 'lesson';
+/** Доля занятий, после которых предлагается бонусная задача. */
+export const BONUS_CHANCE = 0.4;
+/** Во сколько раз верный бонус умножает вклад занятия в готовность. */
+export const BONUS_MULTIPLIER = 2;
+/** Вид бонусной задачи — исправление ошибки: сложнее выбора варианта. */
+export const BONUS_KIND: Kind = 'correction';
 
-export const PARTS = ['warmup', 'writing', 'review'] as const;
+export const PARTS = ['warmup', 'writing', 'review', 'bonus'] as const;
 export type Part = typeof PARTS[number];
-export const PART_LABELS: Record<Part, string> = { warmup: 'разминка', writing: 'письмо', review: 'повтор карточек' };
+export const PART_LABELS: Record<Part, string> = { warmup: 'разминка', writing: 'письмо', review: 'повтор карточек', bonus: 'бонусная задача' };
+
+export const BONUS_STATES = ['offered', 'declined', 'active', 'correct', 'wrong'] as const;
+export type BonusState = typeof BONUS_STATES[number];
 
 export const LESSON_STATUSES = ['active', 'finished'] as const;
 export type LessonStatus = typeof LESSON_STATUSES[number];
@@ -51,6 +65,8 @@ export interface Lesson {
   startedAt: string;
   finishedAt: string | null;
   updatedAt: string | null;
+  /** Бонусная задача: null — не предлагалась; offered | declined | active | correct | wrong. */
+  bonus: BonusState | null;
 }
 
 export interface LessonStep {
@@ -72,7 +88,7 @@ export interface LessonStep {
   answeredAt: string | null;
 }
 
-export type LessonPatch = Partial<Pick<Lesson, 'status' | 'reviewCount' | 'score' | 'finishedAt' | 'updatedAt'>>;
+export type LessonPatch = Partial<Pick<Lesson, 'status' | 'reviewCount' | 'score' | 'finishedAt' | 'updatedAt' | 'bonus'>>;
 export type StepPatch = Partial<Pick<LessonStep, 'answer' | 'correct' | 'score' | 'feedback' | 'detail' | 'answeredAt'>>;
 
 export interface LessonStore {
@@ -92,7 +108,7 @@ export interface LessonStore {
 export type Store = LessonStore & ItemStore & CardStore & ProgramStore & Pick<AssessmentStore, 'latestFinishedAssessment' | 'usedItemIds'>;
 
 export class LessonError extends Error {
-  constructor(public code: 'lesson_no_day' | 'lesson_unavailable' | 'lesson_none' | 'lesson_stale' | 'answer_invalid' | 'bank_empty' | 'lesson_eval_failed', message?: string, public reason?: string) { super(message ?? code); }
+  constructor(public code: 'lesson_no_day' | 'lesson_unavailable' | 'lesson_none' | 'lesson_stale' | 'answer_invalid' | 'bank_empty' | 'lesson_eval_failed' | 'bonus_none', message?: string, public reason?: string) { super(message ?? code); }
 }
 
 export interface RunOpts extends GenerateOpts { rng?: () => number; now?: () => string; id?: () => string; generate?: boolean }
@@ -118,7 +134,20 @@ export function partAt(position: number, l: Pick<Lesson, 'warmupCount'>): Part {
   return 'review';
 }
 
+/** Шагов в занятии без бонуса. */
 export const totalSteps = (l: Pick<Lesson, 'warmupCount' | 'reviewCount'>) => l.warmupCount + 1 + l.reviewCount;
+
+/** Доля 0–1 по хешу строки (FNV-1a) — одинаковая при каждом вызове. */
+export function hashFraction(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h / 0x100000000;
+}
+
+/** Предлагать ли бонус после этого занятия: решается по id занятия, а не монетой при каждом показе. */
+export const bonusOffered = (lessonId: string) => hashFraction(lessonId) < BONUS_CHANCE;
+/** Уровень бонусной задачи — ступенью выше уровня занятия (на верхней ступени — та же). */
+export const bonusLevel = (level: Level): Level => upLevel(level);
 
 /** Темы разминки для дня: тема дня; для смешанного повторения — темы занятий той же недели программы и темы
  *  активных карточек, по кругу (без «mixed» и без «ответа на вопрос задания», которого в банке нет). */
@@ -144,9 +173,9 @@ export function gradeCard(card: ErrorCard, raw: unknown): { ok: true; answer: st
   return { ok: true, answer: s, correct };
 }
 
-/** Итог занятия: среднее баллов отвеченных шагов, 0–100. */
+/** Итог занятия: среднее баллов отвеченных шагов, 0–100; бонус в балл не входит. */
 export function lessonScore(steps: LessonStep[]): number | null {
-  const m = mean(steps.filter(s => s.answeredAt != null && s.score != null).map(s => s.score as number));
+  const m = mean(steps.filter(s => s.part !== 'bonus' && s.answeredAt != null && s.score != null).map(s => s.score as number));
   return m == null ? null : round(m);
 }
 
@@ -186,6 +215,17 @@ export interface View {
   /** Только что отвеченный шаг (в ответе на /answer). */
   last: DoneStep | null;
   score: number | null; startedAt: string; finishedAt: string | null;
+  /** Бонусная задача после занятия: предложена, отклонена, выдана (current — её шаг) или решена (step — разбор). */
+  bonus: BonusView | null;
+}
+
+export interface BonusView {
+  status: BonusState;
+  level: Level;
+  kind: Kind;
+  multiplier: number;
+  /** Разбор решённого бонуса (correct | wrong). */
+  step: DoneStep | null;
 }
 
 /** Задание дня без занятия: что сегодня по программе и почему занятие недоступно (репетиция и срез — 4.1 и 4.3). */
@@ -245,10 +285,16 @@ export async function view(store: Store, l: Lesson, steps: LessonStep[], day: Pr
   const { items, cards, created } = await loadRefs(store, l.userId, steps);
   const ref = (s: LessonStep) => [s.itemId ? items.get(s.itemId) ?? null : null, s.cardId ? cards.get(s.cardId) ?? null : null] as const;
   const pending = steps.find(s => s.answeredAt == null) ?? null;
-  const done = steps.filter(s => s.answeredAt != null);
+  const done = steps.filter(s => s.answeredAt != null && s.part !== 'bonus');
   const dones = done.map(s => doneStep(s, ...ref(s), created.get(s.id) ?? 0));
   const part = (p: Part) => done.filter(s => s.part === p);
   const w = part('writing')[0];
+  const bonusAny = steps.find(s => s.part === 'bonus');
+  const bonusStep = bonusAny?.answeredAt != null ? bonusAny : undefined;
+  const bonus: BonusView | null = l.bonus ? {
+    status: l.bonus, level: bonusAny?.level ?? bonusLevel(l.level), kind: BONUS_KIND, multiplier: BONUS_MULTIPLIER,
+    step: bonusStep ? doneStep(bonusStep, ...ref(bonusStep), created.get(bonusStep.id) ?? 0) : null,
+  } : null;
   return {
     id: l.id, status: l.status, date: l.dayDate, day: day ? publicDay(day, today) : null,
     topic: l.topic, topicLabel: programTopicById(l.topic)?.label ?? l.topic, writing: l.writing, writingLabel: l.writing ? WRITING_LABELS[l.writing] : null,
@@ -258,9 +304,9 @@ export async function view(store: Store, l: Lesson, steps: LessonStep[], day: Pr
       writing: { done: !!w, score: w?.score ?? null },
       review: { total: l.reviewCount, done: part('review').length, correct: part('review').filter(s => s.correct === 1).length },
     },
-    current: pending && l.status === 'active' ? currentStep(pending, ...ref(pending)) : null,
-    steps: dones, last: lastId ? dones.find(d => d.stepId === lastId) ?? null : null,
-    score: l.score, startedAt: l.startedAt, finishedAt: l.finishedAt,
+    current: pending && (l.status === 'active' || pending.part === 'bonus') ? currentStep(pending, ...ref(pending)) : null,
+    steps: dones, last: lastId ? (dones.find(d => d.stepId === lastId) ?? (bonus?.step?.stepId === lastId ? bonus.step : null)) : null,
+    score: l.score, startedAt: l.startedAt, finishedAt: l.finishedAt, bonus,
   };
 }
 
@@ -351,7 +397,9 @@ async function serveNext(env: ProviderEnv, store: Store, l: Lesson, steps: Lesso
 
 async function finish(store: Store, l: Lesson, steps: LessonStep[], day: ProgramDay | null, ts: string) {
   const score = lessonScore(steps);
-  const patch: LessonPatch = { status: 'finished', score, finishedAt: ts, updatedAt: ts, reviewCount: steps.filter(s => s.part === 'review').length };
+  // переменная награда: бонус предлагается только после занятия с ответами, по хешу id занятия
+  const bonus: BonusState | null = score != null && bonusOffered(l.id) ? 'offered' : null;
+  const patch: LessonPatch = { status: 'finished', score, finishedAt: ts, updatedAt: ts, reviewCount: steps.filter(s => s.part === 'review').length, bonus };
   await store.updateLesson(l.id, patch);
   Object.assign(l, patch);
   if (day && day.status !== 'done') {
@@ -373,7 +421,7 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
     const a = await store.latestFinishedAssessment(userId);
     const ts = now();
     const due = reviewCards(await store.listCards(userId), t).length;
-    l = { id: id(), userId, programDayId: day.id, dayDate: t, topic: day.topic, writing: day.writing, level: a?.level ?? DEFAULT_LEVEL, status: 'active', warmupCount: WARMUP_COUNT, reviewCount: due, score: null, startedAt: ts, finishedAt: null, updatedAt: ts };
+    l = { id: id(), userId, programDayId: day.id, dayDate: t, topic: day.topic, writing: day.writing, level: a?.level ?? DEFAULT_LEVEL, status: 'active', warmupCount: WARMUP_COUNT, reviewCount: due, score: null, startedAt: ts, finishedAt: null, updatedAt: ts, bonus: null };
     await store.createLesson(l);
   }
   const steps = await store.listSteps(l.id);
@@ -390,13 +438,15 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, ste
   const now = opts.now ?? (() => new Date().toISOString());
   const t = todayIn(tz, new Date(now()));
   const l = await store.lessonForDay(userId, t);
-  if (!l || l.status !== 'active') throw new LessonError('lesson_none', 'активного занятия на сегодня нет');
+  const bonusActive = !!l && l.status === 'finished' && l.bonus === 'active';
+  if (!l || (l.status !== 'active' && !bonusActive)) throw new LessonError('lesson_none', 'активного занятия на сегодня нет');
   const steps = await store.listSteps(l.id);
   const pending = steps.find(s => s.answeredAt == null);
   if (!pending) throw new LessonError('lesson_stale', 'шаг ещё не выдан');
   if (typeof stepId !== 'string' || stepId !== pending.id) throw new LessonError('lesson_stale', 'ответ относится не к текущему шагу');
   const { day, week } = await dayOf(store, userId, t);
   const ts = now();
+  if (pending.part === 'bonus') return answerBonus(store, l, steps, pending, raw, day, t, ts, opts);
   let patch: StepPatch;
   if (pending.part === 'review') {
     const card = pending.cardId ? await store.getCard(pending.cardId) : null;
@@ -438,6 +488,83 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, ste
   return view(store, l, steps, day, t, pending.id);
 }
 
+// ---------- бонусная задача ----------
+
+/** Задание для бонуса: исправление по теме дня ступенью выше; без своей ступени — соседние (не ниже уровня занятия). */
+export async function pickBonus(store: Store, l: Lesson, topics: string[], used: Set<string>, rng: () => number): Promise<Item | null> {
+  const want = bonusLevel(l.level);
+  for (const lvl of levelFallbacks(want).filter(x => idx(x) >= idx(l.level))) {
+    const cands = (await store.randomItems(BONUS_KIND, lvl, 120)).filter(i => !used.has(i.id) && topics.includes(i.topic));
+    if (!cands.length) continue;
+    for (const t of topics) { const byTopic = cands.filter(i => i.topic === t); if (byTopic.length) return pickRandom(byTopic, rng); }
+  }
+  return null;
+}
+
+/** Принять или отклонить предложенный бонус. Принятие выдаёт одну задачу шагом part=bonus; повторный вызов
+ *  с выданной задачей возвращает её же. Без предложения — bonus_none. */
+export async function bonus(env: ProviderEnv, store: Store, userId: string, tz: string, domain: Domain, accept: boolean, opts: RunOpts = {}): Promise<View> {
+  const now = opts.now ?? (() => new Date().toISOString());
+  const id = opts.id ?? (() => crypto.randomUUID());
+  const rng = opts.rng ?? Math.random;
+  const t = todayIn(tz, new Date(now()));
+  const l = await store.lessonForDay(userId, t);
+  if (!l || l.status !== 'finished' || !l.bonus) throw new LessonError('bonus_none', 'бонусная задача сегодня не предлагалась', l?.bonus ?? undefined);
+  const { day, week } = await dayOf(store, userId, t);
+  const steps = await store.listSteps(l.id);
+  if (l.bonus !== 'offered') {
+    if (l.bonus === 'active') return view(store, l, steps, day, t);
+    throw new LessonError('bonus_none', l.bonus === 'declined' ? 'бонус уже отклонён' : 'бонус уже решён', l.bonus);
+  }
+  const ts = now();
+  if (!accept) {
+    await store.updateLesson(l.id, { bonus: 'declined', updatedAt: ts });
+    l.bonus = 'declined';
+    return view(store, l, steps, day, t);
+  }
+  const used = await usedIds(store, userId, steps);
+  const cards = await store.listCards(userId);
+  const topics = day ? warmupTopics(day, week, cards) : topicById(l.topic) ? [l.topic] : ['spelling'];
+  const level = bonusLevel(l.level);
+  let item = await pickBonus(store, l, topics, used, rng);
+  if (!item && opts.generate !== false) {
+    const topic = topicById(topics[0]) ?? topicById('spelling')!;
+    try {
+      const r = await generateItems(env, store, { kind: BONUS_KIND, level, topic, count: 2, domain }, opts);
+      item = r.items.find(i => i.status === 'verified') ?? null;
+    } catch (e) {
+      throw new LessonError('bank_empty', `в банке нет задания для бонуса, а модель не смогла написать: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`);
+    }
+  }
+  if (!item) throw new LessonError('bank_empty', `в банке нет принятых исправлений уровня ${level} по теме дня`);
+  const step: LessonStep = { id: id(), lessonId: l.id, userId, position: steps.length + 1, part: 'bonus', itemId: item.id, cardId: null, level: item.level, answer: null, correct: null, score: null, feedback: null, detail: null, createdAt: ts, answeredAt: null };
+  await store.insertStep(step);
+  steps.push(step);
+  await store.updateLesson(l.id, { bonus: 'active', updatedAt: ts });
+  l.bonus = 'active';
+  return view(store, l, steps, day, t);
+}
+
+/** Ответ на бонусную задачу: проверка эталоном, неверно — карточка в журнал; балл занятия не меняется. */
+async function answerBonus(store: Store, l: Lesson, steps: LessonStep[], pending: LessonStep, raw: unknown, day: ProgramDay | null, t: string, ts: string, opts: RunOpts): Promise<View> {
+  const item = pending.itemId ? await store.getItem(pending.itemId) : null;
+  if (!item) throw new LessonError('lesson_stale', 'задание не найдено');
+  const g = grade(item, raw);
+  if (!g.ok) throw new LessonError('answer_invalid', undefined, g.reason);
+  if (item.kind === 'writing') throw new LessonError('lesson_stale', 'бонус — не письмо');
+  const patch: StepPatch = { answer: g.answer, correct: g.correct, score: g.score, feedback: g.feedback, answeredAt: ts };
+  await store.updateStep(pending.id, patch);
+  Object.assign(pending, patch);
+  if (g.correct === 0) {
+    const d = draftFromItem(item, g.answer, stepOrigin(pending.id));
+    if (d) await createCards(store, l.userId, [d], t, CARD_SOURCE, opts);
+  }
+  const state: BonusState = g.correct === 1 ? 'correct' : 'wrong';
+  await store.updateLesson(l.id, { bonus: state, updatedAt: ts });
+  l.bonus = state;
+  return view(store, l, steps, day, t, pending.id);
+}
+
 // ---------- хранилище D1 ----------
 
 export function d1LessonStore(db: D1Database): LessonStore {
@@ -447,6 +574,7 @@ export function d1LessonStore(db: D1Database): LessonStore {
     level: (LEVELS as readonly string[]).includes(r.level) ? r.level : DEFAULT_LEVEL, status: (LESSON_STATUSES as readonly string[]).includes(r.status) ? r.status : 'active',
     warmupCount: Number(r.warmup_count ?? WARMUP_COUNT), reviewCount: Number(r.review_count ?? 0), score: n(r.score),
     startedAt: r.started_at, finishedAt: r.finished_at ?? null, updatedAt: r.updated_at ?? null,
+    bonus: (BONUS_STATES as readonly string[]).includes(r.bonus) ? r.bonus : null,
   });
   const toS = (r: any): LessonStep => ({
     id: r.id, lessonId: r.lesson_id, userId: r.user_id, position: Number(r.position), part: (PARTS as readonly string[]).includes(r.part) ? r.part : 'warmup',
@@ -454,7 +582,7 @@ export function d1LessonStore(db: D1Database): LessonStore {
     feedback: r.feedback ?? null, detail: r.detail ?? null, createdAt: r.created_at, answeredAt: r.answered_at ?? null,
   });
   const COLS: Record<string, string> = {
-    status: 'status', reviewCount: 'review_count', score: 'score', finishedAt: 'finished_at', updatedAt: 'updated_at',
+    status: 'status', reviewCount: 'review_count', score: 'score', finishedAt: 'finished_at', updatedAt: 'updated_at', bonus: 'bonus',
     answer: 'answer', correct: 'correct', feedback: 'feedback', detail: 'detail', answeredAt: 'answered_at',
   };
   const setClause = (patch: Record<string, unknown>) => {
@@ -463,8 +591,8 @@ export function d1LessonStore(db: D1Database): LessonStore {
   };
   return {
     async createLesson(l) {
-      await db.prepare('INSERT INTO lessons (id, user_id, program_day_id, day_date, topic, writing, level, status, warmup_count, review_count, score, started_at, finished_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(l.id, l.userId, l.programDayId, l.dayDate, l.topic, l.writing, l.level, l.status, l.warmupCount, l.reviewCount, l.score, l.startedAt, l.finishedAt, l.updatedAt).run();
+      await db.prepare('INSERT INTO lessons (id, user_id, program_day_id, day_date, topic, writing, level, status, warmup_count, review_count, score, started_at, finished_at, updated_at, bonus) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(l.id, l.userId, l.programDayId, l.dayDate, l.topic, l.writing, l.level, l.status, l.warmupCount, l.reviewCount, l.score, l.startedAt, l.finishedAt, l.updatedAt, l.bonus).run();
     },
     async updateLesson(id, patch) {
       const s = setClause(patch); if (!s.sql) return;

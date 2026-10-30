@@ -4,7 +4,7 @@ import {
   GAIN_PER_LESSON, MISS_PENALTY, MISS_CAP, STEP_CAP_MINUTES, GOAL_DAYS_DEFAULT, GOAL_MIN, GOAL_MAX, type ReadinessInput,
 } from '../functions/_lib/dashboard';
 import type { Assessment } from '../functions/_lib/assessment';
-import type { Lesson, LessonStep } from '../functions/_lib/lesson';
+import { BONUS_MULTIPLIER, type Lesson, type LessonStep } from '../functions/_lib/lesson';
 import type { ProgramDay } from '../functions/_lib/program';
 import type { Profile } from '../functions/_lib/profile';
 import { d1ProfileStore } from '../functions/_lib/profile';
@@ -22,9 +22,9 @@ const assessment = (over: Partial<Assessment> = {}): Assessment => ({
   id: 'a1', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B1', currentLevel: 'B1',
   updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null, ...over,
 });
-const lesson = (dayDate: string, score: number | null, status: Lesson['status'] = 'finished'): Lesson => ({
+const lesson = (dayDate: string, score: number | null, status: Lesson['status'] = 'finished', bonus: Lesson['bonus'] = null): Lesson => ({
   id: `l${++seq}`, userId: USER, programDayId: null, dayDate, topic: 'articles', writing: 'review', level: 'B1', status, warmupCount: 5, reviewCount: 0, score,
-  startedAt: `${dayDate}T02:00:00.000Z`, finishedAt: status === 'finished' ? `${dayDate}T02:20:00.000Z` : null, updatedAt: null,
+  startedAt: `${dayDate}T02:00:00.000Z`, finishedAt: status === 'finished' ? `${dayDate}T02:20:00.000Z` : null, updatedAt: null, bonus,
 });
 const day = (dayDate: string, over: Partial<ProgramDay> = {}): ProgramDay => ({
   id: `d${++seq}`, userId: USER, dayDate, position: 1, week: 1, format: 'lesson', topic: 'articles', writing: 'review', reason: 'r', status: 'planned', minutes: 25, score: null, completedAt: null, generatedAt: NOW, updatedAt: null, ...over,
@@ -114,6 +114,12 @@ describe('готовность', () => {
     expect(r.lessons).toBe(2);
     expect(r.gained).toBe(GAIN_PER_LESSON * 1.5);
     expect(r.value).toBe(Math.round(53 + GAIN_PER_LESSON * 1.5));
+  });
+  it('верно решённый бонус удваивает вклад занятия; отклонённый или неверный — нет', () => {
+    const lessons = [lesson('2026-11-02', 100, 'finished', 'correct'), lesson('2026-11-03', 50, 'finished', 'wrong'), lesson('2026-11-04', 100, 'finished', 'declined'), lesson('2026-11-05', 50, 'finished', 'offered')];
+    const r = readinessAt(input({ lessons }), TODAY);
+    expect(r).toMatchObject({ lessons: 4, bonuses: 1, gained: GAIN_PER_LESSON * (BONUS_MULTIPLIER + 0.5 + 1 + 0.5) });
+    expect(r.value).toBe(Math.round(53 + GAIN_PER_LESSON * (BONUS_MULTIPLIER + 2)));
   });
   it('пропуски отнимают по MISS_PENALTY, но не больше MISS_CAP; дата отсечки — по дню', () => {
     const missed = ['2026-10-28', ...Array.from({ length: 15 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')}`)];

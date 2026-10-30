@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText, type Lesson as View, type LessonStepDone, type LessonToday } from '../api';
+import { api, errorText, type Achievement, type Lesson as View, type LessonStepDone, type LessonToday } from '../api';
 import { longDate, minutesText, plural } from '../text';
 import { changedWords, wordDiff } from '../diff';
 import { reviewOutcome } from './Journal';
@@ -68,15 +68,29 @@ export function LessonCard({ onOpen, refreshKey }: CardProps) {
             <>
               <div className="level-row" style={{ marginTop: 4 }}>
                 <span className="level-badge">{l.score ?? '—'}</span>
-                <p style={{ margin: 0, fontWeight: 600 }}>Занятие пройдено — {partsLine(l)}</p>
+                <p style={{ margin: 0, fontWeight: 600 }}>Занятие пройдено — {partsLine(l)}{l.bonus ? `; ${bonusLine(l.bonus)}` : ''}</p>
               </div>
-              <button className="btn secondary" type="button" onClick={onOpen}>Открыть разбор</button>
+              {(l.bonus?.status === 'offered' || l.bonus?.status === 'active') ? (
+                <p className="muted" style={{ fontSize: 14 }}>Бонусная задача ступенью выше ({l.bonus.level}) ждёт: верный ответ умножит вклад занятия в готовность на {l.bonus.multiplier}, неверный ничего не отнимет.</p>
+              ) : null}
+              <button className={l.bonus?.status === 'offered' || l.bonus?.status === 'active' ? 'btn' : 'btn secondary'} type="button" onClick={onOpen}>{l.bonus?.status === 'offered' ? 'К бонусной задаче' : l.bonus?.status === 'active' ? 'Продолжить бонус' : 'Открыть разбор'}</button>
             </>
           )}
         </>
       )}
     </section>
   );
+}
+
+/** Короткая строка о бонусе для карточки и итога. */
+export function bonusLine(b: NonNullable<View['bonus']>): string {
+  switch (b.status) {
+    case 'offered': return 'предложен бонус';
+    case 'active': return 'бонус выдан';
+    case 'declined': return 'бонус отклонён';
+    case 'correct': return `бонус решён, вклад ×${b.multiplier}`;
+    case 'wrong': return 'бонус не решён';
+  }
 }
 
 function partsLine(l: View): string {
@@ -99,6 +113,8 @@ export default function Lesson({ onClose }: Props) {
   const [text, setText] = useState('');
   /** Разбор только что отвеченного шага; пока он на экране, следующий шаг ждёт кнопки «Дальше». */
   const [last, setLast] = useState<LessonStepDone | null>(null);
+  /** Достижения, открытые ответами этого занятия, — показываются в итоге. */
+  const [unlocked, setUnlocked] = useState<Achievement[]>([]);
   const startedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -126,12 +142,22 @@ export default function Lesson({ onClose }: Props) {
     try {
       const r = await api.answerLesson(cur.stepId, v);
       setView(r.lesson); setLast(r.lesson.last);
+      if (r.unlocked?.length) setUnlocked(u => [...u, ...r.unlocked.filter(a => !u.some(x => x.code === a.code))]);
     } catch (e) {
       setError(errorText(e));
       if ((e as any)?.code === 'lesson_stale') api.lesson().then(r => setView(r.lesson)).catch(() => {});
     } finally { setBusy(null); }
   }
   const next = () => setLast(null);
+
+  /** Бонус после занятия: принять (выдаётся задача, обычный шаг) или отклонить. */
+  async function bonus(accept: boolean) {
+    if (busy) return;
+    setBusy('answer'); setError(null);
+    try { const r = await api.bonusLesson(accept); setView(r.lesson); }
+    catch (e) { setError(errorText(e)); }
+    finally { setBusy(null); }
+  }
 
   // Горячие клавиши: 1–4 — вариант, Enter — отправить выбор или перейти дальше, Ctrl+Enter — отправить текст.
   const latest = useRef({ cur, busy, canSend, last, send, next });
@@ -151,14 +177,14 @@ export default function Lesson({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (view?.status === 'finished' && !last) return <Summary view={view} onClose={onClose} />;
+  if (view?.status === 'finished' && !last && !cur) return <Summary view={view} onClose={onClose} onBonus={bonus} busy={busy != null} error={error} unlocked={unlocked} />;
 
   const progress = view ? (view.answered / view.total) * 100 : 0;
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Занятие{view ? ` · ${view.topicLabel}` : ''}</h2>
-        {view && (last || cur) && <span className="muted" style={{ fontSize: 14 }}>Шаг {(last ?? cur)!.position} из {view.total} · {(last ?? cur)!.partLabel}</span>}
+        <h2 style={{ margin: 0 }}>{(last ?? cur)?.part === 'bonus' ? 'Бонусная задача' : 'Занятие'}{view ? ` · ${view.topicLabel}` : ''}</h2>
+        {view && (last || cur) && <span className="muted" style={{ fontSize: 14 }}>{(last ?? cur)!.part === 'bonus' ? `после занятия · ступень ${view.bonus?.level ?? ''}` : `Шаг ${(last ?? cur)!.position} из ${view.total} · ${(last ?? cur)!.partLabel}`}</span>}
       </div>
       <div className="progress" aria-label={view ? `Пройдено ${view.answered} из ${view.total}` : undefined}><span style={{ width: `${progress}%` }} /></div>
 
@@ -185,6 +211,7 @@ export default function Lesson({ onClose }: Props) {
         <>
           <p className="muted hint" style={{ margin: '0 0 6px' }}>{cur.topicLabel}{cur.level ? ` · ${cur.level}` : ''}</p>
           <p className="task">{cur.prompt}</p>
+          {cur.part === 'bonus' && <p className="muted hint" style={{ margin: '0 0 8px' }}>Задача ступенью выше вашего уровня. Верно — вклад занятия в готовность ×{view?.bonus?.multiplier ?? 2}; неверно — ничего не отнимается.</p>}
           <label className="field">
             <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null} autoFocus />
@@ -220,7 +247,7 @@ export default function Lesson({ onClose }: Props) {
 
       <div className="row" style={{ marginTop: 20 }}>
         {last ? (
-          <button className="btn" type="button" onClick={next}>{view?.status === 'finished' ? 'К итогу' : 'Дальше'}</button>
+          <button className="btn" type="button" onClick={next}>{view?.status === 'finished' && !view.current ? 'К итогу' : 'Дальше'}</button>
         ) : (
           <button className="btn" type="button" onClick={send} disabled={!canSend}>{busy === 'answer' ? (cur?.kind === 'writing' ? 'Оцениваю…' : 'Проверяю…') : 'Ответить'}</button>
         )}
@@ -265,6 +292,7 @@ function Review({ step, today }: { step: LessonStepDone; today?: string }) {
         <span className="muted" style={{ fontSize: 13 }}>{step.topicLabel ?? step.partLabel}</span>
       </div>
       {step.feedback && <p className="review-note">{step.feedback}</p>}
+      {step.part === 'bonus' && <p className="muted hint" style={{ marginTop: 4 }}>{step.correct === 1 ? 'Бонус решён — вклад этого занятия в готовность удвоен.' : 'Бонус не решён — ничего не отнимается; балл занятия прежний.'}</p>}
       {step.kind === 'card' && step.card && today && <p className="muted hint" style={{ marginTop: 4 }}>{reviewOutcome(step.card, step.correct === 1, today)}</p>}
       {step.kind !== 'card' && step.newCards > 0 && <p className="muted hint" style={{ marginTop: 4 }}>{step.newCards === 1 ? 'Ошибка записана в журнал — карточка появится в повторе с завтрашнего дня.' : `В журнал записаны ${step.newCards} ${plural(step.newCards, 'карточка', 'карточки', 'карточек')} — появятся в повторе с завтрашнего дня.`}</p>}
       {step.kind !== 'writing' && (
@@ -307,13 +335,17 @@ function Review({ step, today }: { step: LessonStepDone; today?: string }) {
   );
 }
 
-/** Итог занятия: балл, три части, разбор всех шагов. */
-function Summary({ view, onClose }: { view: View; onClose: () => void }) {
+type SummaryProps = { view: View; onClose: () => void; onBonus: (accept: boolean) => void; busy: boolean; error: string | null; unlocked: Achievement[] };
+
+/** Итог занятия: балл, три части, бонусная задача (предложение или итог), новые достижения, разбор всех шагов. */
+function Summary({ view, onClose, onBonus, busy, error, unlocked }: SummaryProps) {
   const [open, setOpen] = useState(false);
   const p = view.parts;
   const writing = view.steps.find(s => s.part === 'writing');
   const retired = view.steps.filter(s => s.card?.retired).length;
-  const newCards = view.steps.reduce((n, s) => n + (s.newCards ?? 0), 0);
+  const b = view.bonus;
+  const allSteps = b?.step ? [...view.steps, b.step] : view.steps;
+  const newCards = allSteps.reduce((n, s) => n + (s.newCards ?? 0), 0);
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -331,12 +363,47 @@ function Summary({ view, onClose }: { view: View; onClose: () => void }) {
         {newCards > 0 && <li>В журнал записано {newCards} {plural(newCards, 'новая карточка', 'новые карточки', 'новых карточек')} — повтор с завтрашнего дня.</li>}
       </ul>
       {writing?.writing?.summary && <p style={{ marginTop: 0 }}>{writing.writing.summary}</p>}
-      <button className="link" type="button" onClick={() => setOpen(v => !v)}>{open ? 'Скрыть разбор шагов' : `Показать разбор шагов (${view.steps.length})`}</button>
+      {b && (
+        <div className={`bonus-box ${b.status}`}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <b className="bonus-title">Бонусная задача · {b.level}</b>
+            <span className="tag">{b.status === 'offered' ? 'предложена' : b.status === 'declined' ? 'отклонена' : b.status === 'correct' ? 'решена' : b.status === 'wrong' ? 'не решена' : 'выдана'}</span>
+          </div>
+          {b.status === 'offered' && (
+            <>
+              <p style={{ margin: '6px 0 10px' }}>Одно исправление ошибки по теме дня ступенью выше вашего уровня. Верный ответ умножает вклад этого занятия в готовность на {b.multiplier}; неверный ничего не отнимает, ошибка просто попадёт в журнал.</p>
+              <div className="row">
+                <button className="btn" type="button" disabled={busy} onClick={() => onBonus(true)}>{busy ? 'Беру задачу…' : 'Взять бонус'}</button>
+                <button className="link" type="button" disabled={busy} onClick={() => onBonus(false)}>Не сегодня</button>
+              </div>
+              {busy && <p className="muted hint">Если в банке нет задачи ступенью выше по теме дня, модель напишет её — до минуты.</p>}
+            </>
+          )}
+          {b.status === 'declined' && <p className="muted" style={{ margin: '6px 0 0', fontSize: 14 }}>Отклонена. Бонус предлагается не после каждого занятия — следующий раз решится случайно.</p>}
+          {b.status === 'correct' && <p style={{ margin: '6px 0 0' }}>Решена верно — вклад этого занятия в готовность умножен на {b.multiplier}.</p>}
+          {b.status === 'wrong' && <p style={{ margin: '6px 0 0' }}>Не решена — ничего не отнято; ошибка записана в журнал и вернётся карточкой.</p>}
+          {error && <p className="error" role="alert" style={{ marginTop: 8 }}>{error}</p>}
+        </div>
+      )}
+      {unlocked.length > 0 && (
+        <div className="unlocked">
+          <h3 className="result-h" style={{ marginTop: 0 }}>{unlocked.length === 1 ? 'Новое достижение' : 'Новые достижения'}</h3>
+          <ul className="ach-list">
+            {unlocked.map(a => (
+              <li key={a.code} className="ach on">
+                <span className="ach-mark" aria-hidden="true" />
+                <div><b>{a.title}</b><span className="muted">{a.description}</span></div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <button className="link" type="button" onClick={() => setOpen(v => !v)}>{open ? 'Скрыть разбор шагов' : `Показать разбор шагов (${allSteps.length})`}</button>
       {open && (
         <div className="stack" style={{ marginTop: 12 }}>
-          {view.steps.map(s => (
+          {allSteps.map(s => (
             <div key={s.stepId}>
-              <p className="muted hint" style={{ margin: '0 0 4px' }}>Шаг {s.position} · {s.partLabel}</p>
+              <p className="muted hint" style={{ margin: '0 0 4px' }}>{s.part === 'bonus' ? 'Бонус' : `Шаг ${s.position}`} · {s.partLabel}</p>
               {s.kind !== 'card' && <p className="prompt" style={{ marginTop: 0 }}>{s.prompt}</p>}
               <Review step={s} today={view.date} />
             </div>

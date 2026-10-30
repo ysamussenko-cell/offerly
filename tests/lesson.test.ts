@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   warmupKind, warmupLevel, partAt, totalSteps, warmupTopics, reviewCards, gradeCard, lessonScore, pickWarmup, pickWriting,
-  today as lessonToday, startOrResume, answer, d1LessonStore, LessonError, WARMUP_COUNT, REVIEW_MAX, stepOrigin, CARD_SOURCE, type Lesson, type LessonStep,
+  today as lessonToday, startOrResume, answer, bonus, pickBonus, bonusOffered, bonusLevel, hashFraction, d1LessonStore, LessonError, WARMUP_COUNT, REVIEW_MAX, BONUS_CHANCE, BONUS_MULTIPLIER, stepOrigin, CARD_SOURCE, type Lesson, type LessonStep,
 } from '../functions/_lib/lesson';
 import { RETIRE_AFTER } from '../functions/_lib/fsrs';
 import { generateProgram, d1ProgramStore, type ProgramDay } from '../functions/_lib/program';
@@ -274,6 +274,129 @@ describe('занятие в хранилище', () => {
   });
 });
 
+describe('бонусная задача', () => {
+  const now = () => NOW;
+  /** id занятия задаётся первым — от него зависит, предложат ли бонус (хеш < BONUS_CHANCE). */
+  const idsFrom = (lessonId: string) => { let first = true; return () => { if (first) { first = false; return lessonId; } return nextId(); }; };
+  async function setup(lessonId: string) {
+    const mem = memoryStore(); fillBank(mem.items);
+    mem.items.push(makeItem('correction', 'A2', 'conjunctions')); // ниже уровня занятия — бонусу не годится
+    mem.assessments.push(assessment());
+    await generateProgram(mem.store, USER, TZ, null, { now, id: nextId });
+    return mem;
+  }
+  const optsFor = (lessonId: string) => ({ now, id: idsFrom(lessonId), rng, generate: false, chatFn: evalChat as any });
+  /** Пройти занятие до конца: выбор варианта верно, исправления — верно, письмо — SHORT. */
+  async function runLesson(mem: ReturnType<typeof memoryStore>, opts: any) {
+    let v = await startOrResume(ENV, mem.store, USER, TZ, DOMAIN, opts);
+    while (v.current) {
+      const c = v.current;
+      const ans = c.kind === 'mcq' ? 'C' : c.kind === 'correction' ? mem.items.find(i => i.prompt === c.prompt)!.answer : SHORT;
+      v = await answer(ENV, mem.store, USER, c.stepId, ans, TZ, DOMAIN, opts);
+    }
+    return v;
+  }
+
+  it('предложение решается по хешу id занятия: доля около BONUS_CHANCE, одно и то же занятие — всегда одинаково; уровень — ступенью выше', () => {
+    expect(hashFraction('L1')).toBe(hashFraction('L1'));
+    expect(hashFraction('L1')).not.toBe(hashFraction('L2'));
+    const ids = Array.from({ length: 2000 }, (_, i) => `lesson-${i}`);
+    const share = ids.filter(bonusOffered).length / ids.length;
+    expect(share).toBeGreaterThan(BONUS_CHANCE - 0.05); expect(share).toBeLessThan(BONUS_CHANCE + 0.05);
+    expect(bonusOffered('L1')).toBe(true); expect(bonusOffered('L10')).toBe(false);
+    expect(bonusLevel('B1')).toBe('B2'); expect(bonusLevel('C1')).toBe('C1');
+    expect(BONUS_MULTIPLIER).toBe(2);
+  });
+
+  it('выбор задачи: исправление по теме дня ступенью выше, не ниже уровня занятия, виденные не берутся', async () => {
+    const mem = memoryStore(); fillBank(mem.items);
+    mem.items.push(makeItem('correction', 'A2', 'conjunctions'));
+    const l = { level: 'B1' } as Lesson;
+    const a = await pickBonus(mem.store, l, ['conjunctions'], new Set(), rng);
+    expect(a).toMatchObject({ kind: 'correction', level: 'B2', topic: 'conjunctions' });
+    const usedB2 = new Set(mem.items.filter(i => i.level === 'B2').map(i => i.id));
+    expect((await pickBonus(mem.store, l, ['conjunctions'], usedB2, rng))!.level).toBe('B1'); // нет B2 — своя ступень, но не A2
+    const usedAll = new Set(mem.items.filter(i => i.level !== 'A2').map(i => i.id));
+    expect(await pickBonus(mem.store, l, ['conjunctions'], usedAll, rng)).toBeNull();
+    expect(await pickBonus(mem.store, l, ['passive'], new Set(), rng)).toBeNull();
+  });
+
+  it('без предложения: после занятия bonus null, запрос бонуса — bonus_none', async () => {
+    const mem = await setup('L10');
+    const v = await runLesson(mem, optsFor('L10'));
+    expect(v.status).toBe('finished'); expect(v.bonus).toBeNull(); expect(v.id).toBe('L10');
+    await expect(bonus(ENV, mem.store, USER, TZ, DOMAIN, true, optsFor('L10'))).rejects.toMatchObject({ code: 'bonus_none' });
+  });
+
+  it('предложен → отклонён: состояние declined, повторный запрос — bonus_none с причиной; балл занятия не трогается', async () => {
+    const mem = await setup('L1');
+    const o = optsFor('L1');
+    const v = await runLesson(mem, o);
+    expect(v.bonus).toEqual({ status: 'offered', level: 'B2', kind: 'correction', multiplier: BONUS_MULTIPLIER, step: null });
+    expect(v.current).toBeNull();
+    // ответить нечему: бонус ещё не выдан
+    await expect(answer(ENV, mem.store, USER, 'x', 'A', TZ, DOMAIN, o)).rejects.toMatchObject({ code: 'lesson_none' });
+    const d = await bonus(ENV, mem.store, USER, TZ, DOMAIN, false, o);
+    expect(d.bonus).toMatchObject({ status: 'declined', step: null }); expect(d.current).toBeNull();
+    expect(mem.lessons[0].bonus).toBe('declined');
+    await expect(bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o)).rejects.toMatchObject({ code: 'bonus_none', reason: 'declined' });
+    expect((await lessonToday(mem.store, USER, TZ, { now })).lesson!.bonus!.status).toBe('declined');
+  });
+
+  it('принят → задача ступенью выше шагом part=bonus; неверно — wrong и карточка; балл занятия и день программы не меняются', async () => {
+    const mem = await setup('L2');
+    const o = optsFor('L2');
+    const v = await runLesson(mem, o);
+    const score = v.score!, dayScore = mem.programDays.find(d => d.dayDate === TODAY)!.score;
+    const cardsBefore = mem.cards.length;
+    const b = await bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o);
+    expect(b.status).toBe('finished'); expect(b.bonus).toMatchObject({ status: 'active', level: 'B2', step: null });
+    expect(b.current).toMatchObject({ position: 7, part: 'bonus', partLabel: 'бонусная задача', kind: 'correction', level: 'B2', topicLabel: 'Союзы и инверсия' });
+    expect(b.answered).toBe(6); expect(b.total).toBe(6); expect(b.steps).toHaveLength(6);
+    expect(mem.lessons[0].bonus).toBe('active');
+    // повторный запрос возвращает ту же задачу
+    expect((await bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o)).current!.stepId).toBe(b.current!.stepId);
+    expect(mem.steps.filter(s => s.part === 'bonus')).toHaveLength(1);
+    // GET тоже показывает её текущим шагом
+    expect((await lessonToday(mem.store, USER, TZ, { now })).lesson!.current!.part).toBe('bonus');
+    // чужой шаг и пустой ответ
+    await expect(answer(ENV, mem.store, USER, 'nope', 'A', TZ, DOMAIN, o)).rejects.toMatchObject({ code: 'lesson_stale' });
+    await expect(answer(ENV, mem.store, USER, b.current!.stepId, '', TZ, DOMAIN, o)).rejects.toMatchObject({ code: 'answer_invalid' });
+    const w = await answer(ENV, mem.store, USER, b.current!.stepId, b.current!.prompt, TZ, DOMAIN, o);
+    expect(w.bonus).toMatchObject({ status: 'wrong', level: 'B2' });
+    expect(w.bonus!.step).toMatchObject({ part: 'bonus', kind: 'correction', correct: 0, score: 0, newCards: 1 });
+    expect(w.last).toMatchObject({ stepId: b.current!.stepId, part: 'bonus', correct: 0 });
+    expect(w.current).toBeNull(); expect(w.score).toBe(score); expect(w.steps).toHaveLength(6);
+    expect(mem.lessons[0]).toMatchObject({ bonus: 'wrong', score, status: 'finished' });
+    expect(mem.programDays.find(d => d.dayDate === TODAY)!.score).toBe(dayScore);
+    expect(mem.cards).toHaveLength(cardsBefore + 1);
+    expect(mem.cards.find(c => c.origin === stepOrigin(b.current!.stepId))).toMatchObject({ topic: 'conjunctions', source: CARD_SOURCE, due: '2026-11-03' });
+    await expect(bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o)).rejects.toMatchObject({ code: 'bonus_none', reason: 'wrong' });
+    await expect(answer(ENV, mem.store, USER, b.current!.stepId, 'x', TZ, DOMAIN, o)).rejects.toMatchObject({ code: 'lesson_none' });
+  });
+
+  it('верный бонус — correct, без карточки; задача из банка не выдаётся снова; в пустом банке — bank_empty', async () => {
+    const mem = await setup('L3');
+    const o = optsFor('L3');
+    await runLesson(mem, o);
+    const b = await bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o);
+    const item = mem.items.find(i => i.id === mem.steps.find(s => s.part === 'bonus')!.itemId)!;
+    expect(item.level).toBe('B2');
+    const cardsBefore = mem.cards.length;
+    const w = await answer(ENV, mem.store, USER, b.current!.stepId, item.answer.toLowerCase(), TZ, DOMAIN, o);
+    expect(w.bonus).toMatchObject({ status: 'correct', step: { correct: 1, score: 100, newCards: 0 } });
+    expect(mem.cards).toHaveLength(cardsBefore);
+    expect(await mem.store.usedLessonItemIds(USER)).toContain(item.id);
+    // банк без исправлений уровня занятия и выше
+    const mem2 = await setup('L4');
+    const o2 = optsFor('L4');
+    await runLesson(mem2, o2);
+    mem2.items.splice(0, mem2.items.length, ...mem2.items.filter(i => !(i.kind === 'correction' && i.level !== 'A2')));
+    await expect(bonus(ENV, mem2.store, USER, TZ, DOMAIN, true, o2)).rejects.toMatchObject({ code: 'bank_empty' });
+    expect(mem2.lessons[0].bonus).toBe('offered'); // предложение остаётся — можно пополнить банк и взять позже
+  });
+});
+
 describe('хранилище D1 (node:sqlite с миграциями)', () => {
   it('занятие и шаги: вставка, обновление, список, виденные задания; карточка и день программы обновляются', async () => {
     const db = freshDb();
@@ -283,7 +406,7 @@ describe('хранилище D1 (node:sqlite с миграциями)', () => {
     db.exec(`INSERT INTO program_days (id, user_id, day_date, topic, format, status, position, week) VALUES ('d1', '${USER}', '${TODAY}', 'tenses', 'lesson', 'planned', 1, 1)`);
     const d1 = d1Of(db);
     const store = d1LessonStore(d1), cards = d1CardStore(d1), program = d1ProgramStore(d1);
-    const l: Lesson = { id: 'l1', userId: USER, programDayId: 'd1', dayDate: TODAY, topic: 'tenses', writing: 'review', level: 'B1', status: 'active', warmupCount: 5, reviewCount: 1, score: null, startedAt: NOW, finishedAt: null, updatedAt: NOW };
+    const l: Lesson = { id: 'l1', userId: USER, programDayId: 'd1', dayDate: TODAY, topic: 'tenses', writing: 'review', level: 'B1', status: 'active', warmupCount: 5, reviewCount: 1, score: null, startedAt: NOW, finishedAt: null, updatedAt: NOW, bonus: null };
     await store.createLesson(l);
     expect(await store.lessonForDay(USER, TODAY)).toEqual(l);
     expect(await store.lessonForDay(USER, '2026-11-03')).toBeNull();
@@ -297,8 +420,12 @@ describe('хранилище D1 (node:sqlite с миграциями)', () => {
     expect(steps[0]).toMatchObject({ answer: 'text', score: 61, correct: null, detail: '{"axes":{}}', answeredAt: NOW });
     expect(steps[1]).toMatchObject({ correct: 1, score: 100, cardId: 'c1' });
     expect(await store.usedLessonItemIds(USER)).toEqual(new Set(['i1']));
-    await store.updateLesson('l1', { status: 'finished', score: 80, finishedAt: NOW, reviewCount: 1 });
-    expect(await store.lessonForDay(USER, TODAY)).toMatchObject({ status: 'finished', score: 80, finishedAt: NOW });
+    await store.updateLesson('l1', { status: 'finished', score: 80, finishedAt: NOW, reviewCount: 1, bonus: 'offered' });
+    expect(await store.lessonForDay(USER, TODAY)).toMatchObject({ status: 'finished', score: 80, finishedAt: NOW, bonus: 'offered' });
+    await store.updateLesson('l1', { bonus: 'correct' });
+    expect((await store.lessonForDay(USER, TODAY))!.bonus).toBe('correct');
+    await store.insertStep({ ...s1, id: 's3', position: 3, part: 'bonus', level: 'B2' });
+    expect((await store.listSteps('l1'))[2]).toMatchObject({ part: 'bonus', level: 'B2' });
     await cards.updateCard('c1', { reps: 1, due: '2026-11-05' });
     expect(await cards.getCard('c1')).toMatchObject({ reps: 1, lapses: 0, due: '2026-11-05', retired: false });
     await cards.updateCard('c1', { retired: true });
@@ -328,6 +455,12 @@ describe('API занятия', () => {
     expect((await call('/lesson')).status).toBe(401);
     expect((await post('/lesson/start', {})).status).toBe(401);
     expect((await post('/lesson/answer', { stepId: 'x', answer: 'A' })).status).toBe(401);
+    expect((await post('/lesson/bonus', { accept: true })).status).toBe(401);
+  });
+  it('бонус без предложения — 409 bonus_none', async () => {
+    const { post, cookie } = await login();
+    const r = await post('/lesson/bonus', { accept: true }, cookie);
+    expect(r.status).toBe(409); expect(await r.json()).toMatchObject({ ok: false, error: 'bonus_none' });
   });
   it('без программы — занятие недоступно и start отвечает 404; с программой — start → answer → GET; чужой шаг — 409', async () => {
     const { mem, call, post, cookie } = await login();

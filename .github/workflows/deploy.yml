@@ -130,6 +130,11 @@ jobs:
           LSA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"stepId":"x","answer":"A"}' "$P/api/lesson/answer")
           echo "::notice title=lesson::GET /api/lesson без cookie → $LSN; POST /api/lesson/start → $LST; POST /api/lesson/answer → $LSA (ждём 401 везде)"
           [ "$LSN" = "401" ] && [ "$LST" = "401" ] && [ "$LSA" = "401" ] || { echo "::error title=lesson::неожиданные коды ответа"; exit 1; }
+          LSB=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"accept":true}' "$P/api/lesson/bonus")
+          ACH=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/achievements")
+          ACS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/achievements/seen")
+          echo "::notice title=achievements::POST /api/lesson/bonus без cookie → $LSB; GET /api/achievements → $ACH; POST /api/achievements/seen → $ACS (ждём 401 везде)"
+          [ "$LSB" = "401" ] && [ "$ACH" = "401" ] && [ "$ACS" = "401" ] || { echo "::error title=achievements::неожиданные коды ответа"; exit 1; }
           DSH=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/dashboard")
           DSG=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"minutes":100}' "$P/api/dashboard/goal")
           echo "::notice title=dashboard::GET /api/dashboard без cookie → $DSH; PUT /api/dashboard/goal → $DSG (ждём 401 везде)"

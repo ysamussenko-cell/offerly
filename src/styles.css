@@ -212,3 +212,21 @@ fieldset.field legend { padding: 0; margin-bottom: 6px; }
 .wd.unavailable, .wd.free { opacity: .7; }
 @media (max-width: 640px) { .week-strip { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 400px) { .week-strip { grid-template-columns: repeat(2, 1fr); } .home-facts dd { font-size: 20px; } }
+
+/* бонусная задача и достижения */
+.bonus-box { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: 12px; background: var(--paper); }
+.bonus-box.correct { border-left-color: var(--mint); }
+.bonus-box.wrong, .bonus-box.declined { border-left-color: var(--line); }
+.bonus-box .bonus-title { font-family: Manrope, Inter, sans-serif; font-size: 16px; }
+.unlocked { margin: 0 0 16px; }
+.ach-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ach { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.ach > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ach b { font-family: Manrope, Inter, sans-serif; font-size: 15px; }
+.ach span.muted { font-size: 13px; line-height: 1.4; }
+.ach small { font-size: 12px; }
+.ach-mark { flex: none; width: 12px; height: 12px; margin-top: 6px; border-radius: 50%; border: 2px solid var(--line); background: transparent; }
+.ach.on .ach-mark { background: var(--amber); border-color: var(--amber); }
+.ach.on { border-color: rgba(242, 165, 65, .5); }
+.ach.fresh { background: rgba(242, 165, 65, .08); }
+.ach .progress { height: 4px; }

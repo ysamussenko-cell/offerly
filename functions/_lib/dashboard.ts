@@ -3,7 +3,8 @@
  *  теста или среза, занятий и дней программы — без отдельных счётчиков, поэтому цифры всегда сходятся с журналом.
  *
  *  Готовность: сводный балл последнего завершённого теста или среза (пять осей с весами, scoring.ts) плюс вклад
- *  занятий после него (до GAIN_PER_LESSON за занятие, пропорционально баллу) минус пропуски занятий программы
+ *  занятий после него (до GAIN_PER_LESSON за занятие, пропорционально баллу; верно решённая бонусная задача
+ *  умножает вклад занятия на BONUS_MULTIPLIER — lesson.ts) минус пропуски занятий программы
  *  (MISS_PENALTY за день, не больше MISS_CAP в сумме — «медленно, без наказания»; день под заморозкой не считается
  *  пропуском). Темп — прирост за последние FORECAST_DAYS дней; по нему прогноз: через сколько дней следующая
  *  ступень CEFR и какой будет готовность к дате собеседования.
@@ -16,7 +17,7 @@
  *  по умолчанию минуты в день из анкеты × GOAL_DAYS_DEFAULT. */
 import type { Assessment, AssessmentStore } from './assessment';
 import { LEVELS, type Level } from './items';
-import type { Lesson, LessonStep, LessonStore } from './lesson';
+import { BONUS_MULTIPLIER, type Lesson, type LessonStep, type LessonStore } from './lesson';
 import { DEFAULT_MINUTES, todayIn, daysBetween } from './onboarding';
 import type { Profile } from './profile';
 import { addDays, publicDay, weekdayOf, WEEKDAYS_RU, type ProgramDay, type ProgramStore, type PublicDay } from './program';
@@ -116,8 +117,8 @@ export function parseGoal(raw: unknown): { ok: true; minutes: number | null } | 
 
 export interface ReadinessInput {
   assessment: Assessment | null;
-  /** Завершённые занятия с баллом. */
-  lessons: Pick<Lesson, 'dayDate' | 'score' | 'status' | 'finishedAt'>[];
+  /** Завершённые занятия с баллом (и исходом бонуса). */
+  lessons: Pick<Lesson, 'dayDate' | 'score' | 'status' | 'finishedAt' | 'bonus'>[];
   /** Даты пропущенных занятий программы (без закрытых заморозкой). */
   missed: string[];
   today: string;
@@ -134,21 +135,23 @@ export interface ReadinessBreakdown {
   gained: number;
   lost: number;
   lessons: number;
+  /** Занятий с верно решённым бонусом — их вклад удвоен. */
+  bonuses: number;
   missed: number;
 }
 
-/** Готовность на дату: база из среза плюс занятия после него минус пропуски после него. */
+/** Готовность на дату: база из среза плюс занятия после него (бонус удваивает занятие) минус пропуски после него. */
 export function readinessAt(inp: ReadinessInput, date: string): ReadinessBreakdown {
   const a = inp.assessment;
-  const empty: ReadinessBreakdown = { value: null, base: null, baseKind: null, baseDate: null, level: null, gained: 0, lost: 0, lessons: 0, missed: 0 };
+  const empty: ReadinessBreakdown = { value: null, base: null, baseKind: null, baseDate: null, level: null, gained: 0, lost: 0, lessons: 0, bonuses: 0, missed: 0 };
   if (!a || a.overall == null) return empty;
   const baseDate = todayIn(inp.tz, new Date(a.finishedAt ?? a.startedAt));
   const lessons = inp.lessons.filter(l => l.status === 'finished' && l.score != null && l.dayDate > baseDate && l.dayDate <= date);
-  const gained = round1(lessons.reduce((s, l) => s + GAIN_PER_LESSON * (l.score as number) / 100, 0));
+  const gained = round1(lessons.reduce((s, l) => s + GAIN_PER_LESSON * (l.score as number) / 100 * (l.bonus === 'correct' ? BONUS_MULTIPLIER : 1), 0));
   const missed = inp.missed.filter(d => d > baseDate && d <= date);
   const lost = Math.min(MISS_CAP, missed.length * MISS_PENALTY);
   const value = Math.round(clamp(a.overall + gained - lost));
-  return { value, base: a.overall, baseKind: a.kind, baseDate, level: scoreToLevel(value), gained, lost, lessons: lessons.length, missed: missed.length };
+  return { value, base: a.overall, baseKind: a.kind, baseDate, level: scoreToLevel(value), gained, lost, lessons: lessons.length, bonuses: lessons.filter(l => l.bonus === 'correct').length, missed: missed.length };
 }
 
 export interface Forecast {

@@ -63,7 +63,8 @@ export type Program = {
   days: ProgramDay[];
 };
 export type ProgramResponse = { ok: true; days: number; topics: { id: string; label: string }[]; program: Program | null };
-export type LessonPart = 'warmup' | 'writing' | 'review';
+export type LessonPart = 'warmup' | 'writing' | 'review' | 'bonus';
+export type BonusState = 'offered' | 'declined' | 'active' | 'correct' | 'wrong';
 export type LessonStepCurrent = {
   stepId: string; position: number; part: LessonPart; partLabel: string; kind: ItemKind | 'card'; kindLabel: string; level: Level | null;
   topicLabel: string | null; prompt: string; options?: string[]; words?: { min: number; max: number };
@@ -83,19 +84,28 @@ export type Lesson = {
   parts: { warmup: { total: number; done: number; correct: number }; writing: { done: boolean; score: number | null }; review: { total: number; done: number; correct: number } };
   current: LessonStepCurrent | null; steps: LessonStepDone[]; last: LessonStepDone | null;
   score: number | null; startedAt: string; finishedAt: string | null;
+  /** Бонусная задача после занятия: предложена, отклонена, выдана (current — её шаг) или решена (step — разбор). */
+  bonus: { status: BonusState; level: Level; kind: ItemKind; multiplier: number; step: LessonStepDone | null } | null;
 };
-export type LessonToday = {
-  ok: true; warmup: number; reviewMax: number; today: string; day: ProgramDay | null; available: boolean;
+export type LessonMeta = { warmup: number; reviewMax: number; bonusMultiplier: number; bonusChance: number };
+export type LessonToday = LessonMeta & {
+  ok: true; today: string; day: ProgramDay | null; available: boolean;
   reason: 'no_program' | 'no_day' | 'rehearsal' | 'checkpoint' | null; lesson: Lesson | null;
 };
+export type AchievementGroup = 'topic' | 'writing' | 'stretch' | 'cards' | 'bonus' | 'lesson';
+export type Achievement = {
+  code: string; title: string; description: string; group: AchievementGroup; groupLabel: string;
+  unlocked: boolean; unlockedAt: string | null; detail: string | null; new: boolean; progress: { value: number; target: number };
+};
+export type Achievements = { ok: true; total: number; unlocked: number; fresh: number; achievements: Achievement[] };
 export type WeekStatus = 'done' | 'active' | 'today' | 'planned' | 'missed' | 'frozen' | 'unavailable' | 'free';
 export type WeekDay = { date: string; weekday: string; today: boolean; past: boolean; day: ProgramDay | null; status: WeekStatus; minutes: number; score: number | null };
 export type Dashboard = {
-  ok: true; gainPerLesson: number; missPenalty: number; missCap: number; freezesPerWeek: number; goalMin: number; goalMax: number; goalDays: number;
+  ok: true; gainPerLesson: number; missPenalty: number; missCap: number; freezesPerWeek: number; goalMin: number; goalMax: number; goalDays: number; bonusMultiplier: number;
   today: string;
   readiness: {
     value: number | null; base: number | null; baseKind: AssessmentKind | null; baseDate: string | null; level: Level | null;
-    gained: number; lost: number; lessons: number; missed: number;
+    gained: number; lost: number; lessons: number; bonuses: number; missed: number;
     forecast: { perDay: number; next: { level: Level; points: number; days: number | null } | null; atInterview: number | null; target: { level: Level; points: number; reached: boolean } };
   };
   countdown: { interviewDate: string | null; daysLeft: number | null };
@@ -153,7 +163,10 @@ export const api = {
   swapProgramDays: (a: string, b: string) => post<ProgramResponse>('/program/swap', { a, b }),
   lesson: () => call<LessonToday>('/lesson'),
   startLesson: () => post<{ ok: true; lesson: Lesson }>('/lesson/start', {}),
-  answerLesson: (stepId: string, answer: string) => post<{ ok: true; lesson: Lesson }>('/lesson/answer', { stepId, answer }),
+  answerLesson: (stepId: string, answer: string) => post<{ ok: true; lesson: Lesson; unlocked: Achievement[] }>('/lesson/answer', { stepId, answer }),
+  bonusLesson: (accept: boolean) => post<{ ok: true; lesson: Lesson }>('/lesson/bonus', { accept }),
+  achievements: () => call<Achievements>('/achievements'),
+  achievementsSeen: () => post<{ ok: true }>('/achievements/seen', {}),
   dashboard: () => call<Dashboard>('/dashboard'),
   saveGoal: (minutes: number | null) => put<Dashboard>('/dashboard/goal', { minutes }),
 };
@@ -190,6 +203,7 @@ export const ERRORS: Record<string, string> = {
   lesson_none: 'Активного занятия на сегодня нет. Вернитесь на главную и начните занятие.',
   lesson_stale: 'Этот шаг уже закрыт — экран обновлён, ответьте на текущий.',
   lesson_eval_failed: 'Модель не оценила письмо. Текст на месте — отправьте ещё раз через минуту.',
+  bonus_none: 'Бонусная задача сегодня не предлагалась или уже закрыта.',
   goal_invalid: 'Недельная цель — целое число минут от 15 до 1260.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };

@@ -87,7 +87,7 @@ export function HomeCard({ refreshKey, onOpenLesson }: Props) {
               </div>
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>
                 База {r.base} — {KIND_LABELS[r.baseKind ?? ''] ?? r.baseKind} {r.baseDate ? shortDate(r.baseDate) : ''}
-                {r.lessons > 0 && <> · занятия {signed(r.gained)} ({lessonsText(r.lessons)})</>}
+                {r.lessons > 0 && <> · занятия {signed(r.gained)} ({lessonsText(r.lessons)}{r.bonuses > 0 ? `, ${r.bonuses === 1 ? 'один бонус' : `бонусов ${r.bonuses}`} ×${d.bonusMultiplier}` : ''})</>}
                 {r.missed > 0 && <> · пропуски {signed(-r.lost)} ({missesText(r.missed)}{r.lost >= d.missCap ? ', дальше не снижается' : ''})</>}
                 {r.lessons === 0 && r.missed === 0 && <> · занятий после него ещё не было</>}
                 {f.atInterview != null && d.countdown.daysLeft != null && d.countdown.daysLeft > 0 && <> · к собеседованию при этом темпе — {f.atInterview}</>}
@@ -160,7 +160,7 @@ export function HomeCard({ refreshKey, onOpenLesson }: Props) {
             <p style={{ margin: '10px 0 0' }}><button className="btn" type="button" onClick={onOpenLesson}>{todayCell.status === 'active' ? 'Продолжить занятие' : 'Начать занятие'}</button></p>
           )}
           <p className="muted" style={{ fontSize: 13, margin: '10px 0 0' }}>
-            Готовность растёт до {d.gainPerLesson} за занятие (по баллу) и снижается на {d.missPenalty} за пропущенное занятие программы, не больше {d.missCap} в сумме.
+            Готовность растёт до {d.gainPerLesson} за занятие (по баллу; верно решённый бонус умножает вклад занятия на {d.bonusMultiplier}) и снижается на {d.missPenalty} за пропущенное занятие программы, не больше {d.missCap} в сумме.
             Серия — дни подряд с занятием; одна дыра в неделю закрывается заморозкой сама. Репетиции и срезы до их появления серию не трогают.
           </p>
         </>

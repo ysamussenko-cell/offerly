@@ -7,6 +7,7 @@ import type { CardStore, ErrorCard } from '../../functions/_lib/cards';
 import type { ProgramDay, ProgramStore } from '../../functions/_lib/program';
 import type { Lesson, LessonStep, LessonStore } from '../../functions/_lib/lesson';
 import type { DashboardStore } from '../../functions/_lib/dashboard';
+import type { AchievementRow, AchievementStore, AnswerRecord } from '../../functions/_lib/achievements';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -21,13 +22,14 @@ export function memoryStore() {
   const programDays: ProgramDay[] = [];
   const lessons: Lesson[] = [];
   const steps: LessonStep[] = [];
+  const achievements: AchievementRow[] = [];
   const patchInto = (target: any, patch: object) => Object.assign(target, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
     interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, targetLevel: null, weeklyGoalMinutes: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -132,6 +134,29 @@ export function memoryStore() {
     async usedLessonItemIds(userId) { return new Set(steps.filter(s => s.userId === userId && s.itemId).map(s => s.itemId as string)); },
 
     async saveWeeklyGoal(userId, minutes, now) { const p = profiles.get(userId) ?? blank(userId, now); profiles.set(userId, { ...p, weeklyGoalMinutes: minutes, updatedAt: now }); },
+
+    async answerLog(userId) {
+      const out: AnswerRecord[] = [];
+      for (const a of attempts) {
+        const i = items.find(x => x.id === a.itemId);
+        if (a.userId !== userId || !a.answeredAt || !i) continue;
+        out.push({ at: a.answeredAt, source: 'assessment', lessonId: null, part: null, kind: i.kind, topic: i.topic, level: a.level, lessonLevel: null, writingFormat: i.writingFormat, correct: a.correct, score: a.score, detail: a.detail });
+      }
+      for (const s of steps) {
+        const i = s.itemId ? items.find(x => x.id === s.itemId) : null;
+        const l = lessons.find(x => x.id === s.lessonId);
+        if (s.userId !== userId || !s.answeredAt || !i || !l) continue;
+        out.push({ at: s.answeredAt, source: 'lesson', lessonId: s.lessonId, part: s.part, kind: i.kind, topic: i.topic, level: s.level, lessonLevel: l.level, writingFormat: i.writingFormat, correct: s.correct, score: s.score, detail: s.detail });
+      }
+      return out.sort((p, q) => p.at.localeCompare(q.at));
+    },
+    async listAchievements(userId) { return achievements.filter(a => a.userId === userId).sort((p, q) => p.unlockedAt.localeCompare(q.unlockedAt)).map(a => ({ ...a })); },
+    async insertAchievements(rows) {
+      let n = 0;
+      for (const r of rows) { if (achievements.some(a => a.userId === r.userId && a.code === r.code)) continue; achievements.push({ ...r }); n++; }
+      return n;
+    },
+    async markAchievementsSeen(userId, now) { for (const a of achievements) if (a.userId === userId && !a.seenAt) a.seenAt = now; },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements };
 }
