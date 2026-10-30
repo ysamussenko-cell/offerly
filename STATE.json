@@ -1,16 +1,17 @@
 {
   "current_task": null,
-  "last_completed": "2.2 Загрузка резюме PDF/DOCX → извлечение текста на Worker → профиль через модель",
+  "last_completed": "2.3 Анкета из шести вопросов и экран «Что я понял из резюме» → карточка «Подготовка»",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "7f59149",
-    "run": 41015118391,
-    "version": "0.3.5"
+    "commit": "5c2bd0f",
+    "run": 41019696131,
+    "version": "0.4.0"
   },
   "defects": [],
   "pending_from_yuriy": [
-    "Проверить на живом адресе загрузку настоящего резюме (PDF и DOCX) и качество профиля от встроенной модели; из облачной сессии это не проверить — нужна почта для входа."
+    "Проверить на живом адресе загрузку настоящего резюме (PDF и DOCX) и качество профиля от встроенной модели; из облачной сессии это не проверить — нужна почта для входа.",
+    "Пройти анкету на живом адресе: после разбора резюме она открывается сама; проверить список часовых поясов в своём браузере и обратный отсчёт до даты собеседования."
   ],
-  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). RESEND_API_KEY добавлен 30.10, /api/health → mail: ok. Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error; WebFetch к pages.dev из плановой сессии не проходит без подтверждения, поэтому живая проверка /api/health и /api/auth/* выполняется шагом Smoke test в workflow (аннотации health, auth, resume, extract). /api/health?deep=1 прогоняет извлечение PDF (unpdf) и DOCX на встроенных фикстурах — проверка, что pdf.js работает в workerd. gh в облачной сессии не авторизован (GH_TOKEN invalid) — статус запусков смотреть через GitHub MCP (actions_list/actions_get). Локально API проверяется через `wrangler pages dev dist` с .dev.vars DEV_ECHO_CODE=1 — код входа возвращается в ответе; быстрый стенд без wrangler — dist + createApp с memoryStore (см. tests/helpers). Размер бандла Functions с unpdf ≈ 1 МБ gzip. Wrangler 3.x нельзя: его esbuild 0.17 ломает pdf.js (unpdf) при сборке Functions — держать wrangler 4.x. Внимание: 30.10 два запуска цикла шли параллельно и сделали одну и ту же починку; перед push всегда git fetch и проверка origin/main. D-2 (profile_failed в проде) закрыт в 0.3.5: JSON-режим Workers AI; deep=2 в проде → analysis ok. Dev loop переведён на ежечасный запуск 08:07–22:07 Алматы."
+  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). RESEND_API_KEY добавлен 30.10, /api/health → mail: ok. Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error; WebFetch к pages.dev из плановой сессии не проходит без подтверждения, поэтому живая проверка /api/health и /api/auth/* выполняется шагом Smoke test в workflow (аннотации health, auth, resume, extract). /api/health?deep=1 прогоняет извлечение PDF (unpdf) и DOCX на встроенных фикстурах — проверка, что pdf.js работает в workerd. gh в облачной сессии не авторизован (GH_TOKEN invalid) — статус запусков смотреть через GitHub MCP (actions_list/actions_get). Локально API проверяется через `wrangler pages dev dist` с .dev.vars DEV_ECHO_CODE=1 — код входа возвращается в ответе; быстрый стенд без wrangler — dist + createApp с memoryStore (см. tests/helpers). Размер бандла Functions с unpdf ≈ 1 МБ gzip. Wrangler 3.x нельзя: его esbuild 0.17 ломает pdf.js (unpdf) при сборке Functions — держать wrangler 4.x. Внимание: 30.10 два запуска цикла шли параллельно и сделали одну и ту же починку; перед push всегда git fetch и проверка origin/main. D-2 (profile_failed в проде) закрыт в 0.3.5: JSON-режим Workers AI; deep=2 в проде → analysis ok. Dev loop переведён на ежечасный запуск 08:07–22:07 Алматы. 2.3 (0.4.0): анкета — PUT /api/onboarding, модуль functions/_lib/onboarding.ts, экран src/screens/Questionnaire.tsx; после анкеты saveAnalysis не трогает target_role (CASE по onboarded_at). Локальный стенд для скриншотов: wrangler pages dev dist с временно убранной секцией [ai] из wrangler.toml (иначе wrangler требует CLOUDFLARE_API_TOKEN для удалённого AI); wrangler следит за wrangler.toml — возвращать оригинал только после остановки сервера; pkill -f «wrangler pages dev» убивает и свою оболочку (код 144) — запускать pkill отдельной командой."
 }
