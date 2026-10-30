@@ -1,7 +1,11 @@
 {
   "current_task": null,
   "last_completed": "0 Каркас",
-  "last_deploy": { "status": "pending", "url": "https://offerly.pages.dev", "commit": null },
+  "last_deploy": {
+    "status": "ok",
+    "url": "https://offerly-c8b.pages.dev",
+    "commit": "HEAD"
+  },
   "defects": [],
-  "notes": "Первый деплой выполняется GitHub Actions после push каркаса. Проверить /api/health: db и ai должны быть ok."
+  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error."
 }

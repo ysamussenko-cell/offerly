@@ -4,7 +4,7 @@
 
 Стек: React + Vite + TypeScript (PWA), Cloudflare Pages Functions (Hono), D1, Workers AI (встроенная модель, распознавание и озвучка речи), режим «свой ключ» для Claude / Gemini / Groq / Mistral / GLM / DeepSeek / Qwen / GPT.
 
-Адрес: https://offerly.pages.dev · Деплой: GitHub Actions при push в `main`.
+Адрес: https://offerly-c8b.pages.dev · Деплой: GitHub Actions при push в `main`.
 
 ## Локально
 ```
