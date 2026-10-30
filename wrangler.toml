@@ -1,0 +1,15 @@
+name = "offerly"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "offerly"
+database_id = "__D1_ID__"
+
+[ai]
+binding = "AI"
+
+[vars]
+APP_NAME = "Offerly"

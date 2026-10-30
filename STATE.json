@@ -1,0 +1,7 @@
+{
+  "current_task": null,
+  "last_completed": "0 Каркас",
+  "last_deploy": { "status": "pending", "url": "https://offerly.pages.dev", "commit": null },
+  "defects": [],
+  "notes": "Первый деплой выполняется GitHub Actions после push каркаса. Проверить /api/health: db и ai должны быть ok."
+}
