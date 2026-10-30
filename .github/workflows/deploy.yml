@@ -24,6 +24,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Check secrets
+        env:
+          V_TOKEN: ${{ vars.CLOUDFLARE_API_TOKEN }}
+          V_ACC: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "::notice title=secrets::token_len=${#CLOUDFLARE_API_TOKEN} account_len=${#CLOUDFLARE_ACCOUNT_ID} vars_token_len=${#V_TOKEN} vars_account_len=${#V_ACC}"
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::error title=secrets::CLOUDFLARE_API_TOKEN пуст — секрет не найден в Repository secrets"; exit 1; fi
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then echo "::error title=secrets::CLOUDFLARE_ACCOUNT_ID пуст"; exit 1; fi
       - run: npm ci
       - run: npm test
       - run: npm run build
