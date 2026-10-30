@@ -36,8 +36,8 @@ jobs:
         run: |
           set +e
           mv wrangler.toml wrangler.toml.tpl
-          CREATE=$(npx wrangler d1 create offerly 2>&1); echo "::notice title=d1 create::${CREATE:0:400}"
-          INFO=$(npx wrangler d1 info offerly --json 2>&1); echo "::notice title=d1 info::${INFO:0:400}"
+          CREATE=$(npx wrangler d1 create offerly 2>&1 | tr "\n\r" "  "); echo "::notice title=d1 create::${CREATE:0:600}"
+          INFO=$(npx wrangler d1 info offerly --json 2>&1 | tr "\n\r" "  "); echo "::notice title=d1 info::${INFO:0:600}"
           ID=$(echo "$INFO" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);console.log(j.uuid||j.id||"")}catch(e){console.log("")}})')
           mv wrangler.toml.tpl wrangler.toml
           set -e
