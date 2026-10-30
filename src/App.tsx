@@ -4,6 +4,7 @@ import Login from './screens/Login';
 import { InstallButton } from './install';
 import Resume, { ProfileCard } from './screens/Resume';
 import Questionnaire, { AnswersCard } from './screens/Questionnaire';
+import { BankCard } from './screens/Bank';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -85,6 +86,7 @@ export default function App() {
           <ProfileCard profile={ready} onReplace={() => setReplacing(true)}
             onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}
             onNext={ready.onboarded ? undefined : () => setSurvey('open')} />
+          {ready.analyzed && <BankCard />}
         </div>
       )}
 

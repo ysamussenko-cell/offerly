@@ -9,6 +9,19 @@ export type Profile = {
 export type Answers = {
   targetRole: string; interviewDate: string | null; interviewFormat: InterviewFormat; minutesPerDay: number; tz: string; nativeLanguage: string;
 };
+export type Level = 'A2' | 'B1' | 'B2' | 'C1';
+export type ItemKind = 'mcq' | 'correction' | 'reading' | 'writing';
+export type ItemStatus = 'draft' | 'verified' | 'rejected';
+export type Topic = { id: string; label: string; hint: string };
+export type ReadingQuestion = { question: string; options: string[]; answer: string };
+export type Item = {
+  id: string; kind: ItemKind; level: Level; topic: string; topicLabel: string; domain: string | null;
+  prompt: string; options: string[] | ReadingQuestion[] | null; answer: string; rubric: string[] | null; explanation: string | null;
+  status: ItemStatus; checkNote: string | null; checkedLevel: Level | null; createdAt: string;
+};
+export type BankStat = { level: Level; kind: ItemKind; status: ItemStatus; count: number };
+export type BankTopics = { levels: Level[]; kinds: { id: ItemKind; label: string }[]; topics: Topic[]; defaultCount: number; maxCount: number };
+export type GenerateResult = { ok: true; requested: number; verified: number; rejected: number; dropped: string[]; items: Item[] };
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -42,6 +55,11 @@ export const api = {
   pasteResume: (text: string) => post<{ ok: true; profile: Profile }>('/resume', { text }),
   analyzeResume: () => post<{ ok: true; profile: Profile }>('/resume/analyze', {}),
   saveAnswers: (a: Answers) => put<{ ok: true; profile: Profile; user: User }>('/onboarding', a),
+  bankTopics: () => call<{ ok: true } & BankTopics>('/items/topics'),
+  bankStats: () => call<{ ok: true; stats: BankStat[] }>('/items/stats'),
+  bankItems: (q: Partial<Record<'level' | 'topic' | 'kind' | 'status' | 'limit', string>>) =>
+    call<{ ok: true; items: Item[] }>(`/items/bank?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][])}`),
+  generateItems: (body: { kind: ItemKind; level: Level; topic: string; count: number }) => post<GenerateResult>('/items/generate', body),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -63,6 +81,8 @@ export const ERRORS: Record<string, string> = {
   resume_too_short: 'Текста мало — меньше двухсот знаков. Нужно полное резюме, а не заголовок.',
   profile_failed: 'Текст сохранён, но модель не смогла собрать профиль. Нажмите «Разобрать снова».',
   onboarding_invalid: 'В анкете есть ответ, который сервер не принял. Проверьте поля.',
+  items_invalid: 'Сервер не принял параметры: уровень, тема или вид задания вне списка.',
+  items_failed: 'Модель не вернула задания. Попробуйте ещё раз через минуту.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 

@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/api.ts","./src/install.tsx","./src/main.tsx","./src/text.ts","./src/screens/Login.tsx","./src/screens/Questionnaire.tsx","./src/screens/Resume.tsx"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/api.ts","./src/install.tsx","./src/main.tsx","./src/text.ts","./src/screens/Bank.tsx","./src/screens/Login.tsx","./src/screens/Questionnaire.tsx","./src/screens/Resume.tsx"],"version":"5.9.3"}

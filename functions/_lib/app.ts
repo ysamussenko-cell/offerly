@@ -8,13 +8,14 @@ import { loginCodeMail, sendMail, type MailEnv } from './mail';
 import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normalizeText, selfTestExtract } from './extract';
 import { analyzeResume, d1ProfileStore, publicProfile, SELF_TEST_RESUME, type ProfileStore } from './profile';
 import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onboarding';
+import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_LABELS, LEVELS, TOPICS, DEFAULT_COUNT, MAX_COUNT, type ItemStore, type Kind, type Level, type Status, STATUSES } from './items';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -25,7 +26,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -191,6 +192,45 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     await c.get('store').saveAnswers(user.id, v.answers, new Date().toISOString());
     const p = await c.get('store').getProfile(user.id);
     return c.json({ ok: true, profile: p ? publicProfile(p) : null, user: publicUser({ ...user, tz: v.answers.tz }) });
+  });
+
+  // --- банк заданий ---
+
+  /** Справочник банка: уровни, виды и темы — для формы пополнения. */
+  app.get('/items/topics', (c) => c.json({
+    ok: true, levels: LEVELS, kinds: KINDS.map(id => ({ id, label: KIND_LABELS[id] })), topics: TOPICS, defaultCount: DEFAULT_COUNT, maxCount: MAX_COUNT,
+  }));
+
+  /** Сводка: сколько заданий в банке по уровню, виду и статусу. */
+  app.get('/items/stats', requireAuth, async (c) => c.json({ ok: true, stats: await c.get('store').bankStats() }));
+
+  /** Задания банка с ключами и заметками проверки — для просмотра владельцем. Фильтры: level, topic, kind, status, limit. */
+  app.get('/items/bank', requireAuth, async (c) => {
+    const q = (k: string) => c.req.query(k) || undefined;
+    const level = q('level'), kind = q('kind'), status = q('status');
+    if (level && !(LEVELS as readonly string[]).includes(level)) return c.json({ ok: false, error: 'items_invalid', field: 'level' }, 400);
+    if (kind && !(KINDS as readonly string[]).includes(kind)) return c.json({ ok: false, error: 'items_invalid', field: 'kind' }, 400);
+    if (status && !(STATUSES as readonly string[]).includes(status)) return c.json({ ok: false, error: 'items_invalid', field: 'status' }, 400);
+    const items = await c.get('store').listItems({ level: level as Level, kind: kind as Kind, status: status as Status, topic: q('topic'), limit: Number(q('limit') ?? 50) || 50 });
+    return c.json({ ok: true, items: items.map(publicItem) });
+  });
+
+  /** Пополнение банка: модель пишет задания по теме и уровню в домене пользователя, второй прогон проверяет каждое. */
+  app.post('/items/generate', requireAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const v = parseGenerateBody(body);
+    if (!v.ok) return c.json({ ok: false, error: 'items_invalid', field: v.field }, 400);
+    const p = await c.get('store').getProfile(c.get('auth')!.user.id);
+    const domain = { specialty: p?.specialty ?? null, industry: p?.industry ?? null, targetRole: p?.targetRole ?? null, keywords: p?.keywords ?? [] };
+    try {
+      const r = await generateItems(c.env, c.get('store'), { kind: v.kind, level: v.level, topic: v.topic, count: v.count, domain });
+      const verified = r.items.filter(i => i.status === 'verified').length;
+      return c.json({ ok: true, requested: v.count, verified, rejected: r.items.length - verified, dropped: r.dropped, items: r.items.map(publicItem) });
+    } catch (e) {
+      const detail = String(e instanceof Error ? e.message : e).slice(0, 300);
+      console.error('item generation failed', detail);
+      return c.json({ ok: false, error: 'items_failed', detail }, 502);
+    }
   });
 
   return app;

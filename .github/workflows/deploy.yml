@@ -96,6 +96,12 @@ jobs:
           ONB=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"targetRole":"x"}' "$P/api/onboarding")
           echo "::notice title=onboarding::PUT /api/onboarding без cookie → $ONB (ждём 401)"
           [ "$ONB" = "401" ] || { echo "::error title=onboarding::неожиданный код ответа"; exit 1; }
+          TOP=$(curl -s -o topics.json -w '%{http_code}' "$P/api/items/topics")
+          NTOP=$(node -e 'const t=require("./topics.json"); console.log((t.topics||[]).length+" тем, "+(t.kinds||[]).length+" вида, уровни "+(t.levels||[]).join("/"))')
+          STATS=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/items/stats")
+          GEN=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"kind":"mcq","level":"B1","topic":"articles"}' "$P/api/items/generate")
+          echo "::notice title=items::GET /api/items/topics → $TOP ($NTOP); GET /api/items/stats без cookie → $STATS (ждём 401); POST /api/items/generate без cookie → $GEN (ждём 401)"
+          [ "$TOP" = "200" ] && [ "$STATS" = "401" ] && [ "$GEN" = "401" ] || { echo "::error title=items::неожиданные коды ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
