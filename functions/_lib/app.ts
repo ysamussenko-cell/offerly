@@ -9,13 +9,14 @@ import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normal
 import { analyzeResume, d1ProfileStore, publicProfile, SELF_TEST_RESUME, type ProfileStore } from './profile';
 import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onboarding';
 import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_LABELS, LEVELS, TOPICS, DEFAULT_COUNT, MAX_COUNT, type ItemStore, type Kind, type Level, type Status, STATUSES } from './items';
+import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -26,7 +27,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -232,6 +233,37 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       return c.json({ ok: false, error: 'items_failed', detail }, 502);
     }
   });
+
+  // --- тест уровня ---
+
+  const domainOf = async (c: any) => {
+    const p = await c.get('store').getProfile(c.get('auth')!.user.id);
+    return { specialty: p?.specialty ?? null, industry: p?.industry ?? null, targetRole: p?.targetRole ?? null, keywords: p?.keywords ?? [] };
+  };
+  const ASSESSMENT_STATUS: Record<AssessmentError['code'], number> = { assessment_none: 404, assessment_stale: 409, assessment_finished: 409, answer_invalid: 400, bank_empty: 502 };
+  const assessmentFail = (c: any, e: unknown) => {
+    if (e instanceof AssessmentError) return c.json({ ok: false, error: e.code, reason: e.reason, detail: e.message !== e.code ? e.message : undefined }, ASSESSMENT_STATUS[e.code]);
+    throw e;
+  };
+
+  /** Состояние теста: активный с текущим заданием (без ключа) или последний завершённый с уровнем; null — теста не было. */
+  app.get('/assessment', requireAuth, async (c) => c.json({ ok: true, total: TOTAL, adaptive: ADAPTIVE_COUNT, assessment: await currentAssessment(c.get('store'), c.get('auth')!.user.id) }));
+
+  /** Начать или продолжить: возвращает текущее задание. Если банк пуст — модель пишет задание (до минуты). */
+  app.post('/assessment/start', requireAuth, async (c) => {
+    try { return c.json({ ok: true, assessment: await startOrResume(c.env, c.get('store'), c.get('auth')!.user.id, await domainOf(c)) }); }
+    catch (e) { return assessmentFail(c, e); }
+  });
+
+  /** Ответ на текущее задание: {attemptId, answer}. Ответ проверяется сравнением с эталоном; письмо только сохраняется. */
+  app.post('/assessment/answer', requireAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json({ ok: true, assessment: await answerAssessment(c.env, c.get('store'), c.get('auth')!.user.id, body.attemptId, body.answer, await domainOf(c)) }); }
+    catch (e) { return assessmentFail(c, e); }
+  });
+
+  /** Бросить начатый тест: следующий start начнёт новый, виденные задания не повторятся. */
+  app.post('/assessment/abandon', requireAuth, async (c) => c.json({ ok: true, abandoned: await abandon(c.get('store'), c.get('auth')!.user.id) }));
 
   return app;
 }

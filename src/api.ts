@@ -22,6 +22,16 @@ export type Item = {
 export type BankStat = { level: Level; kind: ItemKind; status: ItemStatus; count: number };
 export type BankTopics = { levels: Level[]; kinds: { id: ItemKind; label: string }[]; topics: Topic[]; defaultCount: number; maxCount: number };
 export type GenerateResult = { ok: true; requested: number; verified: number; rejected: number; dropped: string[]; items: Item[] };
+export type AssessmentStatus = 'active' | 'finished' | 'abandoned';
+export type TestItem = {
+  attemptId: string; itemId: string; position: number; kind: ItemKind; kindLabel: string; prompt: string;
+  options?: string[]; questions?: { question: string; options: string[] }[]; words?: { min: number; max: number };
+};
+export type Assessment = {
+  id: string; status: AssessmentStatus; total: number; answered: number; current: TestItem | null;
+  startedAt: string; finishedAt: string | null; level: Level | null; levelLabel: string | null;
+  summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
+};
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -60,6 +70,10 @@ export const api = {
   bankItems: (q: Partial<Record<'level' | 'topic' | 'kind' | 'status' | 'limit', string>>) =>
     call<{ ok: true; items: Item[] }>(`/items/bank?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][])}`),
   generateItems: (body: { kind: ItemKind; level: Level; topic: string; count: number }) => post<GenerateResult>('/items/generate', body),
+  assessment: () => call<{ ok: true; total: number; adaptive: number; assessment: Assessment | null }>('/assessment'),
+  startAssessment: () => post<{ ok: true; assessment: Assessment }>('/assessment/start', {}),
+  answerAssessment: (attemptId: string, answer: string | string[]) => post<{ ok: true; assessment: Assessment }>('/assessment/answer', { attemptId, answer }),
+  abandonAssessment: () => post<{ ok: true; abandoned: boolean }>('/assessment/abandon', {}),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -83,6 +97,11 @@ export const ERRORS: Record<string, string> = {
   onboarding_invalid: 'В анкете есть ответ, который сервер не принял. Проверьте поля.',
   items_invalid: 'Сервер не принял параметры: уровень, тема или вид задания вне списка.',
   items_failed: 'Модель не вернула задания. Попробуйте ещё раз через минуту.',
+  assessment_none: 'Начатого теста нет. Нажмите «Начать тест».',
+  assessment_stale: 'Это задание уже закрыто — экран обновлён, ответьте на текущее.',
+  assessment_finished: 'Тест уже завершён.',
+  answer_invalid: 'Ответ не принят: проверьте, что он заполнен.',
+  bank_empty: 'В банке нет подходящего задания, и модель не смогла написать новое. Пополните банк и попробуйте снова.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 
@@ -98,10 +117,19 @@ export const ANSWER_ERRORS: Record<string, string> = {
   'nativeLanguage:empty': 'Укажите родной язык.',
 };
 
+/** Отказы при приёме ответа теста — по причине. */
+export const ANSWER_REFUSALS: Record<string, string> = {
+  empty: 'Ответ пустой. Выберите вариант или напишите текст.',
+  format: 'Ответ не того вида: для выбора — одна буква, для чтения — ответ на оба вопроса, для исправления — предложение целиком.',
+  too_short: 'Текст короче тридцати слов. Цель — 60–80 слов.',
+  too_long: 'Текст длиннее двухсот слов. Цель — 60–80 слов.',
+};
+
 export const errorText = (e: unknown) => {
   if (e instanceof ApiError && e.code === 'onboarding_invalid') {
     return ANSWER_ERRORS[`${e.body?.field}:${e.body?.reason}`] ?? ERRORS.onboarding_invalid;
   }
+  if (e instanceof ApiError && e.code === 'answer_invalid') return ANSWER_REFUSALS[String(e.body?.reason)] ?? ERRORS.answer_invalid;
   const base = (e instanceof ApiError && ERRORS[e.code]) || ERRORS.request_failed;
   const detail = e instanceof ApiError && typeof e.body?.detail === 'string' ? e.body.detail : '';
   return detail ? `${base} Ответ сервера: ${detail}` : base;

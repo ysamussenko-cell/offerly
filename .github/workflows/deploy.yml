@@ -102,6 +102,11 @@ jobs:
           GEN=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"kind":"mcq","level":"B1","topic":"articles"}' "$P/api/items/generate")
           echo "::notice title=items::GET /api/items/topics → $TOP ($NTOP); GET /api/items/stats без cookie → $STATS (ждём 401); POST /api/items/generate без cookie → $GEN (ждём 401)"
           [ "$TOP" = "200" ] && [ "$STATS" = "401" ] && [ "$GEN" = "401" ] || { echo "::error title=items::неожиданные коды ответа"; exit 1; }
+          ASG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/assessment")
+          AST=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/assessment/start")
+          ASA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"attemptId":"x","answer":"A"}' "$P/api/assessment/answer")
+          echo "::notice title=assessment::GET /api/assessment без cookie → $ASG; POST /api/assessment/start → $AST; POST /api/assessment/answer → $ASA (ждём 401 везде)"
+          [ "$ASG" = "401" ] && [ "$AST" = "401" ] && [ "$ASA" = "401" ] || { echo "::error title=assessment::неожиданные коды ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'

@@ -317,6 +317,9 @@ export interface ItemStore {
   listItems(f: { level?: Level; topic?: string; kind?: Kind; status?: Status; limit?: number }): Promise<Item[]>;
   /** Сводка банка: число заданий по уровню, виду и статусу. */
   bankStats(): Promise<{ level: Level; kind: Kind; status: Status; count: number }[]>;
+  getItem(id: string): Promise<Item | null>;
+  /** Принятые (verified) задания вида и уровня в случайном порядке — для теста уровня. */
+  randomItems(kind: Kind, level: Level, limit: number): Promise<Item[]>;
 }
 
 export interface GenerateOpts { provider?: ProviderId; apiKey?: string; model?: string; chatFn?: typeof chat; now?: () => string; id?: () => string }
@@ -416,6 +419,14 @@ export function d1ItemStore(db: D1Database): ItemStore {
     async bankStats() {
       const rs = await db.prepare('SELECT level, kind, status, COUNT(*) AS count FROM items GROUP BY level, kind, status').all();
       return (rs.results as any[]).map(r => ({ level: r.level, kind: r.kind, status: r.status ?? 'draft', count: Number(r.count) }));
+    },
+    async getItem(id) {
+      const r = await db.prepare('SELECT * FROM items WHERE id = ?').bind(id).first();
+      return r ? toItem(r) : null;
+    },
+    async randomItems(kind, level, limit) {
+      const rs = await db.prepare("SELECT * FROM items WHERE status = 'verified' AND kind = ? AND level = ? ORDER BY RANDOM() LIMIT ?").bind(kind, level, Math.min(Math.max(limit, 1), 200)).all();
+      return (rs.results as any[]).map(toItem);
     },
   };
 }

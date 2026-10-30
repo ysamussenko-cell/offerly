@@ -146,7 +146,7 @@ export function AnswersCard({ profile, user, onEdit }: { profile: Profile; user:
       <div className="row" style={{ marginTop: 20 }}>
         <button className="btn secondary" type="button" onClick={onEdit}>Изменить ответы</button>
       </div>
-      <p className="muted" style={{ marginTop: 16, fontSize: 14 }}>Следующий шаг — тест уровня по вашей специальности; появится в ближайших обновлениях.</p>
+      <p className="muted" style={{ marginTop: 16, fontSize: 14 }}>Следующий шаг — тест уровня по вашей специальности: карточка «Тест уровня» выше.</p>
     </section>
   );
 }
