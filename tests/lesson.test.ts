@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   warmupKind, warmupLevel, partAt, totalSteps, warmupTopics, reviewCards, gradeCard, lessonScore, pickWarmup, pickWriting,
-  today as lessonToday, startOrResume, answer, d1LessonStore, LessonError, WARMUP_COUNT, REVIEW_MAX, REVIEW_INTERVAL, type Lesson, type LessonStep,
+  today as lessonToday, startOrResume, answer, d1LessonStore, LessonError, WARMUP_COUNT, REVIEW_MAX, stepOrigin, CARD_SOURCE, type Lesson, type LessonStep,
 } from '../functions/_lib/lesson';
+import { RETIRE_AFTER } from '../functions/_lib/fsrs';
 import { generateProgram, d1ProgramStore, type ProgramDay } from '../functions/_lib/program';
 import { d1CardStore, type ErrorCard } from '../functions/_lib/cards';
 import type { Assessment } from '../functions/_lib/assessment';
@@ -23,8 +24,8 @@ const nextId = () => `id${++seq}`;
 const SHORT = Array.from({ length: 8 }, () => 'The boiler efficiency test shows a small loss.').join(' '); // 64 слова
 
 const card = (topic: string, over: Partial<ErrorCard> = {}): ErrorCard => ({
-  id: `c${++seq}`, userId: USER, topic, rule: 'правило карточки', example: `We have installed ${seq} boilers since 2020 at the plant.`, correction: `We installed ${seq} boilers in 2020 at the plant.`, source: 'seed',
-  stability: 1, difficulty: 5, due: '2026-11-01', reps: 0, lapses: 0, retired: false, createdAt: NOW, ...over,
+  id: `c${++seq}`, userId: USER, topic, rule: 'правило карточки', example: `We have installed ${seq} boilers since 2020 at the plant.`, correction: `We installed ${seq} boilers in 2020 at the plant.`, source: 'seed', origin: null,
+  stability: 1, difficulty: 5, due: '2026-11-01', reps: 0, lapses: 0, streak: 0, reviewedAt: null, retired: false, createdAt: NOW, ...over,
 });
 const assessment = (level: Level = 'B1'): Assessment => ({
   id: 'a1', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level, currentLevel: level,
@@ -144,9 +145,13 @@ describe('занятие в хранилище', () => {
     expect(v.last).toMatchObject({ position: 1, part: 'warmup', kind: 'mcq', correct: 1, score: 100, feedback: 'правило одной строкой' });
     expect(v.last!.written).toContain('the energy audit'); expect(v.last!.correction).toContain('the energy audit');
     expect(v.current).toMatchObject({ position: 2, kind: 'mcq' });
-    // 2: неверно
+    // 2: неверно — в журнале появляется карточка с выбранным и верным словом, сроком на завтра
     v = await answer(ENV, mem.store, USER, v.current!.stepId, 'A', TZ, DOMAIN, opts);
-    expect(v.last).toMatchObject({ correct: 0, score: 0 }); expect(v.last!.written).toContain('a energy audit');
+    expect(v.last).toMatchObject({ correct: 0, score: 0, newCards: 1 }); expect(v.last!.written).toContain('a energy audit');
+    const made1 = mem.cards.find(c => c.origin === stepOrigin(v.last!.stepId))!;
+    expect(made1).toMatchObject({ topic: 'conjunctions', source: CARD_SOURCE, rule: 'правило одной строкой', due: '2026-11-03', streak: 0, reviewedAt: null, retired: false });
+    expect(made1.example).toContain('a energy audit'); expect(made1.correction).toContain('the energy audit');
+    expect(mem.cards).toHaveLength(5);
     // 3: исправление верно (регистр и знаки не важны)
     expect(v.current).toMatchObject({ position: 3, kind: 'correction', level: 'B1' });
     const it3 = mem.items.find(i => i.id === mem.steps[2].itemId)!;
@@ -157,7 +162,9 @@ describe('занятие в хранилище', () => {
     v = await answer(ENV, mem.store, USER, v.current!.stepId, 'C', TZ, DOMAIN, opts);
     expect(v.current).toMatchObject({ position: 5, kind: 'correction', level: 'B2' });
     v = await answer(ENV, mem.store, USER, v.current!.stepId, v.current!.prompt, TZ, DOMAIN, opts); // неизменённое предложение — неверно
-    expect(v.last).toMatchObject({ correct: 0 });
+    expect(v.last).toMatchObject({ correct: 0, newCards: 1 });
+    const made5 = mem.cards.find(c => c.origin === stepOrigin(v.last!.stepId))!;
+    expect(made5).toMatchObject({ topic: 'conjunctions', example: v.last!.prompt, correction: v.last!.correction }); // карточка — исходное предложение с ошибкой
     expect(v.parts.warmup).toEqual({ total: 5, done: 5, correct: 3 });
     // 6: письмо — формат дня, оценка моделью; сбой модели не записывает ответ
     expect(v.current).toMatchObject({ position: 6, part: 'writing', kind: 'writing', words: { min: 60, max: 80 } });
@@ -169,18 +176,27 @@ describe('занятие в хранилище', () => {
     expect(v.last).toMatchObject({ part: 'writing', correct: null, score: 59, feedback: EVAL.summary, correction: EVAL.rewrite });
     expect(v.last!.writing).toMatchObject({ level: 'B2', errors: [{ original: 'shows a small loss' }], axes: { grammar: 60 } });
     expect(v.parts.writing).toEqual({ done: true, score: 59 });
+    // ошибка письма без темы от экзаменатора — карточка по теме занятия
+    expect(v.last!.newCards).toBe(1);
+    expect(mem.cards.find(c => c.origin === `${stepOrigin(v.last!.stepId)}:w1`)).toMatchObject({ topic: 'conjunctions', example: 'shows a small loss', correction: 'showed a small loss', rule: 'Прошедшее время для завершённого теста' });
+    expect(mem.cards).toHaveLength(7);
     // 7–9: карточки — пример на экране, правило после ответа; счётчики и срок карточки меняются
     expect(v.current).toMatchObject({ position: 7, part: 'review', kind: 'card', kindLabel: 'карточка журнала', topicLabel: 'Союзы и инверсия' });
     const c7 = mem.cards.find(c => c.id === mem.steps[6].cardId)!;
     expect(v.current!.prompt).toBe(c7.example);
     v = await answer(ENV, mem.store, USER, v.current!.stepId, c7.correction, TZ, DOMAIN, opts);
-    expect(v.last).toMatchObject({ part: 'review', correct: 1, score: 100, feedback: 'правило карточки', written: c7.correction, correction: c7.correction });
-    expect(c7).toMatchObject({ reps: 1, lapses: 0, due: '2026-11-05' });
-    expect(REVIEW_INTERVAL).toEqual({ correct: 3, wrong: 1 });
+    expect(v.last).toMatchObject({ part: 'review', correct: 1, score: 100, feedback: 'правило карточки', written: c7.correction, correction: c7.correction, newCards: 0 });
+    // первый верный повтор по FSRS: стабильность w2 ≈ 3,7 дня → срок через четыре дня, серия 1, до гашения два
+    expect(c7).toMatchObject({ reps: 1, lapses: 0, streak: 1, reviewedAt: TODAY, due: '2026-11-06', retired: false });
+    expect(c7.stability).toBeCloseTo(3.7145, 3);
+    expect(v.last!.card).toEqual({ id: c7.id, due: '2026-11-06', streak: 1, left: RETIRE_AFTER - 1, retired: false });
     const c8 = mem.cards.find(c => c.id === mem.steps[7].cardId)!;
     expect(c8.id).not.toBe(c7.id);
     v = await answer(ENV, mem.store, USER, v.current!.stepId, 'wrong answer here', TZ, DOMAIN, opts);
-    expect(v.last).toMatchObject({ correct: 0 }); expect(c8).toMatchObject({ reps: 0, lapses: 1, due: '2026-11-03' });
+    // неверно: lapses, серия 0, карточка возвращается завтра; новая карточка из повтора не заводится
+    expect(v.last).toMatchObject({ correct: 0, newCards: 0 }); expect(c8).toMatchObject({ reps: 0, lapses: 1, streak: 0, due: '2026-11-03' });
+    expect(v.last!.card).toMatchObject({ due: '2026-11-03', streak: 0, left: RETIRE_AFTER });
+    expect(mem.cards).toHaveLength(7);
     expect(v.current).toMatchObject({ position: 9, part: 'review' });
     const c9 = mem.cards.find(c => c.id === mem.steps[8].cardId)!;
     v = await answer(ENV, mem.store, USER, v.current!.stepId, c9.correction, TZ, DOMAIN, opts);

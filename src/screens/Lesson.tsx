@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errorText, type Lesson as View, type LessonStepDone, type LessonToday } from '../api';
 import { longDate, minutesText, plural } from '../text';
 import { changedWords, wordDiff } from '../diff';
+import { reviewOutcome } from './Journal';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
@@ -164,7 +165,7 @@ export default function Lesson({ onClose }: Props) {
       {busy === 'start' && <p className="muted">Собираю занятие: задания темы дня из банка, письмо формата дня, карточки к повтору. Если в банке по теме пусто, модель напишет задание — до минуты.</p>}
       {!cur && !last && busy !== 'start' && !error && <p className="muted">Шаг не выдан. Вернитесь на главную и начните снова.</p>}
 
-      {last && <Review step={last} />}
+      {last && <Review step={last} today={view?.date} />}
 
       {!last && cur && cur.kind === 'mcq' && (
         <>
@@ -252,7 +253,7 @@ function Diff({ from, to, side }: { from: string; to: string; side: 'written' | 
 }
 
 /** Разбор шага: верно или нет, одна строка объяснения, как написано и как надо с подсветкой изменений. */
-function Review({ step }: { step: LessonStepDone }) {
+function Review({ step, today }: { step: LessonStepDone; today?: string }) {
   const written = step.written ?? step.answer ?? '';
   const correction = step.correction ?? '';
   const changed = written && correction ? changedWords(wordDiff(written, correction)) : 0;
@@ -264,6 +265,8 @@ function Review({ step }: { step: LessonStepDone }) {
         <span className="muted" style={{ fontSize: 13 }}>{step.topicLabel ?? step.partLabel}</span>
       </div>
       {step.feedback && <p className="review-note">{step.feedback}</p>}
+      {step.kind === 'card' && step.card && today && <p className="muted hint" style={{ marginTop: 4 }}>{reviewOutcome(step.card, step.correct === 1, today)}</p>}
+      {step.kind !== 'card' && step.newCards > 0 && <p className="muted hint" style={{ marginTop: 4 }}>{step.newCards === 1 ? 'Ошибка записана в журнал — карточка появится в повторе с завтрашнего дня.' : `В журнал записаны ${step.newCards} ${plural(step.newCards, 'карточка', 'карточки', 'карточек')} — появятся в повторе с завтрашнего дня.`}</p>}
       {step.kind !== 'writing' && (
         <>
           {step.correct === 0 && written && <p className="ex-quote mono" lang="en"><Diff from={written} to={correction} side="written" /></p>}
@@ -309,6 +312,8 @@ function Summary({ view, onClose }: { view: View; onClose: () => void }) {
   const [open, setOpen] = useState(false);
   const p = view.parts;
   const writing = view.steps.find(s => s.part === 'writing');
+  const retired = view.steps.filter(s => s.card?.retired).length;
+  const newCards = view.steps.reduce((n, s) => n + (s.newCards ?? 0), 0);
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -322,7 +327,8 @@ function Summary({ view, onClose }: { view: View; onClose: () => void }) {
       <ul className="facts-list">
         <li>Разминка по теме «{view.topicLabel}»: верно {p.warmup.correct} из {p.warmup.total}.</li>
         <li>Письмо{view.writingLabel ? ` (${view.writingLabel})` : ''}: {p.writing.done ? `${p.writing.score ?? '—'} из 100${writing?.writing ? `, уровень текста ${writing.writing.level}` : ''}` : 'не сдано'}.</li>
-        <li>Карточки журнала: {p.review.total ? `верно ${p.review.correct} из ${p.review.total}` : 'к повтору сегодня не было'}.</li>
+        <li>Карточки журнала: {p.review.total ? `верно ${p.review.correct} из ${p.review.total}${retired ? `, погашено ${retired}` : ''}` : 'к повтору сегодня не было'}.</li>
+        {newCards > 0 && <li>В журнал записано {newCards} {plural(newCards, 'новая карточка', 'новые карточки', 'новых карточек')} — повтор с завтрашнего дня.</li>}
       </ul>
       {writing?.writing?.summary && <p style={{ marginTop: 0 }}>{writing.writing.summary}</p>}
       <button className="link" type="button" onClick={() => setOpen(v => !v)}>{open ? 'Скрыть разбор шагов' : `Показать разбор шагов (${view.steps.length})`}</button>
@@ -332,7 +338,7 @@ function Summary({ view, onClose }: { view: View; onClose: () => void }) {
             <div key={s.stepId}>
               <p className="muted hint" style={{ margin: '0 0 4px' }}>Шаг {s.position} · {s.partLabel}</p>
               {s.kind !== 'card' && <p className="prompt" style={{ marginTop: 0 }}>{s.prompt}</p>}
-              <Review step={s} />
+              <Review step={s} today={view.date} />
             </div>
           ))}
         </div>

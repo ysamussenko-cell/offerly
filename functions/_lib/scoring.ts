@@ -12,6 +12,7 @@ import { extractJsonObject } from './profile';
 import { LEVELS, WRITING_WORDS, topicById, type Item, type Level, type ReadingQuestion } from './items';
 import type { Attempt } from './assessment';
 import type { GenerateOpts } from './items';
+import { CARD_TOPICS } from './cards';
 
 export const AXES = ['grammar', 'vocabulary', 'coherence', 'taskResponse', 'fluency'] as const;
 export type Axis = typeof AXES[number];
@@ -68,7 +69,11 @@ const mean = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.le
 
 // ---------- оценка письма моделью ----------
 
-export interface WritingError { original: string; corrected: string; note: string }
+export interface WritingError {
+  original: string; corrected: string; note: string;
+  /** Тема ошибки из справочника карточек (cards.ts); null, если экзаменатор её не назвал. */
+  topic?: string | null;
+}
 
 export interface WritingEval {
   /** Четыре оси письма в шкале 0–100 (беглость речи письмо не измеряет). */
@@ -90,7 +95,7 @@ export const WRITING_EVAL_SCHEMA = {
     grammar: { type: 'integer' }, vocabulary: { type: 'integer' }, coherence: { type: 'integer' }, task_response: { type: 'integer' },
     level: { type: 'string', enum: [...LEVELS] },
     summary: { type: 'string' },
-    errors: { type: 'array', items: { type: 'object', properties: { original: { type: 'string' }, corrected: { type: 'string' }, note: { type: 'string' } }, required: ['original', 'corrected', 'note'] } },
+    errors: { type: 'array', items: { type: 'object', properties: { original: { type: 'string' }, corrected: { type: 'string' }, note: { type: 'string' }, topic: { type: 'string', enum: CARD_TOPICS.map(t => t.id) } }, required: ['original', 'corrected', 'note', 'topic'] } },
     rewrite: { type: 'string' },
   },
   required: ['grammar', 'vocabulary', 'coherence', 'task_response', 'level', 'summary', 'errors', 'rewrite'],
@@ -104,7 +109,7 @@ export function writingPrompt(item: Item, text: string): ChatMessage[] {
     'You are a strict but fair examiner of English writing for an interview-preparation coach. You grade a learner\'s short professional text against the task, its rubric and a model answer, and you report only errors that are actually present in the learner\'s text.',
     SCALE,
     'Axes: "grammar" — accuracy of grammar and spelling; "vocabulary" — range and precision of professional vocabulary and collocations; "coherence" — logical flow, linking, paragraphing, clear sentences; "task_response" — whether the text does exactly what the task asks for the stated reader (compare with the model answer; answering a neighbouring question is a low score).',
-    '"errors": up to 5 real errors from the learner\'s text, most important first. "original" — the exact words as they appear in the learner\'s text (3–12 words, verbatim); "corrected" — the same fragment corrected; "note" — one line in Russian, up to 120 characters, naming the rule or the better choice. Never invent errors; a clean text gets an empty list.',
+    '"errors": up to 5 real errors from the learner\'s text, most important first. "original" — the exact words as they appear in the learner\'s text (3–12 words, verbatim); "corrected" — the same fragment corrected; "note" — one line in Russian, up to 120 characters, naming the rule or the better choice; "topic" — the error\'s topic id, one of: ' + CARD_TOPICS.map(t => `${t.id} (${t.hint})`).join('; ') + '. Never invent errors; a clean text gets an empty list.',
     `"rewrite": the learner\'s text rewritten in natural English at the target level with all errors fixed and the task fully answered, keeping the learner\'s ideas and length (${WRITING_WORDS.target[0]}–${WRITING_WORDS.target[1]} words).`,
     '"summary": one or two sentences in Russian for the learner — direct, adult, supportive: what works and what to fix first. No exclamation marks, no emoji.',
     '"level": the overall CEFR level (A2, B1, B2 or C1) of this text.',
@@ -147,7 +152,8 @@ export function normalizeWritingEval(raw: unknown, text: string): Omit<WritingEv
     if (!hay.includes(normText(original))) continue;
     if (normText(original) === normText(corrected)) continue;
     if (errors.some(x => normText(x.original) === normText(original))) continue;
-    errors.push({ original, corrected, note });
+    const topicRaw = clean(eo.topic, 40).toLowerCase();
+    errors.push({ original, corrected, note, topic: CARD_TOPICS.some(t => t.id === topicRaw) ? topicRaw : null });
     if (errors.length >= 5) break;
   }
   const rw = clean(o.rewrite, 3000);

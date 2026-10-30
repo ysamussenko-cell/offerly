@@ -19,7 +19,7 @@ const nextId = () => `d${++seq}`;
 
 const card = (topic: string, retired = false): ErrorCard => ({
   id: `c${++seq}`, userId: USER, topic, rule: 'правило', example: 'wrong', correction: 'right', source: 'seed',
-  stability: 1, difficulty: 5, due: '2026-11-01', reps: 0, lapses: 0, retired, createdAt: NOW,
+  origin: null, stability: 1, difficulty: 5, due: '2026-11-01', reps: 0, lapses: 0, streak: 0, reviewedAt: null, retired, createdAt: NOW,
 });
 const assessment = (axes: Record<string, number | null>, kind: Assessment['kind'] = 'baseline'): Assessment => ({
   id: 'a1', userId: USER, kind, status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B1', currentLevel: 'B1',

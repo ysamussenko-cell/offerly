@@ -61,7 +61,7 @@ jobs:
           set -o pipefail
           OUT=$(npx wrangler d1 execute offerly --remote --yes --file seed/first_user.sql 2>&1 | tr "\n\r" "  ") || { echo "::error title=seed::seed/first_user.sql не применился: ${OUT:0:600}"; exit 1; }
           echo "::notice title=seed::применён seed/first_user.sql: ${OUT:0:300}"
-          Q="SELECT (SELECT count(*) FROM users WHERE email = 'ysamussenko@gmail.com') AS first_user, (SELECT count(*) FROM assessments WHERE kind = 'baseline') AS baseline, (SELECT count(*) FROM error_cards WHERE source = 'seed') AS seed_cards, (SELECT count(*) FROM error_cards) AS all_cards"
+          Q="SELECT (SELECT count(*) FROM users WHERE email = 'ysamussenko@gmail.com') AS first_user, (SELECT count(*) FROM assessments WHERE kind = 'baseline') AS baseline, (SELECT count(*) FROM error_cards WHERE source = 'seed') AS seed_cards, (SELECT count(*) FROM error_cards) AS all_cards, (SELECT count(*) FROM error_cards WHERE retired = 1) AS retired, (SELECT count(*) FROM error_cards WHERE reviewed_at IS NOT NULL OR origin IS NOT NULL) AS fsrs_touched"
           CNT=$(npx wrangler d1 execute offerly --remote --yes --json --command "$Q" 2>&1 | tr "\n\r" "  ")
           echo "::notice title=seed counts::${CNT:0:500}"
 

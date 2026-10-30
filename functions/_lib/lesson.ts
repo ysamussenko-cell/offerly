@@ -6,13 +6,16 @@
  *  Каждый выданный шаг сразу записывается в lesson_steps без ответа — занятие можно прервать и продолжить.
  *  Задания берутся из банка на уровне последнего теста или среза (две последние позиции разминки — ступенью выше,
  *  растяжка); если в банке пусто — модель пишет задание через обычный конвейер с проверкой. Задания, уже виденные
- *  в тестах и занятиях, не повторяются. После последнего шага день программы отмечается пройденным с баллом. */
+ *  в тестах и занятиях, не повторяются. После последнего шага день программы отмечается пройденным с баллом.
+ *  Неверное исправление или выбор варианта в разминке и ошибки письма заводят карточки журнала (cards.ts);
+ *  повтор карточки переносит её по FSRS (fsrs.ts), три верных подряд гасят. */
 import type { Env as ProviderEnv } from './providers';
 import { KIND_LABELS, LEVELS, WRITING_WORDS, generateItems, topicById, type Domain, type Item, type ItemStore, type Kind, type Level, type GenerateOpts } from './items';
 import { grade, levelFallbacks, type AssessmentStore } from './assessment';
 import { evaluateWriting, parseWritingEval, type WritingEval } from './scoring';
-import { dueForReview, cardTopicById, type CardStore, type ErrorCard } from './cards';
-import { addDays, programTopicById, publicDay, MIXED_TOPIC, WRITING_LABELS, type ProgramDay, type ProgramStore, type PublicDay, type WritingFormat } from './program';
+import { dueForReview, cardTopicById, reviewPatch, draftFromItem, draftsFromWriting, createCards, type CardStore, type ErrorCard } from './cards';
+import { RETIRE_AFTER } from './fsrs';
+import { programTopicById, publicDay, MIXED_TOPIC, WRITING_LABELS, type ProgramDay, type ProgramStore, type PublicDay, type WritingFormat } from './program';
 import { todayIn } from './onboarding';
 
 export const WARMUP_COUNT = 5;
@@ -23,8 +26,8 @@ export const STRETCH_POSITIONS = [4, 5];
 /** Сколько карточек журнала повторяется за занятие. */
 export const REVIEW_MAX = 5;
 export const DEFAULT_LEVEL: Level = 'B1';
-/** Простой интервал до FSRS (3.3): верно — через три дня, неверно — завтра. */
-export const REVIEW_INTERVAL = { correct: 3, wrong: 1 };
+/** Источник карточек, заведённых из ошибок занятия. */
+export const CARD_SOURCE = 'lesson';
 
 export const PARTS = ['warmup', 'writing', 'review'] as const;
 export type Part = typeof PARTS[number];
@@ -164,6 +167,10 @@ export interface DoneStep {
   /** Как надо: предложение с верным словом, исправленное предложение, «как надо» карточки, переписанное письмо. */
   correction: string | null;
   writing: { level: Level; summary: string; rewrite: string | null; errors: WritingEval['errors']; axes: WritingEval['axes'] } | null;
+  /** Для повтора карточки: её состояние после ответа — срок, верных подряд, сколько осталось до гашения, погашена ли. */
+  card: { id: string; due: string | null; streak: number; left: number; retired: boolean } | null;
+  /** Сколько карточек журнала завёл этот шаг (неверная разминка — одна, письмо — по ошибкам). */
+  newCards: number;
 }
 
 export interface View {
@@ -198,9 +205,12 @@ export function currentStep(s: LessonStep, item: Item | null, card: ErrorCard | 
   return b;
 }
 
-export function doneStep(s: LessonStep, item: Item | null, card: ErrorCard | null): DoneStep {
-  const base = { stepId: s.id, position: s.position, part: s.part, partLabel: PART_LABELS[s.part], topicLabel: topicLabelOf(item, card), answer: s.answer, correct: s.correct, score: s.score, feedback: s.feedback, writing: null as DoneStep['writing'] };
-  if (s.part === 'review') return { ...base, kind: 'card', prompt: card?.example ?? '', written: s.answer, correction: card?.correction ?? null };
+export function doneStep(s: LessonStep, item: Item | null, card: ErrorCard | null, newCards = 0): DoneStep {
+  const base = { stepId: s.id, position: s.position, part: s.part, partLabel: PART_LABELS[s.part], topicLabel: topicLabelOf(item, card), answer: s.answer, correct: s.correct, score: s.score, feedback: s.feedback, writing: null as DoneStep['writing'], card: null as DoneStep['card'], newCards };
+  if (s.part === 'review') {
+    const c = card ? { id: card.id, due: card.due, streak: card.streak, left: card.retired ? 0 : Math.max(0, RETIRE_AFTER - card.streak), retired: card.retired } : null;
+    return { ...base, kind: 'card', prompt: card?.example ?? '', written: s.answer, correction: card?.correction ?? null, card: c };
+  }
   if (!item) return { ...base, kind: 'mcq', prompt: '', written: s.answer, correction: null };
   if (item.kind === 'mcq') {
     const opts = item.options as string[];
@@ -215,21 +225,26 @@ export function doneStep(s: LessonStep, item: Item | null, card: ErrorCard | nul
   return { ...base, kind: item.kind, prompt: item.prompt, written: s.answer, correction: item.answer };
 }
 
-async function loadRefs(store: Store, steps: LessonStep[]) {
-  const items = new Map<string, Item>(), cards = new Map<string, ErrorCard>();
-  for (const s of steps) {
-    if (s.itemId && !items.has(s.itemId)) { const it = await store.getItem(s.itemId); if (it) items.set(s.itemId, it); }
-    if (s.cardId && !cards.has(s.cardId)) { const c = await store.getCard(s.cardId); if (c) cards.set(s.cardId, c); }
+/** Ключ источника карточки, заведённой из шага занятия (письмо — с номером ошибки, см. cards.ts). */
+export const stepOrigin = (stepId: string) => `step:${stepId}`;
+
+async function loadRefs(store: Store, userId: string, steps: LessonStep[]) {
+  const items = new Map<string, Item>(), cards = new Map<string, ErrorCard>(), created = new Map<string, number>();
+  for (const s of steps) if (s.itemId && !items.has(s.itemId)) { const it = await store.getItem(s.itemId); if (it) items.set(s.itemId, it); }
+  for (const c of await store.listCards(userId)) {
+    cards.set(c.id, c);
+    const m = c.origin?.match(/^step:([^:]+)/);
+    if (m) created.set(m[1], (created.get(m[1]) ?? 0) + 1);
   }
-  return { items, cards };
+  return { items, cards, created };
 }
 
 export async function view(store: Store, l: Lesson, steps: LessonStep[], day: ProgramDay | null, today: string, lastId: string | null = null): Promise<View> {
-  const { items, cards } = await loadRefs(store, steps);
+  const { items, cards, created } = await loadRefs(store, l.userId, steps);
   const ref = (s: LessonStep) => [s.itemId ? items.get(s.itemId) ?? null : null, s.cardId ? cards.get(s.cardId) ?? null : null] as const;
   const pending = steps.find(s => s.answeredAt == null) ?? null;
   const done = steps.filter(s => s.answeredAt != null);
-  const dones = done.map(s => doneStep(s, ...ref(s)));
+  const dones = done.map(s => doneStep(s, ...ref(s), created.get(s.id) ?? 0));
   const part = (p: Part) => done.filter(s => s.part === p);
   const w = part('writing')[0];
   return {
@@ -387,7 +402,7 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, ste
     const g = gradeCard(card, raw);
     if (!g.ok) throw new LessonError('answer_invalid', undefined, g.reason);
     patch = { answer: g.answer, correct: g.correct, score: g.correct * 100, feedback: card.rule, answeredAt: ts };
-    await store.updateCard(card.id, g.correct ? { reps: card.reps + 1, due: addDays(t, REVIEW_INTERVAL.correct) } : { lapses: card.lapses + 1, due: addDays(t, REVIEW_INTERVAL.wrong) });
+    await store.updateCard(card.id, reviewPatch(card, g.correct === 1, t));
   } else {
     const item = pending.itemId ? await store.getItem(pending.itemId) : null;
     if (!item) throw new LessonError('lesson_stale', 'задание не найдено');
@@ -399,8 +414,14 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, ste
       catch (e) { throw new LessonError('lesson_eval_failed', `экзаменатор не оценил письмо: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`); }
       const score = round((w.axes.grammar + w.axes.vocabulary + w.axes.coherence + w.axes.taskResponse) / 4);
       patch = { answer: g.answer, correct: null, score, feedback: w.summary, detail: JSON.stringify(w), answeredAt: ts };
+      const fallback = cardTopicById(l.topic) ? l.topic : null;
+      await createCards(store, userId, draftsFromWriting(w.errors, stepOrigin(pending.id), fallback), t, CARD_SOURCE, opts);
     } else {
       patch = { answer: g.answer, correct: g.correct, score: g.score, feedback: g.feedback, answeredAt: ts };
+      if (g.correct === 0) {
+        const d = draftFromItem(item, g.answer, stepOrigin(pending.id));
+        if (d) await createCards(store, userId, [d], t, CARD_SOURCE, opts);
+      }
     }
   }
   await store.updateStep(pending.id, patch);

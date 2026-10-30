@@ -102,6 +102,14 @@ export function memoryStore() {
     },
     async getCard(id) { const c = cards.find(x => x.id === id); return c ? { ...c } : null; },
     async updateCard(id, patch) { const c = cards.find(x => x.id === id); if (c) patchInto(c, patch); },
+    async insertCards(list) {
+      let n = 0;
+      for (const c of list) {
+        if (cards.some(x => x.id === c.id || (c.origin != null && x.userId === c.userId && x.origin === c.origin))) continue;
+        cards.push({ ...c }); n++;
+      }
+      return n;
+    },
 
     async listProgramDays(userId) {
       return programDays.filter(d => d.userId === userId).sort((a, b) => a.dayDate.localeCompare(b.dayDate) || a.position - b.position || a.id.localeCompare(b.id)).map(d => ({ ...d }));

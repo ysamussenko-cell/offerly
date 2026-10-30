@@ -47,7 +47,7 @@ export type AssessmentResult = {
 };
 export type ErrorCard = {
   id: string; topic: string; topicLabel: string; rule: string | null; example: string | null; correction: string | null;
-  source: string | null; due: string | null; reps: number; lapses: number; retired: boolean; createdAt: string;
+  source: string | null; due: string | null; reps: number; lapses: number; streak: number; left: number; reviewedAt: string | null; retired: boolean; createdAt: string;
 };
 export type DayFormat = 'lesson' | 'rehearsal' | 'checkpoint';
 export type WritingFormat = 'review' | 'explain';
@@ -72,7 +72,9 @@ export type LessonStepDone = {
   stepId: string; position: number; part: LessonPart; partLabel: string; kind: ItemKind | 'card'; topicLabel: string | null;
   prompt: string; answer: string | null; correct: number | null; score: number | null; feedback: string | null;
   written: string | null; correction: string | null;
-  writing: { level: Level; summary: string; rewrite: string | null; errors: { original: string; corrected: string; note: string }[]; axes: { grammar: number; vocabulary: number; coherence: number; taskResponse: number } } | null;
+  writing: { level: Level; summary: string; rewrite: string | null; errors: { original: string; corrected: string; note: string; topic?: string | null }[]; axes: { grammar: number; vocabulary: number; coherence: number; taskResponse: number } } | null;
+  card: { id: string; due: string | null; streak: number; left: number; retired: boolean } | null;
+  newCards: number;
 };
 export type Lesson = {
   id: string; status: 'active' | 'finished'; date: string; day: ProgramDay | null;

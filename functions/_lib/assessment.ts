@@ -4,7 +4,9 @@
  *  задание прямо сейчас через тот же конвейер генерации с проверкой. Каждое выданное задание сразу записывается
  *  в attempts без ответа — это точка продолжения: тест можно прервать и открыть снова с того же места.
  *  Проверка ответов — сравнением с эталоном из банка: буква варианта, буквы двух вопросов, исправленное предложение.
- *  После последнего ответа письмо оценивает модель по рубрике и образцу, считаются пять осей и уровень (scoring.ts). */
+ *  После последнего ответа письмо оценивает модель по рубрике и образцу, считаются пять осей и уровень (scoring.ts);
+ *  неверные исправления и выборы варианта и ошибки письма становятся карточками журнала (cards.ts), если хранилище
+ *  карточек подключено — повторный пересчёт карточки не дублирует (ключ источника — попытка). */
 import type { Env as ProviderEnv } from './providers';
 import {
   LEVELS, TOPICS, KIND_LABELS, WRITING_WORDS, generateItems, type Domain, type Item, type ItemStore, type Kind, type Level, type ReadingQuestion, type GenerateOpts,
@@ -13,6 +15,7 @@ import {
   AXES, AXIS_LABELS, LEVEL_THRESHOLD, BAND, computeAxes, errorExamples, evaluateWriting, nextStep, parseWritingEval,
   type Axes, type Axis, type ErrorExample, type WritingEval,
 } from './scoring';
+import { createCards, draftFromItem, draftsFromWriting, type CardStore } from './cards';
 
 export const ADAPTIVE_COUNT = 12;
 export const TOTAL = ADAPTIVE_COUNT + 2; // + чтение + письмо
@@ -91,7 +94,12 @@ export interface AssessmentStore {
   usedItemIds(userId: string): Promise<Set<string>>;
 }
 
-export type Store = AssessmentStore & ItemStore;
+export type Store = AssessmentStore & ItemStore & Partial<CardStore>;
+
+/** Источник карточек, заведённых из ошибок теста. */
+export const CARD_SOURCE = 'assessment';
+/** Ключ источника карточки из попытки теста (письмо — с номером ошибки, см. cards.ts). */
+export const attemptOrigin = (attemptId: string) => `attempt:${attemptId}`;
 
 // ---------- план и ход теста ----------
 
@@ -414,7 +422,21 @@ export async function score(env: ProviderEnv, store: Store, a: Assessment, attem
   const patch: AssessmentPatch = { axes: s.axes, overall: s.overall, level: s.level, scoredAt: ts, scoringNote: note, updatedAt: ts };
   await store.updateAssessment(a.id, patch);
   Object.assign(a, patch);
+  if (store.insertCards && store.listCards && store.updateCard) await cardsFromAttempts(store as Store & CardStore, a.userId, attempts, items, writing, wa ?? null, ts.slice(0, 10), opts);
   return a;
+}
+
+/** Карточки журнала из ошибок теста: неверные исправления и выборы варианта, до трёх ошибок письма (тема — от экзаменатора). */
+export async function cardsFromAttempts(store: CardStore, userId: string, attempts: Attempt[], items: Map<string, Item>, writing: WritingEval | null, wa: Attempt | null, today: string, opts: RunOpts = {}) {
+  const drafts = [];
+  for (const x of attempts) {
+    if (x.answeredAt == null || x.correct !== 0) continue;
+    const item = items.get(x.itemId);
+    const d = item ? draftFromItem(item, x.answer, attemptOrigin(x.id)) : null;
+    if (d) drafts.push(d);
+  }
+  if (writing && wa) drafts.push(...draftsFromWriting(writing.errors, attemptOrigin(wa.id), null));
+  return createCards(store, userId, drafts, today, CARD_SOURCE, opts);
 }
 
 /** Пересчитать последний завершённый тест: письмо оценивается заново, если прошлая оценка не удалась (или force). */
