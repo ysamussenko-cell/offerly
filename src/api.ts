@@ -1,14 +1,18 @@
 export type User = { id: string; email: string; name: string | null; locale: string; tz: string };
+export type Profile = {
+  specialty: string | null; industry: string | null; years: number | null; targetRole: string | null; keywords: string[];
+  summary: string | null; resumeName: string | null; resumeAt: string | null; resumeChars: number; analyzed: boolean; updatedAt: string;
+};
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string) { super(code); }
+  constructor(public status: number, public code: string, public body: any = {}) { super(code); }
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const r = await fetch(`/api${path}`, { credentials: 'same-origin', ...init });
   const j: any = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, j.error ?? 'request_failed');
+  if (!r.ok) throw new ApiError(r.status, j.error ?? 'request_failed', j);
   return j as T;
 }
 
@@ -21,6 +25,14 @@ export const api = {
   requestCode: (email: string) => post<{ ok: true; delivery: 'email' | 'echo'; code?: string; expiresAt: string }>('/auth/request', { email }),
   verifyCode: (email: string, code: string) => post<{ ok: true; user: User; isNew: boolean }>('/auth/verify', { email, code }),
   logout: () => post<{ ok: true }>('/auth/logout', {}),
+  profile: () => call<{ ok: true; profile: Profile | null }>('/profile'),
+  uploadResume: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return call<{ ok: true; profile: Profile }>('/resume', { method: 'POST', body: fd });
+  },
+  pasteResume: (text: string) => post<{ ok: true; profile: Profile }>('/resume', { text }),
+  analyzeResume: () => post<{ ok: true; profile: Profile }>('/resume/analyze', {}),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -34,6 +46,13 @@ export const ERRORS: Record<string, string> = {
   wrong_code: 'Код не подошёл. Проверьте цифры в письме.',
   locked: 'Пять неверных попыток. Запросите новый код.',
   unauthorized: 'Сессия закончилась. Войдите снова.',
+  resume_missing: 'Файл не пришёл. Выберите PDF, DOCX или TXT.',
+  resume_unsupported: 'Такой формат не читаю. Нужен PDF, DOCX или обычный текст.',
+  resume_too_large: 'Файл больше 8 МБ. Сохраните резюме без картинок или вставьте текст.',
+  resume_unreadable: 'Файл повреждён или защищён — открыть не удалось. Попробуйте сохранить его заново.',
+  resume_no_text: 'В файле нет текстового слоя — похоже, это скан. Вставьте текст резюме вручную.',
+  resume_too_short: 'Текста мало — меньше двухсот знаков. Нужно полное резюме, а не заголовок.',
+  profile_failed: 'Текст сохранён, но модель не смогла собрать профиль. Нажмите «Разобрать снова».',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 

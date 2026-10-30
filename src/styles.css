@@ -27,3 +27,17 @@ code, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .btn:disabled { opacity: .5; cursor: default; }
 .link { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; text-decoration: underline; cursor: pointer; }
 .link:disabled { opacity: .5; cursor: default; }
+.field textarea { font: inherit; font-size: 15px; line-height: 1.5; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; outline: none; resize: vertical; min-height: 160px; }
+.field textarea:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(242, 165, 65, .25); }
+.tab { background: transparent; border: 1px solid var(--line); color: var(--muted); font: inherit; font-size: 14px; font-weight: 500; border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+.tab.active { border-color: var(--graphite); color: var(--ink); font-weight: 600; }
+@media (prefers-color-scheme: dark) { .tab.active { border-color: var(--amber); } }
+.tab:disabled { opacity: .5; cursor: default; }
+.drop { margin-top: 16px; border: 1.5px dashed var(--line); border-radius: 16px; padding: 28px 24px; text-align: center; background: var(--paper); transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--amber); background: rgba(242, 165, 65, .08); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 24px; margin: 12px 0 0; }
+.facts div { display: flex; flex-direction: column; gap: 2px; }
+.facts dt { font-size: 13px; color: var(--muted); }
+.facts dd { margin: 0; font-family: Manrope, Inter, sans-serif; font-weight: 600; font-size: 18px; }
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; }
+.chips li { font-size: 13px; padding: 4px 10px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); }

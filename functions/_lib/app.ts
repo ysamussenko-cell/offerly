@@ -5,18 +5,26 @@ import {
   sessionCookie, clearSessionCookie, SESSION_COOKIE, CODE_TTL_SEC, type AuthStore, type User,
 } from './auth';
 import { loginCodeMail, sendMail, type MailEnv } from './mail';
+import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normalizeText } from './extract';
+import { analyzeResume, d1ProfileStore, publicProfile, type ProfileStore } from './profile';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-type Vars = { store: AuthStore; auth: { user: User; sessionId: string } | null };
+export type Store = AuthStore & ProfileStore;
+
+type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
 const publicUser = (u: User) => ({ id: u.id, email: u.email, name: u.name, locale: u.locale, tz: u.tz });
 
+const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
+  resume_unsupported: 415, resume_too_large: 413, resume_unreadable: 422, resume_no_text: 422, resume_too_short: 400,
+};
+
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => AuthStore = env => d1Store(env.DB)) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -94,6 +102,64 @@ export function createApp(version: string, makeStore: (env: Env) => AuthStore = 
   });
 
   app.get('/me', requireAuth, (c) => c.json({ ok: true, user: publicUser(c.get('auth')!.user) }));
+
+  // --- резюме и профиль ---
+
+  app.get('/profile', requireAuth, async (c) => {
+    const p = await c.get('store').getProfile(c.get('auth')!.user.id);
+    return c.json({ ok: true, profile: p ? publicProfile(p) : null });
+  });
+
+  /** Загрузка резюме: multipart с полем file (PDF, DOCX, TXT) или JSON {text}. Текст сохраняется сразу,
+   *  затем модель строит профиль; если разбор не удался — 502, текст остаётся, можно повторить /resume/analyze. */
+  app.post('/resume', requireAuth, async (c) => {
+    const userId = c.get('auth')!.user.id;
+    const ct = c.req.header('content-type') ?? '';
+    let text: string; let name: string | null = null;
+    try {
+      if (ct.includes('multipart/form-data')) {
+        const len = Number(c.req.header('content-length') ?? 0);
+        if (len > MAX_FILE_BYTES + 4096) return c.json({ ok: false, error: 'resume_too_large' }, 413);
+        const body = await c.req.parseBody();
+        const file = body.file;
+        if (!(file instanceof File)) return c.json({ ok: false, error: 'resume_missing' }, 400);
+        name = file.name.slice(0, 200);
+        text = (await extractResumeText(file.name, file.type, await file.arrayBuffer())).text;
+      } else {
+        const body = await c.req.json().catch(() => ({}));
+        text = normalizeText(typeof body.text === 'string' ? body.text : '');
+        if (text.length < MIN_TEXT_CHARS) return c.json({ ok: false, error: 'resume_too_short' }, 400);
+        name = 'текст';
+      }
+    } catch (e) {
+      if (e instanceof ExtractError) return c.json({ ok: false, error: e.code }, EXTRACT_STATUS[e.code] as 400);
+      throw e;
+    }
+    const now = new Date().toISOString();
+    await c.get('store').saveResume(userId, text, name, now);
+    return analyze(c, userId, text);
+  });
+
+  /** Повторный разбор уже сохранённого текста резюме. */
+  app.post('/resume/analyze', requireAuth, async (c) => {
+    const userId = c.get('auth')!.user.id;
+    const p = await c.get('store').getProfile(userId);
+    if (!p?.resumeText) return c.json({ ok: false, error: 'resume_missing' }, 400);
+    return analyze(c, userId, p.resumeText);
+  });
+
+  async function analyze(c: any, userId: string, text: string) {
+    try {
+      const a = await analyzeResume(c.env, text);
+      await c.get('store').saveAnalysis(userId, a, new Date().toISOString());
+    } catch (e) {
+      console.error('profile analysis failed', e instanceof Error ? e.message : e);
+      const p = await c.get('store').getProfile(userId);
+      return c.json({ ok: false, error: 'profile_failed', profile: p ? publicProfile(p) : null }, 502);
+    }
+    const p = await c.get('store').getProfile(userId);
+    return c.json({ ok: true, profile: p ? publicProfile(p) : null });
+  }
 
   return app;
 }

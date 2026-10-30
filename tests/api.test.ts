@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { createApp, type Env } from '../functions/_lib/app';
 import { memoryStore } from './helpers/memoryStore';
 import { loginCodeMail, sendMail } from '../functions/_lib/mail';
+import { makeDocx, makePdf, SAMPLE_RESUME } from './helpers/fixtures';
 
-function makeApp(envExtra: Partial<Env> = {}) {
+function makeApp(envExtra: Partial<Env> = {}, aiRun: (...a: any[]) => Promise<any> = async () => ({ response: 'hi' })) {
   const mem = memoryStore();
-  const env = { DB: null, AI: { run: async () => ({ response: 'hi' }) }, APP_NAME: 'Offerly', ...envExtra } as unknown as Env;
+  const env = { DB: null, AI: { run: aiRun }, APP_NAME: 'Offerly', ...envExtra } as unknown as Env;
   const app = createApp('test', () => mem.store);
   const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -91,6 +92,114 @@ describe('API входа', () => {
     const j: any = await (await call('/health')).json();
     expect(j.mail).toBe('missing');
     expect(j.version).toBe('test');
+  });
+});
+
+const PROFILE_JSON = JSON.stringify({
+  specialty: 'инженер-теплоэнергетик', industry: 'энергетика', years: 15, target_role: null,
+  keywords: ['boiler efficiency', 'energy audit', 'steam turbine'], summary: 'Вы инженер-теплоэнергетик с опытом пятнадцать лет.',
+});
+
+/** Вход тестового пользователя: возвращает заголовок cookie. */
+async function signIn(post: ReturnType<typeof makeApp>['post'], email = 'yuriy@example.com') {
+  const j1: any = await (await post('/auth/request', { email })).json();
+  const r2 = await post('/auth/verify', { email, code: j1.code });
+  return { cookie: r2.headers.get('set-cookie')!.split(';')[0] };
+}
+
+describe('API резюме и профиля', () => {
+  it('без сессии — 401', async () => {
+    const { call, post } = makeApp();
+    expect((await call('/profile')).status).toBe(401);
+    expect((await post('/resume', { text: 'x' })).status).toBe(401);
+    expect((await post('/resume/analyze', {})).status).toBe(401);
+  });
+
+  it('до загрузки профиль пуст', async () => {
+    const { call, post } = makeApp({ DEV_ECHO_CODE: '1' });
+    const { cookie } = await signIn(post);
+    const j: any = await (await call('/profile', { headers: { cookie } })).json();
+    expect(j).toEqual({ ok: true, profile: null });
+  });
+
+  it('DOCX → текст → профиль через модель', async () => {
+    const aiRun = vi.fn(async (_model: string, input: any) => {
+      expect(input.messages[1].content).toContain('Thermal Power Engineer');
+      return { response: PROFILE_JSON };
+    });
+    const { call, post, mem } = makeApp({ DEV_ECHO_CODE: '1' }, aiRun);
+    const { cookie } = await signIn(post);
+    const fd = new FormData();
+    fd.append('file', new File([makeDocx(SAMPLE_RESUME) as BlobPart], 'resume.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+    const r = await call('/resume', { method: 'POST', headers: { cookie }, body: fd });
+    expect(r.status).toBe(200);
+    const j: any = await r.json();
+    expect(j.profile.specialty).toBe('инженер-теплоэнергетик');
+    expect(j.profile.years).toBe(15);
+    expect(j.profile.keywords).toEqual(['boiler efficiency', 'energy audit', 'steam turbine']);
+    expect(j.profile.resumeName).toBe('resume.docx');
+    expect(j.profile.analyzed).toBe(true);
+    expect(j.profile.resumeText).toBeUndefined();
+    expect(aiRun).toHaveBeenCalledTimes(1);
+    const stored = [...mem.profiles.values()][0];
+    expect(stored.resumeText).toContain('energy audit');
+  });
+
+  it('PDF и вставленный текст тоже принимаются', async () => {
+    const { call, post } = makeApp({ DEV_ECHO_CODE: '1' }, async () => ({ response: PROFILE_JSON }));
+    const { cookie } = await signIn(post);
+    const fd = new FormData();
+    fd.append('file', new File([makePdf(SAMPLE_RESUME) as BlobPart], 'cv.pdf', { type: 'application/pdf' }));
+    expect((await call('/resume', { method: 'POST', headers: { cookie }, body: fd })).status).toBe(200);
+    const r = await post('/resume', { text: SAMPLE_RESUME.join('\n') }, { cookie });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as any).profile.resumeName).toBe('текст');
+  });
+
+  it('ошибки файла — понятные коды', async () => {
+    const { call, post } = makeApp({ DEV_ECHO_CODE: '1' });
+    const { cookie } = await signIn(post);
+    const send = async (name: string, bytes: Uint8Array, type?: string) => {
+      const fd = new FormData();
+      fd.append('file', new File([bytes as BlobPart], name, type ? { type } : undefined));
+      const r = await call('/resume', { method: 'POST', headers: { cookie }, body: fd });
+      return { status: r.status, error: ((await r.json()) as any).error };
+    };
+    const junk = new Uint8Array(400); for (let i = 0; i < junk.length; i++) junk[i] = (i * 7) % 5;
+    expect(await send('cv.dat', junk)).toEqual({ status: 415, error: 'resume_unsupported' });
+    expect(await send('scan.pdf', makePdf([]))).toEqual({ status: 422, error: 'resume_no_text' });
+    expect(await send('cv.txt', new TextEncoder().encode('коротко'), 'text/plain')).toEqual({ status: 400, error: 'resume_too_short' });
+    expect((await post('/resume', { text: 'коротко' }, { cookie })).status).toBe(400);
+    const empty = new FormData(); empty.append('other', 'x');
+    expect((await call('/resume', { method: 'POST', headers: { cookie }, body: empty })).status).toBe(400);
+  });
+
+  it('модель не ответила JSON — 502, текст сохранён, повтор через /resume/analyze', async () => {
+    let calls = 0;
+    const aiRun = async () => ({ response: ++calls <= 2 ? 'I am not able to help.' : PROFILE_JSON });
+    const { call, post, mem } = makeApp({ DEV_ECHO_CODE: '1' }, aiRun);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { cookie } = await signIn(post);
+      const r = await post('/resume', { text: SAMPLE_RESUME.join('\n') }, { cookie });
+      expect(r.status).toBe(502);
+      const j: any = await r.json();
+      expect(j.error).toBe('profile_failed');
+      expect(j.profile.analyzed).toBe(false);
+      expect(j.profile.resumeChars).toBeGreaterThan(200);
+      expect([...mem.profiles.values()][0].resumeText).toContain('Almaty');
+
+      const r2 = await post('/resume/analyze', {}, { cookie });
+      expect(r2.status).toBe(200);
+      expect(((await r2.json()) as any).profile.industry).toBe('энергетика');
+      expect(calls).toBe(3);
+    } finally { errSpy.mockRestore(); }
+  });
+
+  it('повторный разбор без резюме — 400', async () => {
+    const { post } = makeApp({ DEV_ECHO_CODE: '1' });
+    const { cookie } = await signIn(post);
+    expect((await post('/resume/analyze', {}, { cookie })).status).toBe(400);
   });
 });
 

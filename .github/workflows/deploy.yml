@@ -89,3 +89,7 @@ jobs:
           REQ=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"email":"bad"}' "$P/api/auth/request")
           echo "::notice title=auth::GET /api/me без cookie → $ME (ждём 401); POST /api/auth/request с плохим адресом → $REQ (ждём 400)"
           [ "$ME" = "401" ] && [ "$REQ" = "400" ] || { echo "::error title=auth::неожиданные коды ответа"; exit 1; }
+          PROF=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/profile")
+          RES=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F 'file=@health.json;filename=cv.txt' "$P/api/resume")
+          echo "::notice title=resume::GET /api/profile без cookie → $PROF (ждём 401); POST /api/resume без cookie → $RES (ждём 401)"
+          [ "$PROF" = "401" ] && [ "$RES" = "401" ] || { echo "::error title=resume::неожиданные коды ответа"; exit 1; }

@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
-import { api, type Health, type User } from './api';
+import { api, type Health, type Profile, type User } from './api';
 import Login from './screens/Login';
+import Resume, { ProfileCard } from './screens/Resume';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
+type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [auth, setAuth] = useState<Auth>({ state: 'loading' });
+  const [profile, setProfile] = useState<ProfileState>({ state: 'loading' });
+  const [replacing, setReplacing] = useState(false);
   const [installEvt, setInstallEvt] = useState<any>(null);
 
   useEffect(() => {
@@ -17,9 +21,16 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', onPrompt);
   }, []);
 
+  useEffect(() => {
+    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); return; }
+    api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
+  }, [auth.state]);
+
   async function signOut() {
     try { await api.logout(); } finally { setAuth({ state: 'anonymous' }); }
   }
+
+  function gotProfile(p: Profile) { setProfile({ state: 'ready', profile: p }); setReplacing(false); }
 
   return (
     <main className="wrap">
@@ -48,19 +59,19 @@ export default function App() {
         </>
       )}
 
+      {auth.state === 'in' && profile.state === 'loading' && <section className="card"><p className="muted">Загружаю профиль…</p></section>}
+
+      {auth.state === 'in' && profile.state === 'ready' && (profile.profile === null || replacing
+        ? <Resume profile={profile.profile} onProfile={gotProfile} onCancel={replacing ? () => setReplacing(false) : undefined} />
+        : <ProfileCard profile={profile.profile} onReplace={() => setReplacing(true)}
+            onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }} />
+      )}
+
       {auth.state === 'in' && (
-        <section className="card">
-          <h2>{auth.isNew ? 'Учётная запись создана' : 'С возвращением'}</h2>
-          <p className="muted">
-            {auth.isNew
-              ? 'Следующий шаг — резюме: по нему тренер поймёт вашу специальность и подберёт задания. Загрузка появится в ближайшем обновлении.'
-              : 'Профиль и программа появятся здесь по мере готовности следующих этапов.'}
-          </p>
-          <div className="row" style={{ marginTop: 16 }}>
-            <button className="btn" onClick={() => installEvt?.prompt()} disabled={!installEvt}>Установить приложение</button>
-            <a className="btn secondary" href="/api/health">Состояние сервиса</a>
-          </div>
-        </section>
+        <div className="row" style={{ marginTop: 16 }}>
+          <button className="btn secondary" onClick={() => installEvt?.prompt()} disabled={!installEvt}>Установить приложение</button>
+          <a className="link" href="/api/health">Состояние сервиса</a>
+        </div>
       )}
 
       <section className="card" style={{ marginTop: 16 }}>
