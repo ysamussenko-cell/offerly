@@ -115,7 +115,7 @@ export function ProgramCard({ refreshKey, interviewDate }: Props) {
               );
             })}
           </div>
-          <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Занятия по дням программы начнутся со следующей задачи (3.2); пересборка не трогает пройденные дни и начало программы.</p>
+          <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Занятие дня — в карточке «Сегодня»; пройденный день получает отметку и балл. Пересборка не трогает пройденные дни и начало программы.</p>
         </>
       )}
       {state.error && <p className="error" role="alert" style={{ marginTop: 12 }}>{state.error}</p>}

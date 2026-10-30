@@ -8,6 +8,7 @@ import { BankCard } from './screens/Bank';
 import Assessment, { TestCard, type Mode } from './screens/Assessment';
 import { JournalCard } from './screens/Journal';
 import { ProgramCard } from './screens/Program';
+import Lesson, { LessonCard } from './screens/Lesson';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -22,6 +23,8 @@ export default function App() {
   /** Экран теста уровня открыт; счётчик — чтобы карточка перечитала состояние после закрытия. */
   const [testing, setTesting] = useState<Mode | null>(null);
   const [testRuns, setTestRuns] = useState(0);
+  /** Экран дневного занятия открыт. */
+  const [lesson, setLesson] = useState(false);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false, version: '-', db: 'error', ai: 'error' }));
@@ -29,7 +32,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); return; }
+    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); setLesson(false); return; }
     api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
   }, [auth.state]);
 
@@ -86,12 +89,17 @@ export default function App() {
         <Questionnaire profile={ready} user={auth.user} onSaved={gotAnswers} onCancel={() => setSurvey('closed')} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && testing && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && testing && (
         <Assessment mode={testing} onClose={() => { setTesting(null); setTestRuns(n => n + 1); }} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && lesson && (
+        <Lesson onClose={() => { setLesson(false); setTestRuns(n => n + 1); }} />
+      )}
+
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && !lesson && (
         <div className="stack" style={{ marginTop: 0 }}>
+          {ready.analyzed && <LessonCard refreshKey={testRuns} onOpen={() => setLesson(true)} />}
           {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}
           {ready.analyzed && <TestCard onOpen={setTesting} refreshKey={testRuns} />}
           {ready.analyzed && <JournalCard refreshKey={testRuns} />}

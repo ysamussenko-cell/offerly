@@ -63,6 +63,29 @@ export type Program = {
   days: ProgramDay[];
 };
 export type ProgramResponse = { ok: true; days: number; topics: { id: string; label: string }[]; program: Program | null };
+export type LessonPart = 'warmup' | 'writing' | 'review';
+export type LessonStepCurrent = {
+  stepId: string; position: number; part: LessonPart; partLabel: string; kind: ItemKind | 'card'; kindLabel: string; level: Level | null;
+  topicLabel: string | null; prompt: string; options?: string[]; words?: { min: number; max: number };
+};
+export type LessonStepDone = {
+  stepId: string; position: number; part: LessonPart; partLabel: string; kind: ItemKind | 'card'; topicLabel: string | null;
+  prompt: string; answer: string | null; correct: number | null; score: number | null; feedback: string | null;
+  written: string | null; correction: string | null;
+  writing: { level: Level; summary: string; rewrite: string | null; errors: { original: string; corrected: string; note: string }[]; axes: { grammar: number; vocabulary: number; coherence: number; taskResponse: number } } | null;
+};
+export type Lesson = {
+  id: string; status: 'active' | 'finished'; date: string; day: ProgramDay | null;
+  topic: string; topicLabel: string; writing: WritingFormat | null; writingLabel: string | null; level: Level; minutes: number | null;
+  total: number; answered: number;
+  parts: { warmup: { total: number; done: number; correct: number }; writing: { done: boolean; score: number | null }; review: { total: number; done: number; correct: number } };
+  current: LessonStepCurrent | null; steps: LessonStepDone[]; last: LessonStepDone | null;
+  score: number | null; startedAt: string; finishedAt: string | null;
+};
+export type LessonToday = {
+  ok: true; warmup: number; reviewMax: number; today: string; day: ProgramDay | null; available: boolean;
+  reason: 'no_program' | 'no_day' | 'rehearsal' | 'checkpoint' | null; lesson: Lesson | null;
+};
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -110,6 +133,9 @@ export const api = {
   program: () => call<ProgramResponse>('/program'),
   generateProgram: () => post<ProgramResponse>('/program/generate', {}),
   swapProgramDays: (a: string, b: string) => post<ProgramResponse>('/program/swap', { a, b }),
+  lesson: () => call<LessonToday>('/lesson'),
+  startLesson: () => post<{ ok: true; lesson: Lesson }>('/lesson/start', {}),
+  answerLesson: (stepId: string, answer: string) => post<{ ok: true; lesson: Lesson }>('/lesson/answer', { stepId, answer }),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -139,6 +165,11 @@ export const ERRORS: Record<string, string> = {
   answer_invalid: 'Ответ не принят: проверьте, что он заполнен.',
   bank_empty: 'В банке нет подходящего задания, и модель не смогла написать новое. Пополните банк и попробуйте снова.',
   program_invalid: 'Переставить не получилось: менять местами можно только два ещё не пройденных занятия, не раньше сегодняшнего дня.',
+  lesson_no_day: 'На сегодня нет дня программы. Составьте программу в карточке «Программа».',
+  lesson_unavailable: 'Сегодня по программе не занятие: репетиция интервью и контрольный срез появятся в следующих версиях.',
+  lesson_none: 'Активного занятия на сегодня нет. Вернитесь на главную и начните занятие.',
+  lesson_stale: 'Этот шаг уже закрыт — экран обновлён, ответьте на текущий.',
+  lesson_eval_failed: 'Модель не оценила письмо. Текст на месте — отправьте ещё раз через минуту.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 

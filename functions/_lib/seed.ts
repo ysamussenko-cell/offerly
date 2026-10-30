@@ -61,7 +61,7 @@ export function baselineScore(): Scored {
   const attempts: Attempt[] = [];
   const stub = (id: string, kind: Kind, level: Level): Item => ({
     id, kind, level, topic: 'tenses', domain: null, prompt: '', options: null, answer: '', rubric: null, explanation: null,
-    status: 'verified', checkNote: null, checkedLevel: null, fingerprint: id, source: SEED_SOURCE, createdAt: BASELINE.startedAt, verifiedAt: null,
+    status: 'verified', checkNote: null, checkedLevel: null, fingerprint: id, source: SEED_SOURCE, writingFormat: null, createdAt: BASELINE.startedAt, verifiedAt: null,
   });
   const push = (kind: Kind, level: Level, correct: number | null, score: number | null) => {
     const position = attempts.length + 1, id = `baseline-${position}`;

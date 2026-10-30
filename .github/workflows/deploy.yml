@@ -125,6 +125,11 @@ jobs:
           PRSW=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"a":"x","b":"y"}' "$P/api/program/swap")
           echo "::notice title=program::GET /api/program без cookie → $PRG; POST /api/program/generate → $PRGEN; POST /api/program/swap → $PRSW (ждём 401 везде)"
           [ "$PRG" = "401" ] && [ "$PRGEN" = "401" ] && [ "$PRSW" = "401" ] || { echo "::error title=program::неожиданные коды ответа"; exit 1; }
+          LSN=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/lesson")
+          LST=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/lesson/start")
+          LSA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"stepId":"x","answer":"A"}' "$P/api/lesson/answer")
+          echo "::notice title=lesson::GET /api/lesson без cookie → $LSN; POST /api/lesson/start → $LST; POST /api/lesson/answer → $LSA (ждём 401 везде)"
+          [ "$LSN" = "401" ] && [ "$LST" = "401" ] && [ "$LSA" = "401" ] || { echo "::error title=lesson::неожиданные коды ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'

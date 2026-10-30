@@ -77,7 +77,7 @@ export interface ProgramDay {
   updatedAt: string | null;
 }
 
-export type ProgramDayPatch = Partial<Pick<ProgramDay, 'topic' | 'reason' | 'updatedAt'>>;
+export type ProgramDayPatch = Partial<Pick<ProgramDay, 'topic' | 'reason' | 'updatedAt' | 'status' | 'score' | 'completedAt'>>;
 
 export interface ProgramStore {
   /** Дни программы пользователя по дате. */
@@ -85,6 +85,7 @@ export interface ProgramStore {
   getProgramDay(id: string): Promise<ProgramDay | null>;
   /** Удаляет ещё не пройденные (planned) дни с даты fromDate и вставляет новые — одной пачкой. Пройденные дни остаются. */
   replacePlannedDays(userId: string, fromDate: string, days: ProgramDay[]): Promise<void>;
+  /** Перестановка темы (3.1) и итог занятия дня: status, score, completedAt (3.2). */
   updateProgramDay(id: string, patch: ProgramDayPatch): Promise<void>;
 }
 
@@ -393,7 +394,7 @@ export function d1ProgramStore(db: D1Database): ProgramStore {
   const insert = (d: ProgramDay) => db.prepare(
     'INSERT INTO program_days (id, user_id, day_date, topic, format, status, minutes, score, completed_at, writing, week, position, reason, generated_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ).bind(d.id, d.userId, d.dayDate, d.topic, d.format, d.status, d.minutes, d.score, d.completedAt, d.writing, d.week, d.position, d.reason, d.generatedAt, d.updatedAt);
-  const COLS: Record<string, string> = { topic: 'topic', reason: 'reason', updatedAt: 'updated_at' };
+  const COLS: Record<string, string> = { topic: 'topic', reason: 'reason', updatedAt: 'updated_at', status: 'status', score: 'score', completedAt: 'completed_at' };
   return {
     async listProgramDays(userId) {
       const rs = await db.prepare('SELECT * FROM program_days WHERE user_id = ? ORDER BY day_date, position, id').bind(userId).all();

@@ -12,13 +12,14 @@ import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_
 import { d1CardStore, publicCard, CARD_TOPICS, type CardStore } from './cards';
 import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
 import { d1ProgramStore, generateProgram, swapDays, current as currentProgram, ProgramError, PROGRAM_TOPICS, PROGRAM_DAYS, type ProgramStore } from './program';
+import { d1LessonStore, today as lessonToday, startOrResume as startLesson, answer as answerLesson, LessonError, WARMUP_COUNT, REVIEW_MAX, type LessonStore } from './lesson';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -29,7 +30,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -314,6 +315,39 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const p = await c.get('store').getProfile(user.id);
     try { return c.json({ ok: true, days: PROGRAM_DAYS, topics: programTopics, program: await swapDays(c.get('store'), user.id, user.tz, p, body.a, body.b) }); }
     catch (e) { return programFail(c, e); }
+  });
+
+  // --- дневное занятие ---
+
+  const LESSON_STATUS: Record<LessonError['code'], number> = { lesson_no_day: 404, lesson_unavailable: 409, lesson_none: 404, lesson_stale: 409, answer_invalid: 400, bank_empty: 502, lesson_eval_failed: 502 };
+  const lessonFail = (c: any, e: unknown) => {
+    if (e instanceof LessonError) return c.json({ ok: false, error: e.code, reason: e.reason, detail: e.message !== e.code ? e.message : undefined }, LESSON_STATUS[e.code]);
+    throw e;
+  };
+  const lessonMeta = { warmup: WARMUP_COUNT, reviewMax: REVIEW_MAX };
+
+  /** Сегодня: день программы (доступно ли занятие и почему нет) и занятие по нему — активное с текущим шагом или завершённое с итогом. */
+  app.get('/lesson', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const r = await lessonToday(c.get('store'), user.id, user.tz);
+    return c.json({ ok: true, ...lessonMeta, today: r.today, day: r.info.day, available: r.info.available, reason: r.info.reason, lesson: r.lesson });
+  });
+
+  /** Начать занятие дня или продолжить: возвращает текущий шаг. Если банк пуст по теме — модель пишет задание (до минуты). */
+  app.post('/lesson/start', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    try { return c.json({ ok: true, ...lessonMeta, lesson: await startLesson(c.env, c.get('store'), user.id, user.tz, await domainOf(c)) }); }
+    catch (e) { return lessonFail(c, e); }
+  });
+
+  /** Ответ на текущий шаг: {stepId, answer}. Разминка и карточки проверяются сравнением с эталоном, письмо — моделью
+   *  по рубрике и образцу (при сбое модели — lesson_eval_failed 502, ответ не записан, можно отправить снова).
+   *  В ответе last — разбор только что отвеченного шага, current — следующий. */
+  app.post('/lesson/answer', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json({ ok: true, ...lessonMeta, lesson: await answerLesson(c.env, c.get('store'), user.id, body.stepId, body.answer, user.tz, await domainOf(c)) }); }
+    catch (e) { return lessonFail(c, e); }
   });
 
   return app;

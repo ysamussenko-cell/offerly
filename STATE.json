@@ -1,5 +1,5 @@
 {
-  "current_task": null,
+  "current_task": "3.2 Дневное занятие — код готов, тесты и сборка проходят, ждёт деплоя 0.10.0",
   "last_completed": "3.1 Генератор программы на четыре недели: functions/_lib/program.ts (errorProfile из карточек, ошибок теста и осей; layout — воскресенье репетиция, суббота смешанное повторение, срезы на 14/28; assignTopics по весам с чередованием; письмо review/explain по очереди), миграция 0009 (program_days.writing/week/position/reason/generated_at/updated_at), маршруты GET /api/program, POST /api/program/generate, POST /api/program/swap, экран src/screens/Program.tsx (карточка «Программа» с неделями и перестановкой тем)",
   "last_deploy": {
     "status": "ok",

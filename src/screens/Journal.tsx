@@ -32,7 +32,7 @@ export function JournalCard({ refreshKey }: Props) {
         <>
           <p style={{ marginTop: 0 }}>
             {cardsText(active.length)} к повтору{retired ? `, ${retired} погашено` : ''}.
-            <span className="muted"> Повторы по интервалам начнутся вместе с ежедневными занятиями.</span>
+            <span className="muted"> Карточки со сроком на сегодня повторяются в конце дневного занятия; интервалы по FSRS — следующая задача.</span>
           </p>
           <ul className="chips" style={{ marginBottom: 10 }}>
             {[...topics.entries()].map(([label, n]) => <li key={label}>{label}{n > 1 ? ` · ${n}` : ''}</li>)}

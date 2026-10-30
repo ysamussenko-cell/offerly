@@ -5,6 +5,7 @@ import type { Item, ItemStore } from '../../functions/_lib/items';
 import type { Assessment, AssessmentStore, Attempt } from '../../functions/_lib/assessment';
 import type { CardStore, ErrorCard } from '../../functions/_lib/cards';
 import type { ProgramDay, ProgramStore } from '../../functions/_lib/program';
+import type { Lesson, LessonStep, LessonStore } from '../../functions/_lib/lesson';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -17,12 +18,15 @@ export function memoryStore() {
   const attempts: Attempt[] = [];
   const cards: ErrorCard[] = [];
   const programDays: ProgramDay[] = [];
+  const lessons: Lesson[] = [];
+  const steps: LessonStep[] = [];
+  const patchInto = (target: any, patch: object) => Object.assign(target, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
     interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -96,6 +100,8 @@ export function memoryStore() {
       const key = (c: ErrorCard) => `${c.retired ? 1 : 0}|${c.due == null ? 1 : 0}|${c.due ?? ''}|${c.createdAt}|${c.id}`;
       return cards.filter(c => c.userId === userId).sort((a, b) => key(a).localeCompare(key(b))).map(c => ({ ...c }));
     },
+    async getCard(id) { const c = cards.find(x => x.id === id); return c ? { ...c } : null; },
+    async updateCard(id, patch) { const c = cards.find(x => x.id === id); if (c) patchInto(c, patch); },
 
     async listProgramDays(userId) {
       return programDays.filter(d => d.userId === userId).sort((a, b) => a.dayDate.localeCompare(b.dayDate) || a.position - b.position || a.id.localeCompare(b.id)).map(d => ({ ...d }));
@@ -105,7 +111,15 @@ export function memoryStore() {
       for (let i = programDays.length - 1; i >= 0; i--) { const d = programDays[i]; if (d.userId === userId && d.status === 'planned' && d.dayDate >= fromDate) programDays.splice(i, 1); }
       for (const d of days) programDays.push({ ...d });
     },
-    async updateProgramDay(id, patch) { const d = programDays.find(x => x.id === id); if (d) Object.assign(d, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); },
+    async updateProgramDay(id, patch) { const d = programDays.find(x => x.id === id); if (d) patchInto(d, patch); },
+
+    async createLesson(l) { lessons.push({ ...l }); },
+    async updateLesson(id, patch) { const l = lessons.find(x => x.id === id); if (l) patchInto(l, patch); },
+    async lessonForDay(userId, dayDate) { const l = lessons.filter(x => x.userId === userId && x.dayDate === dayDate).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return l ? { ...l } : null; },
+    async insertStep(s) { steps.push({ ...s }); },
+    async updateStep(id, patch) { const s = steps.find(x => x.id === id); if (s) patchInto(s, patch); },
+    async listSteps(lessonId) { return steps.filter(s => s.lessonId === lessonId).sort((p, q) => p.position - q.position).map(s => ({ ...s })); },
+    async usedLessonItemIds(userId) { return new Set(steps.filter(s => s.userId === userId && s.itemId).map(s => s.itemId as string)); },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps };
 }

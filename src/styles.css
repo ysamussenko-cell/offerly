@@ -165,3 +165,17 @@ fieldset.field legend { padding: 0; margin-bottom: 6px; }
 .tag.ok { color: var(--mint-text); border-color: var(--mint); }
 .tag.today { color: var(--amber-text); border-color: var(--amber); }
 @media (max-width: 480px) { .day { gap: 10px; padding: 10px; } .day-date { min-width: 40px; } }
+
+/* дневное занятие */
+.review { border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--paper); }
+.review.ok { border-left-color: var(--mint); }
+.review.bad { border-left-color: var(--coral); }
+.review.graded { border-left-color: var(--amber); }
+.review .verdict { font-family: Manrope, Inter, sans-serif; font-size: 16px; }
+.review.ok .verdict { color: var(--mint-text); } .review.bad .verdict { color: var(--coral-text); } .review.graded .verdict { color: var(--amber-text); }
+.review-note { margin: 6px 0 4px; font-size: 15px; }
+.review .ex-quote { margin-top: 8px; }
+.review .passage { margin-top: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; }
+.diff-del { color: var(--coral-text); text-decoration-color: var(--coral); }
+.diff-ins { background: rgba(63, 191, 159, .18); color: var(--mint-text); font-weight: 600; border-radius: 3px; padding: 0 2px; }
+.ex-quote .diff-del { font-weight: 600; }

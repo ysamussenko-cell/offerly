@@ -33,10 +33,18 @@ export interface ErrorCard {
   createdAt: string;
 }
 
+export type CardPatch = Partial<Pick<ErrorCard, 'reps' | 'lapses' | 'due' | 'stability' | 'difficulty' | 'retired'>>;
+
 export interface CardStore {
   /** Карточки пользователя: сначала к повтору (по due), погашенные — в конце. */
   listCards(userId: string): Promise<ErrorCard[]>;
+  getCard(id: string): Promise<ErrorCard | null>;
+  /** Итог повтора: счётчики и следующая дата (расписание FSRS — 3.3). */
+  updateCard(id: string, patch: CardPatch): Promise<void>;
 }
+
+/** Карточка готова к повтору: не погашена, есть пример и исправление, срок наступил или не назначен. */
+export const dueForReview = (c: ErrorCard, today: string) => !c.retired && !!c.example && !!c.correction && (c.due == null || c.due <= today);
 
 /** Что отдаём наружу: карточка с подписью темы. */
 export const publicCard = (c: ErrorCard) => ({
@@ -50,10 +58,21 @@ export function d1CardStore(db: D1Database): CardStore {
     source: r.source ?? null, stability: Number(r.stability ?? 1), difficulty: Number(r.difficulty ?? 5), due: r.due ?? null,
     reps: Number(r.reps ?? 0), lapses: Number(r.lapses ?? 0), retired: Number(r.retired ?? 0) === 1, createdAt: r.created_at,
   });
+  const COLS: Record<string, string> = { reps: 'reps', lapses: 'lapses', due: 'due', stability: 'stability', difficulty: 'difficulty', retired: 'retired' };
   return {
     async listCards(userId) {
       const rs = await db.prepare('SELECT * FROM error_cards WHERE user_id = ? ORDER BY retired, due IS NULL, due, created_at, id').bind(userId).all();
       return (rs.results as any[]).map(toCard);
+    },
+    async getCard(id) {
+      const r = await db.prepare('SELECT * FROM error_cards WHERE id = ?').bind(id).first();
+      return r ? toCard(r) : null;
+    },
+    async updateCard(id, patch) {
+      const keys = Object.keys(patch).filter(k => (patch as any)[k] !== undefined && COLS[k]);
+      if (!keys.length) return;
+      const val = (k: string) => { const v = (patch as any)[k]; return typeof v === 'boolean' ? (v ? 1 : 0) : v; };
+      await db.prepare(`UPDATE error_cards SET ${keys.map(k => `${COLS[k]} = ?`).join(', ')} WHERE id = ?`).bind(...keys.map(val), id).run();
     },
   };
 }

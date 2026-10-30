@@ -70,9 +70,19 @@ export interface Item {
   checkedLevel: Level | null;
   fingerprint: string;
   source: string | null;
+  /** Формат письменного задания для занятий: review — отзыв рецензента, explain — объяснение неспециалисту; у остальных null. */
+  writingFormat: WritingTaskFormat | null;
   createdAt: string;
   verifiedAt: string | null;
 }
+
+export const WRITING_TASK_FORMATS = ['review', 'explain'] as const;
+export type WritingTaskFormat = typeof WRITING_TASK_FORMATS[number];
+/** Что должно быть письменным заданием каждого формата — добавка к подсказке генератора. */
+export const WRITING_FORMAT_RULES: Record<WritingTaskFormat, string> = {
+  review: 'The writing task must be a REVIEWER\'S FEEDBACK: the learner has to assess a piece of work from their professional world (a report section, a proposal, an answer written by a colleague or an AI system) and write a short review for its author — what is right, what is wrong and what to change, in a formal but respectful register.',
+  explain: 'The writing task must be an EXPLANATION FOR A NON-SPECIALIST: the learner has to explain a technical matter from their professional world (a process, a decision, a risk, a result) to a reader without technical background — a manager, a client or a recruiter — in plain, precise English.',
+};
 
 /** Домен пользователя для генерации: берётся из профиля резюме и анкеты. */
 export interface Domain { specialty: string | null; industry: string | null; targetRole: string | null; keywords: string[] }
@@ -118,7 +128,7 @@ export function generationSchema(kind: Kind): Record<string, unknown> {
   return { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: props, required: req[kind] } } }, required: ['items'] };
 }
 
-export interface GenerateRequest { kind: Kind; level: Level; topic: Topic; count: number; domain: Domain }
+export interface GenerateRequest { kind: Kind; level: Level; topic: Topic; count: number; domain: Domain; /** Только для writing: формат задания занятия. */ format?: WritingTaskFormat | null }
 
 export function generationPrompt(r: GenerateRequest): ChatMessage[] {
   const terms = r.domain.keywords.slice(0, 20).join(', ');
@@ -128,6 +138,7 @@ export function generationPrompt(r: GenerateRequest): ChatMessage[] {
     `Topic: ${r.topic.label} — ${r.topic.hint}. Every item must test this topic, not something else.`,
     `Learner: ${domainText(r.domain)}.${terms ? ` Professional terms the learner uses: ${terms}.` : ''} Set every item in this professional world, in natural English as spoken in a job interview or written in a work report. Do not invent facts about the learner.`,
     KIND_RULES[r.kind],
+    ...(r.kind === 'writing' && r.format ? [WRITING_FORMAT_RULES[r.format]] : []),
     'All items must differ from each other in sentence and situation. No numbering inside texts, no markdown.',
     `Return ONLY one JSON object: {"items": [ ... ]} with exactly ${r.count} items and nothing else.`,
   ].join('\n');
@@ -166,15 +177,16 @@ export const fingerprintOf = (text: string) => text.toLowerCase().replace(/[^a-z
 
 export type Rejection = { ok: false; reason: string };
 export type Normalized = { ok: true; item: Omit<Item, 'id' | 'status' | 'checkNote' | 'checkedLevel' | 'createdAt' | 'verifiedAt' | 'source'> };
+export type ItemCtx = { kind: Kind; level: Level; topic: string; domain: string | null; format?: WritingTaskFormat | null };
 
 /** Структурная проверка одного задания из ответа генератора. Отказ — причина одной строкой. */
-export function normalizeItem(raw: unknown, ctx: { kind: Kind; level: Level; topic: string; domain: string | null }): Normalized | Rejection {
+export function normalizeItem(raw: unknown, ctx: ItemCtx): Normalized | Rejection {
   if (!raw || typeof raw !== 'object') return { ok: false, reason: 'не объект' };
   const o = raw as Record<string, unknown>;
   const prompt = clean(o.prompt, 2000);
   const explanation = clean(o.explanation, 300) || null;
   if (explanation && !looksRussian(explanation)) return { ok: false, reason: 'объяснение не по-русски' };
-  const base = { kind: ctx.kind, level: ctx.level, topic: ctx.topic, domain: ctx.domain, prompt, explanation, rubric: null as string[] | null, options: null as Item['options'] };
+  const base = { kind: ctx.kind, level: ctx.level, topic: ctx.topic, domain: ctx.domain, prompt, explanation, rubric: null as string[] | null, options: null as Item['options'], writingFormat: ctx.kind === 'writing' ? ctx.format ?? null : null };
 
   switch (ctx.kind) {
     case 'mcq': {
@@ -228,7 +240,7 @@ export function normalizeItem(raw: unknown, ctx: { kind: Kind; level: Level; top
 }
 
 /** Разбирает весь ответ генератора; дубли внутри ответа и против банка отбрасываются. */
-export function normalizeBatch(raw: unknown, ctx: { kind: Kind; level: Level; topic: string; domain: string | null }, known: Set<string>) {
+export function normalizeBatch(raw: unknown, ctx: ItemCtx, known: Set<string>) {
   const list = raw && typeof raw === 'object' && Array.isArray((raw as any).items) ? (raw as any).items : Array.isArray(raw) ? raw : [];
   const items: Normalized['item'][] = [];
   const rejected: string[] = [];
@@ -318,7 +330,7 @@ export interface ItemStore {
   /** Сводка банка: число заданий по уровню, виду и статусу. */
   bankStats(): Promise<{ level: Level; kind: Kind; status: Status; count: number }[]>;
   getItem(id: string): Promise<Item | null>;
-  /** Принятые (verified) задания вида и уровня в случайном порядке — для теста уровня. */
+  /** Принятые (verified) задания вида и уровня в случайном порядке — для теста уровня и разминки занятия. */
   randomItems(kind: Kind, level: Level, limit: number): Promise<Item[]>;
 }
 
@@ -333,7 +345,7 @@ export async function generateItems(env: ProviderEnv, store: ItemStore, req: Gen
   const id = opts.id ?? (() => crypto.randomUUID());
   const source = opts.model ?? PROVIDERS.find(p => p.id === (opts.provider ?? 'workers-ai'))!.defaultModel;
   const chatOpts = { provider: opts.provider, apiKey: opts.apiKey, model: opts.model };
-  const ctx = { kind: req.kind, level: req.level, topic: req.topic.id, domain: domainText(req.domain) };
+  const ctx: ItemCtx = { kind: req.kind, level: req.level, topic: req.topic.id, domain: domainText(req.domain), format: req.format ?? null };
 
   const reply = await call(env, generationPrompt(req), { ...chatOpts, maxTokens: req.kind === 'mcq' ? 1200 : 2400, jsonSchema: generationSchema(req.kind) });
   const raw = extractJsonObject(reply);
@@ -363,7 +375,7 @@ export async function generateItems(env: ProviderEnv, store: ItemStore, req: Gen
 /** Что отдаём наружу. Банк смотрит владелец — ключи и объяснения видны; тест уровня (2.5) отдаёт задания своим маршрутом без ключей. */
 export const publicItem = (i: Item) => ({
   id: i.id, kind: i.kind, level: i.level, topic: i.topic, topicLabel: topicById(i.topic)?.label ?? i.topic, domain: i.domain,
-  prompt: i.prompt, options: i.options, answer: i.answer, rubric: i.rubric, explanation: i.explanation,
+  prompt: i.prompt, options: i.options, answer: i.answer, rubric: i.rubric, explanation: i.explanation, writingFormat: i.writingFormat,
   status: i.status, checkNote: i.checkNote, checkedLevel: i.checkedLevel, createdAt: i.createdAt,
 });
 
@@ -388,16 +400,17 @@ export function d1ItemStore(db: D1Database): ItemStore {
     options: parse(r.options), answer: r.answer ?? '', rubric: parse(r.rubric), explanation: r.explanation ?? null,
     status: (STATUSES as readonly string[]).includes(r.status) ? r.status : 'draft', checkNote: r.check_note ?? null,
     checkedLevel: r.checked_level ?? null, fingerprint: r.fingerprint ?? '', source: r.source ?? null,
+    writingFormat: (WRITING_TASK_FORMATS as readonly string[]).includes(r.writing_format) ? r.writing_format : null,
     createdAt: r.created_at, verifiedAt: r.verified_at ?? null,
   });
   return {
     async insertItems(items) {
       if (!items.length) return;
       await db.batch(items.map(i => db.prepare(
-        `INSERT INTO items (id, kind, level, topic, domain, prompt, options, answer, rubric, explanation, status, check_note, checked_level, verified_at, fingerprint, source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO items (id, kind, level, topic, domain, prompt, options, answer, rubric, explanation, status, check_note, checked_level, verified_at, fingerprint, source, writing_format, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(i.id, i.kind, i.level, i.topic, i.domain, i.prompt, i.options ? JSON.stringify(i.options) : null, i.answer,
-        i.rubric ? JSON.stringify(i.rubric) : null, i.explanation, i.status, i.checkNote, i.checkedLevel, i.verifiedAt, i.fingerprint, i.source, i.createdAt)));
+        i.rubric ? JSON.stringify(i.rubric) : null, i.explanation, i.status, i.checkNote, i.checkedLevel, i.verifiedAt, i.fingerprint, i.source, i.writingFormat ?? null, i.createdAt)));
     },
     async knownFingerprints(fps) {
       const out = new Set<string>();
