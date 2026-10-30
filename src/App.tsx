@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api, type Health, type Profile, type User } from './api';
 import Login from './screens/Login';
 import { InstallButton } from './install';
+import { ThemeSwitch } from './ThemeSwitch';
+import { OFFLINE_NOTICE, useOnline } from './offline';
 import Resume, { ProfileCard } from './screens/Resume';
 import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 import { BankCard } from './screens/Bank';
@@ -27,6 +29,7 @@ export default function App() {
   const [testRuns, setTestRuns] = useState(0);
   /** Экран дневного занятия открыт. */
   const [lesson, setLesson] = useState(false);
+  const online = useOnline();
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false, version: '-', db: 'error', ai: 'error' }));
@@ -59,15 +62,17 @@ export default function App() {
       <header className="row topbar">
         <div className="row">
           <img src="/icon.svg" width={40} height={40} alt="" />
-          <h1 style={{ fontSize: 28, margin: 0 }}>Offerly</h1>
+          <h1 className="brand">Offerly</h1>
         </div>
         {auth.state === 'in' && (
           <div className="row">
-            <span className="muted mono">{auth.user.email}</span>
+            <span className="muted mono who" title={auth.user.email}>{auth.user.email}</span>
             <button className="link" onClick={signOut}>Выйти</button>
           </div>
         )}
       </header>
+
+      {!online && <p className="offline" role="status">{OFFLINE_NOTICE}</p>}
 
       {auth.state === 'loading' && <section className="card"><p className="muted">Проверяю сессию…</p></section>}
 
@@ -116,8 +121,9 @@ export default function App() {
       )}
 
       {auth.state !== 'loading' && (
-        <div className="row" style={{ marginTop: 16 }}>
+        <div className="row footer">
           <InstallButton />
+          <ThemeSwitch />
           <a className="link" href="/api/health">Состояние сервиса</a>
         </div>
       )}

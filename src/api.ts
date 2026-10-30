@@ -120,8 +120,16 @@ export class ApiError extends Error {
   constructor(public status: number, public code: string, public body: any = {}) { super(code); }
 }
 
+/** Запрос не дошёл до сервера: offline — браузер знает, что сети нет; network — сеть есть, но сервер не ответил. */
+export const networkFailure = (online: boolean) => new ApiError(0, online ? 'network' : 'offline');
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const r = await fetch(`/api${path}`, { credentials: 'same-origin', ...init });
+  let r: Response;
+  try {
+    r = await fetch(`/api${path}`, { credentials: 'same-origin', ...init });
+  } catch {
+    throw networkFailure(typeof navigator === 'undefined' || navigator.onLine !== false);
+  }
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(r.status, j.error ?? 'request_failed', j);
   return j as T;
@@ -173,6 +181,8 @@ export const api = {
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
 export const ERRORS: Record<string, string> = {
+  offline: 'Нет сети. Ответ не отправлен — текст остаётся на экране, подключитесь и отправьте снова.',
+  network: 'Сервер не ответил. Проверьте подключение и повторите.',
   bad_email: 'Адрес почты выглядит неверно.',
   too_many: 'Слишком много кодов подряд. Подождите пятнадцать минут и запросите снова.',
   mail_not_configured: 'Отправка писем пока не настроена. Нужен ключ RESEND_API_KEY в секретах проекта.',

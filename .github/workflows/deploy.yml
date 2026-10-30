@@ -152,3 +152,7 @@ jobs:
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
           node -e 'const h=require("./deep.json"); if(h.ai_chat!=="ok"){console.log("::warning title=ai_chat::"+h.ai_chat)}; if(!String(h.analysis).startsWith("ok")){console.log("::warning title=analysis::"+h.analysis)}'
+          SW=$(curl -s -o /dev/null -w '%{http_code}' "$P/sw.js"); MF=$(curl -s -o /dev/null -w '%{http_code}' "$P/manifest.webmanifest")
+          THEME=$(curl -fsS "$P/" | grep -c 'data-theme' || true)
+          echo "::notice title=pwa::GET /sw.js → $SW; GET /manifest.webmanifest → $MF (ждём 200); скрипт темы в index.html: $THEME"
+          [ "$SW" = "200" ] && [ "$MF" = "200" ] || { echo "::error title=pwa::service worker или манифест не отдаются"; exit 1; }

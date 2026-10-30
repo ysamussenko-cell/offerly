@@ -17,6 +17,10 @@ export default defineConfig({
         background_color: '#F6F3EE',
         display: 'standalone',
         start_url: '/',
+        id: '/',
+        scope: '/',
+        orientation: 'any',
+        categories: ['education', 'productivity'],
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -24,7 +28,16 @@ export default defineConfig({
           { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }
         ]
       },
-      workbox: { navigateFallbackDenylist: [/^\/api\//] }
+      workbox: {
+        // Оболочка приложения в предкэше; /api — только по сети (ответы и проверка офлайн не ходят, см. src/offline.ts).
+        navigateFallbackDenylist: [/^\/api\//],
+        cleanupOutdatedCaches: true,
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        runtimeCaching: [
+          { urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i, handler: 'StaleWhileRevalidate', options: { cacheName: 'google-fonts-css', expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 365 } } },
+          { urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i, handler: 'CacheFirst', options: { cacheName: 'google-fonts-files', expiration: { maxEntries: 24, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [0, 200] } } },
+        ],
+      }
     })
   ],
   server: { proxy: { '/api': 'http://localhost:8788' } }
