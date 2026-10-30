@@ -92,6 +92,13 @@ describe('API входа', () => {
     const j: any = await (await call('/health')).json();
     expect(j.mail).toBe('missing');
     expect(j.version).toBe('test');
+    expect(j.extract).toBeUndefined();
+  });
+
+  it('health?deep=1 прогоняет извлечение PDF и DOCX', async () => {
+    const { call } = makeApp();
+    const j: any = await (await call('/health?deep=1')).json();
+    expect(j.extract).toBe('ok');
   });
 });
 

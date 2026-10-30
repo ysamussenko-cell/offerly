@@ -5,7 +5,7 @@ import {
   sessionCookie, clearSessionCookie, SESSION_COOKIE, CODE_TTL_SEC, type AuthStore, type User,
 } from './auth';
 import { loginCodeMail, sendMail, type MailEnv } from './mail';
-import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normalizeText } from './extract';
+import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normalizeText, selfTestExtract } from './extract';
 import { analyzeResume, d1ProfileStore, publicProfile, type ProfileStore } from './profile';
 
 export interface Env extends ProviderEnv, MailEnv {
@@ -50,7 +50,10 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       try { await c.env.DB.prepare('select 1').first(); db = 'ok'; } catch { db = 'error'; }
     }
     if (c.env.AI) ai = 'ok';
-    return c.json({ ok: db === 'ok' && ai === 'ok', version, db, ai, mail: c.env.RESEND_API_KEY ? 'ok' : 'missing' });
+    const out: Record<string, unknown> = { ok: db === 'ok' && ai === 'ok', version, db, ai, mail: c.env.RESEND_API_KEY ? 'ok' : 'missing' };
+    // ?deep=1 — прогон извлечения текста на крошечных встроенных PDF и DOCX: проверяет, что pdf.js и zip работают в этой среде.
+    if (c.req.query('deep') === '1') out.extract = await selfTestExtract();
+    return c.json(out);
   });
 
   app.get('/providers', (c) => c.json(PROVIDERS.map(({ id, name, short, keyUrl, defaultModel, free }) => ({ id, name, short, keyUrl, defaultModel, free }))));

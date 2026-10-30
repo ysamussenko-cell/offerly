@@ -70,9 +70,53 @@ export async function extractResumeText(name: string, mime: string | undefined, 
   return { kind, text, pages };
 }
 
+/** Самопроверка для /api/health?deep=1: крошечные PDF и DOCX, собранные на месте, проходят через оба парсера. */
+export async function selfTestExtract(): Promise<'ok' | string> {
+  try {
+    const pdfText = (await extractPdf(tinyPdf('Offerly extract check'))).text;
+    if (!pdfText.includes('Offerly extract check')) return `pdf: получено «${pdfText.slice(0, 40)}»`;
+    const docxText = await extractDocx(tinyDocx('Offerly docx check'));
+    if (!docxText.includes('Offerly docx check')) return `docx: получено «${docxText.slice(0, 40)}»`;
+    return 'ok';
+  } catch (e) {
+    return `error: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
+  }
+}
+
+function tinyPdf(line: string): Uint8Array {
+  const content = `BT /F1 12 Tf 50 750 Td (${line}) Tj ET`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offs: number[] = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+
+/** DOCX-минимум: zip без сжатия с одним word/document.xml. */
+function tinyDocx(line: string): Uint8Array {
+  const enc = new TextEncoder();
+  const name = enc.encode('word/document.xml');
+  const data = enc.encode(`<w:document><w:body><w:p><w:r><w:t>${line}</w:t></w:r></w:p></w:body></w:document>`);
+  const u16 = (n: number) => [n & 0xff, (n >> 8) & 0xff];
+  const u32 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
+  const local = [...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...name, ...data];
+  const central = [...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(0), ...name];
+  const eocd = [...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(1), ...u16(1), ...u32(central.length), ...u32(local.length), ...u16(0)];
+  return new Uint8Array([...local, ...central, ...eocd]);
+}
+
 // --- PDF ---
 
-async function extractPdf(bytes: Uint8Array): Promise<{ text: string; pages: number }> {
+export async function extractPdf(bytes: Uint8Array): Promise<{ text: string; pages: number }> {
   const { extractText, getDocumentProxy } = await import('unpdf');
   const pdf = await getDocumentProxy(bytes);
   const { text, totalPages } = await extractText(pdf, { mergePages: true });
