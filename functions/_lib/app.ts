@@ -11,13 +11,14 @@ import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onbo
 import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_LABELS, LEVELS, TOPICS, DEFAULT_COUNT, MAX_COUNT, type ItemStore, type Kind, type Level, type Status, STATUSES } from './items';
 import { d1CardStore, publicCard, CARD_TOPICS, type CardStore } from './cards';
 import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
+import { d1ProgramStore, generateProgram, swapDays, current as currentProgram, ProgramError, PROGRAM_TOPICS, PROGRAM_DAYS, type ProgramStore } from './program';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -28,7 +29,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -281,6 +282,38 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
   app.get('/cards', requireAuth, async (c) => {
     const cards = await c.get('store').listCards(c.get('auth')!.user.id);
     return c.json({ ok: true, topics: CARD_TOPICS.map(({ id, label }) => ({ id, label })), cards: cards.map(publicCard) });
+  });
+
+  // --- программа на четыре недели ---
+
+  const programFail = (c: any, e: unknown) => {
+    if (e instanceof ProgramError) return c.json({ ok: false, error: e.code, reason: e.reason }, e.code === 'program_none' ? 404 : 400);
+    throw e;
+  };
+  const programTopics = PROGRAM_TOPICS.map(({ id, label }) => ({ id, label }));
+
+  /** Текущая программа: дни последней сборки с темой, форматом письма и причиной выбора; null — ещё не построена. */
+  app.get('/program', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const p = await c.get('store').getProfile(user.id);
+    return c.json({ ok: true, days: PROGRAM_DAYS, topics: programTopics, program: await currentProgram(c.get('store'), user.id, user.tz, p) });
+  });
+
+  /** Построить или пересобрать программу с сегодняшнего дня по журналу ошибок, последнему тесту и дате собеседования.
+   *  Пройденные дни остаются, незавершённые заменяются. */
+  app.post('/program/generate', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const p = await c.get('store').getProfile(user.id);
+    return c.json({ ok: true, days: PROGRAM_DAYS, topics: programTopics, program: await generateProgram(c.get('store'), user.id, user.tz, p) });
+  });
+
+  /** Переставить темы двух дней занятий: {a, b} — id дней. Ошибка program_invalid с причиной not_found | same | not_lesson | not_planned | past. */
+  app.post('/program/swap', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    const p = await c.get('store').getProfile(user.id);
+    try { return c.json({ ok: true, days: PROGRAM_DAYS, topics: programTopics, program: await swapDays(c.get('store'), user.id, user.tz, p, body.a, body.b) }); }
+    catch (e) { return programFail(c, e); }
   });
 
   return app;

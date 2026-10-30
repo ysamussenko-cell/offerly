@@ -7,6 +7,7 @@ import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 import { BankCard } from './screens/Bank';
 import Assessment, { TestCard, type Mode } from './screens/Assessment';
 import { JournalCard } from './screens/Journal';
+import { ProgramCard } from './screens/Program';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -91,6 +92,7 @@ export default function App() {
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && (
         <div className="stack" style={{ marginTop: 0 }}>
+          {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}
           {ready.analyzed && <TestCard onOpen={setTesting} refreshKey={testRuns} />}
           {ready.analyzed && <JournalCard refreshKey={testRuns} />}
           {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}

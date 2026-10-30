@@ -49,6 +49,20 @@ export type ErrorCard = {
   id: string; topic: string; topicLabel: string; rule: string | null; example: string | null; correction: string | null;
   source: string | null; due: string | null; reps: number; lapses: number; retired: boolean; createdAt: string;
 };
+export type DayFormat = 'lesson' | 'rehearsal' | 'checkpoint';
+export type WritingFormat = 'review' | 'explain';
+export type ProgramDay = {
+  id: string; date: string; weekday: string; position: number; week: number; format: DayFormat; formatLabel: string;
+  topic: string; topicLabel: string; writing: WritingFormat | null; writingLabel: string | null; reason: string | null;
+  status: 'planned' | 'done' | 'skipped'; minutes: number | null; score: number | null; completedAt: string | null; today: boolean; past: boolean;
+};
+export type Program = {
+  generatedAt: string | null; startDate: string; endDate: string; totalDays: number; today: string; interviewDate: string | null;
+  counts: { lessons: number; rehearsals: number; checkpoints: number; done: number };
+  topics: { id: string; label: string; days: number }[];
+  days: ProgramDay[];
+};
+export type ProgramResponse = { ok: true; days: number; topics: { id: string; label: string }[]; program: Program | null };
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -93,6 +107,9 @@ export const api = {
   abandonAssessment: () => post<{ ok: true; abandoned: boolean }>('/assessment/abandon', {}),
   scoreAssessment: (force = false) => post<{ ok: true; assessment: Assessment }>('/assessment/score', { force }),
   cards: () => call<{ ok: true; topics: { id: string; label: string }[]; cards: ErrorCard[] }>('/cards'),
+  program: () => call<ProgramResponse>('/program'),
+  generateProgram: () => post<ProgramResponse>('/program/generate', {}),
+  swapProgramDays: (a: string, b: string) => post<ProgramResponse>('/program/swap', { a, b }),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -121,6 +138,7 @@ export const ERRORS: Record<string, string> = {
   assessment_finished: 'Тест уже завершён.',
   answer_invalid: 'Ответ не принят: проверьте, что он заполнен.',
   bank_empty: 'В банке нет подходящего задания, и модель не смогла написать новое. Пополните банк и попробуйте снова.',
+  program_invalid: 'Переставить не получилось: менять местами можно только два ещё не пройденных занятия, не раньше сегодняшнего дня.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 

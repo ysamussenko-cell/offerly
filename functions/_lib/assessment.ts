@@ -81,6 +81,8 @@ export interface AssessmentStore {
   updateAssessment(id: string, patch: AssessmentPatch): Promise<void>;
   activeAssessment(userId: string): Promise<Assessment | null>;
   latestAssessment(userId: string): Promise<Assessment | null>;
+  /** Последний завершённый тест или срез — точка отсчёта для программы (3.1) и контрольного среза (4.3). */
+  latestFinishedAssessment(userId: string): Promise<Assessment | null>;
   insertAttempt(a: Attempt): Promise<void>;
   updateAttempt(id: string, patch: AttemptPatch): Promise<void>;
   /** Попытки теста по порядку позиций. */
@@ -483,6 +485,10 @@ export function d1AssessmentStore(db: D1Database): AssessmentStore {
     },
     async latestAssessment(userId) {
       const r = await db.prepare('SELECT * FROM assessments WHERE user_id = ? ORDER BY started_at DESC LIMIT 1').bind(userId).first();
+      return r ? toA(r) : null;
+    },
+    async latestFinishedAssessment(userId) {
+      const r = await db.prepare("SELECT * FROM assessments WHERE user_id = ? AND status = 'finished' ORDER BY started_at DESC LIMIT 1").bind(userId).first();
       return r ? toA(r) : null;
     },
     async insertAttempt(t) {

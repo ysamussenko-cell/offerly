@@ -4,6 +4,7 @@ import type { OnboardingStore } from '../../functions/_lib/onboarding';
 import type { Item, ItemStore } from '../../functions/_lib/items';
 import type { Assessment, AssessmentStore, Attempt } from '../../functions/_lib/assessment';
 import type { CardStore, ErrorCard } from '../../functions/_lib/cards';
+import type { ProgramDay, ProgramStore } from '../../functions/_lib/program';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -15,12 +16,13 @@ export function memoryStore() {
   const assessments: Assessment[] = [];
   const attempts: Attempt[] = [];
   const cards: ErrorCard[] = [];
+  const programDays: ProgramDay[] = [];
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
     interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -84,6 +86,7 @@ export function memoryStore() {
     async updateAssessment(id, patch) { const a = assessments.find(x => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === 'axes' && v ? { ...(v as object) } : v]))); },
     async activeAssessment(userId) { const a = assessments.filter(x => x.userId === userId && x.status === 'active').sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
     async latestAssessment(userId) { const a = assessments.filter(x => x.userId === userId).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
+    async latestFinishedAssessment(userId) { const a = assessments.filter(x => x.userId === userId && x.status === 'finished').sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
     async insertAttempt(t) { attempts.push({ ...t }); },
     async updateAttempt(id, patch) { const t = attempts.find(x => x.id === id); if (t) Object.assign(t, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); },
     async listAttempts(assessmentId) { return attempts.filter(x => x.assessmentId === assessmentId).sort((p, q) => p.position - q.position).map(x => ({ ...x })); },
@@ -93,6 +96,16 @@ export function memoryStore() {
       const key = (c: ErrorCard) => `${c.retired ? 1 : 0}|${c.due == null ? 1 : 0}|${c.due ?? ''}|${c.createdAt}|${c.id}`;
       return cards.filter(c => c.userId === userId).sort((a, b) => key(a).localeCompare(key(b))).map(c => ({ ...c }));
     },
+
+    async listProgramDays(userId) {
+      return programDays.filter(d => d.userId === userId).sort((a, b) => a.dayDate.localeCompare(b.dayDate) || a.position - b.position || a.id.localeCompare(b.id)).map(d => ({ ...d }));
+    },
+    async getProgramDay(id) { const d = programDays.find(x => x.id === id); return d ? { ...d } : null; },
+    async replacePlannedDays(userId, fromDate, days) {
+      for (let i = programDays.length - 1; i >= 0; i--) { const d = programDays[i]; if (d.userId === userId && d.status === 'planned' && d.dayDate >= fromDate) programDays.splice(i, 1); }
+      for (const d of days) programDays.push({ ...d });
+    },
+    async updateProgramDay(id, patch) { const d = programDays.find(x => x.id === id); if (d) Object.assign(d, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays };
 }

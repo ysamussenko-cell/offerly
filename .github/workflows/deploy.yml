@@ -120,6 +120,11 @@ jobs:
           CRD=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/cards")
           echo "::notice title=cards::GET /api/cards без cookie → $CRD (ждём 401)"
           [ "$CRD" = "401" ] || { echo "::error title=cards::неожиданный код ответа"; exit 1; }
+          PRG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/program")
+          PRGEN=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/program/generate")
+          PRSW=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"a":"x","b":"y"}' "$P/api/program/swap")
+          echo "::notice title=program::GET /api/program без cookie → $PRG; POST /api/program/generate → $PRGEN; POST /api/program/swap → $PRSW (ждём 401 везде)"
+          [ "$PRG" = "401" ] && [ "$PRGEN" = "401" ] && [ "$PRSW" = "401" ] || { echo "::error title=program::неожиданные коды ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
