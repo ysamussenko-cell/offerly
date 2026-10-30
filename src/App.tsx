@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type Health, type Profile, type User } from './api';
 import Login from './screens/Login';
+import { InstallButton } from './install';
 import Resume, { ProfileCard } from './screens/Resume';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
@@ -11,14 +12,10 @@ export default function App() {
   const [auth, setAuth] = useState<Auth>({ state: 'loading' });
   const [profile, setProfile] = useState<ProfileState>({ state: 'loading' });
   const [replacing, setReplacing] = useState(false);
-  const [installEvt, setInstallEvt] = useState<any>(null);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false, version: '-', db: 'error', ai: 'error' }));
     api.me().then(r => setAuth({ state: 'in', user: r.user, isNew: false })).catch(() => setAuth({ state: 'anonymous' }));
-    const onPrompt = (e: Event) => { e.preventDefault(); setInstallEvt(e); };
-    window.addEventListener('beforeinstallprompt', onPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', onPrompt);
   }, []);
 
   useEffect(() => {
@@ -69,7 +66,7 @@ export default function App() {
 
       {auth.state === 'in' && (
         <div className="row" style={{ marginTop: 16 }}>
-          <button className="btn secondary" onClick={() => installEvt?.prompt()} disabled={!installEvt}>Установить приложение</button>
+          <InstallButton />
           <a className="link" href="/api/health">Состояние сервиса</a>
         </div>
       )}
