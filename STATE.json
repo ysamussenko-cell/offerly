@@ -2,10 +2,10 @@
   "current_task": null,
   "last_completed": "2.2 Загрузка резюме PDF/DOCX → извлечение текста на Worker → профиль через модель",
   "last_deploy": {
-    "status": "pending",
+    "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": null,
-    "run": null,
+    "commit": "4c18651",
+    "run": 41009104774,
     "version": "0.3.1"
   },
   "defects": [],
@@ -13,5 +13,5 @@
     "Добавить в Repository secrets GitHub ключ RESEND_API_KEY (resend.com → API Keys); без него письма с кодом не отправляются (API отвечает mail_not_configured). Отправитель по умолчанию onboarding@resend.dev доставляет только на адрес владельца аккаунта Resend; для других адресов нужен свой домен и MAIL_FROM в wrangler.toml.",
     "Проверить на живом адресе загрузку настоящего резюме (PDF и DOCX) и качество профиля от встроенной модели; из облачной сессии это не проверить — нужна почта для входа."
   ],
-  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error; WebFetch к pages.dev из плановой сессии не проходит без подтверждения, поэтому живая проверка /api/health и /api/auth/* выполняется шагом Smoke test в workflow (аннотации health, auth, resume, extract). /api/health?deep=1 прогоняет извлечение PDF (unpdf) и DOCX на встроенных фикстурах — проверка, что pdf.js работает в workerd. gh в облачной сессии не авторизован (GH_TOKEN invalid) — статус запусков смотреть через GitHub MCP (actions_list/actions_get). Локально API проверяется через `wrangler pages dev dist` с .dev.vars DEV_ECHO_CODE=1 — код входа возвращается в ответе; быстрый стенд без wrangler — dist + createApp с memoryStore (см. tests/helpers). Размер бандла Functions с unpdf ≈ 1 МБ gzip. Wrangler 3.x нельзя: его esbuild 0.17 ломает pdf.js (unpdf) при сборке Functions — держать wrangler 4.x."
+  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error; WebFetch к pages.dev из плановой сессии не проходит без подтверждения, поэтому живая проверка /api/health и /api/auth/* выполняется шагом Smoke test в workflow (аннотации health, auth, resume, extract). /api/health?deep=1 прогоняет извлечение PDF (unpdf) и DOCX на встроенных фикстурах — проверка, что pdf.js работает в workerd. gh в облачной сессии не авторизован (GH_TOKEN invalid) — статус запусков смотреть через GitHub MCP (actions_list/actions_get). Локально API проверяется через `wrangler pages dev dist` с .dev.vars DEV_ECHO_CODE=1 — код входа возвращается в ответе; быстрый стенд без wrangler — dist + createApp с memoryStore (см. tests/helpers). Размер бандла Functions с unpdf ≈ 1 МБ gzip. Wrangler 3.x нельзя: его esbuild 0.17 ломает pdf.js (unpdf) при сборке Functions — держать wrangler 4.x. Внимание: 30.10 два запуска цикла шли параллельно и сделали одну и ту же починку; перед push всегда git fetch и проверка origin/main."
 }
