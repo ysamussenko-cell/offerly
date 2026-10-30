@@ -87,10 +87,10 @@ export function Examples({ examples }: { examples: ErrorExample[] }) {
   );
 }
 
-type Props = { result: AssessmentResult; levelLabel: string | null; finishedAt: string | null; onRescore?: () => void; rescoring?: boolean };
+type Props = { result: AssessmentResult; levelLabel: string | null; finishedAt: string | null; onRescore?: () => void; rescoring?: boolean; /** Исходный срез вне приложения: вместо письма и примеров — как он получен. */ baseline?: boolean };
 
 /** Экран результата: уровень, лестница, радар, письмо и три примера ошибок. */
-export default function ResultView({ result, levelLabel, onRescore, rescoring }: Props) {
+export default function ResultView({ result, levelLabel, onRescore, rescoring, baseline }: Props) {
   const [showRewrite, setShowRewrite] = useState(false);
   const w = result.writing;
   return (
@@ -98,7 +98,7 @@ export default function ResultView({ result, levelLabel, onRescore, rescoring }:
       <div className="level-row">
         <span className="level-badge">{result.level}</span>
         <div>
-          <p style={{ margin: 0, fontWeight: 600, fontSize: 18 }}>{levelLabel ? levelLabel[0].toUpperCase() + levelLabel.slice(1) : ''} — ваш уровень по тесту</p>
+          <p style={{ margin: 0, fontWeight: 600, fontSize: 18 }}>{levelLabel ? levelLabel[0].toUpperCase() + levelLabel.slice(1) : ''}{baseline ? ' — ваш уровень на старте' : ' — ваш уровень по тесту'}</p>
           <p className="muted" style={{ margin: 0, fontSize: 14 }}>Сводный балл {result.overall} из 100 по {result.axes.filter(a => a.score != null).length} осям. Беглость речи появится с голосовой репликой.</p>
         </div>
       </div>
@@ -120,6 +120,13 @@ export default function ResultView({ result, levelLabel, onRescore, rescoring }:
       </div>
       <p className="muted hint">Шкала общая для всех осей: 0–25 — A2, 25–50 — B1, 50–75 — B2, 75–100 — C1. Грамматика и словарь — по заданиям с эталоном и по письму; связность и ответ на вопрос — по письму и чтению.</p>
 
+      {baseline ? (
+        <>
+          <h3 className="result-h">Как получен срез</h3>
+          <p style={{ margin: 0 }}>{result.scoringNote ?? 'Срез проведён вне приложения.'}</p>
+          <p className="muted hint">Стартовые карточки ошибок — в журнале на главном экране. Тест уровня в приложении даст оценку по собственным ответам и заменит срез.</p>
+        </>
+      ) : (<>
       <h3 className="result-h">Письмо</h3>
       {w ? (
         <>
@@ -141,6 +148,7 @@ export default function ResultView({ result, levelLabel, onRescore, rescoring }:
 
       <h3 className="result-h">Три примера ваших ошибок</h3>
       <Examples examples={result.examples} />
+      </>)}
     </div>
   );
 }

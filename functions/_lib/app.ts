@@ -9,6 +9,7 @@ import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normal
 import { analyzeResume, d1ProfileStore, publicProfile, SELF_TEST_RESUME, type ProfileStore } from './profile';
 import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onboarding';
 import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_LABELS, LEVELS, TOPICS, DEFAULT_COUNT, MAX_COUNT, type ItemStore, type Kind, type Level, type Status, STATUSES } from './items';
+import { d1CardStore, publicCard, CARD_TOPICS, type CardStore } from './cards';
 import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
 
 export interface Env extends ProviderEnv, MailEnv {
@@ -16,7 +17,7 @@ export interface Env extends ProviderEnv, MailEnv {
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -27,7 +28,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -273,6 +274,14 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
 
   /** Бросить начатый тест: следующий start начнёт новый, виденные задания не повторятся. */
   app.post('/assessment/abandon', requireAuth, async (c) => c.json({ ok: true, abandoned: await abandon(c.get('store'), c.get('auth')!.user.id) }));
+
+  // --- журнал ошибок ---
+
+  /** Карточки ошибок пользователя: к повтору — первыми, погашенные — в конце. Создание из ошибок и повторы по FSRS — 3.3. */
+  app.get('/cards', requireAuth, async (c) => {
+    const cards = await c.get('store').listCards(c.get('auth')!.user.id);
+    return c.json({ ok: true, topics: CARD_TOPICS.map(({ id, label }) => ({ id, label })), cards: cards.map(publicCard) });
+  });
 
   return app;
 }

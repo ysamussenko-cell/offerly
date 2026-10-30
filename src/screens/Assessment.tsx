@@ -51,9 +51,10 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
             <span className="level-badge">{a.level}</span>
             <div>
               <p style={{ margin: 0, fontWeight: 600 }}>{a.levelLabel && a.levelLabel[0].toUpperCase() + a.levelLabel.slice(1)}{a.result ? ` · ${a.result.overall} из 100` : ' — предварительно'}</p>
-              <p className="muted" style={{ margin: 0, fontSize: 14 }}>{a.finishedAt ? longDate(a.finishedAt.slice(0, 10)) : ''}{a.summary ? ` · грамматика и лексика: ${a.summary.adaptiveCorrect} из ${a.summary.adaptiveTotal}` : ''}</p>
+              <p className="muted" style={{ margin: 0, fontSize: 14 }}>{a.kind === 'baseline' ? 'Исходный срез · ' : ''}{a.finishedAt ? longDate(a.finishedAt.slice(0, 10)) : ''}{a.summary ? ` · грамматика и лексика: ${a.summary.adaptiveCorrect} из ${a.summary.adaptiveTotal}` : ''}</p>
             </div>
           </div>
+          {a.kind === 'baseline' && <p className="muted" style={{ fontSize: 14, marginTop: 0 }}>Срез получен вне приложения и служит точкой отсчёта. Тест уровня в приложении заменит его.</p>}
           {a.result && (
             <ul className="axes-mini">
               {a.result.axes.map(x => <li key={x.id} className={x.score == null ? 'off' : ''}><span>{x.label}</span><b>{x.score == null ? '—' : x.score}</b></li>)}
@@ -61,8 +62,8 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
           )}
           {!a.result && <p className="muted" style={{ fontSize: 14 }}>Тест пройден до появления оценки по осям. Откройте разбор — оси и уровень посчитаются по сохранённым ответам.</p>}
           <div className="row">
-            <button className="btn" type="button" onClick={() => onOpen('result')}>{a.result ? 'Открыть разбор' : 'Рассчитать оценку'}</button>
-            <button className="btn secondary" type="button" onClick={() => onOpen('test')}>Пройти заново</button>
+            <button className="btn" type="button" onClick={() => onOpen('result')}>{a.result ? (a.kind === 'baseline' ? 'Открыть срез' : 'Открыть разбор') : 'Рассчитать оценку'}</button>
+            <button className="btn secondary" type="button" onClick={() => onOpen('test')}>{a.kind === 'baseline' ? 'Пройти тест' : 'Пройти заново'}</button>
           </div>
         </>
       )}
@@ -253,14 +254,15 @@ type FinishedProps = { view: View; onClose: () => void; onRestart: () => void; o
 function Finished({ view, onClose, onRestart, onRescore, busy, error }: FinishedProps) {
   const s = view.summary;
   const r = view.result;
+  const baseline = view.kind === 'baseline';
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Результат теста</h2>
+        <h2 style={{ margin: 0 }}>{baseline ? 'Исходный срез' : 'Результат теста'}</h2>
         {view.finishedAt && <span className="muted" style={{ fontSize: 14 }}>{longDate(view.finishedAt.slice(0, 10))}</span>}
       </div>
       {r ? (
-        <ResultView result={r} levelLabel={view.levelLabel} finishedAt={view.finishedAt} onRescore={onRescore} rescoring={busy === 'score'} />
+        <ResultView result={r} levelLabel={view.levelLabel} finishedAt={view.finishedAt} onRescore={baseline ? undefined : onRescore} rescoring={busy === 'score'} baseline={baseline} />
       ) : (
         <>
           <div className="level-row" style={{ marginTop: 12 }}>
@@ -281,7 +283,7 @@ function Finished({ view, onClose, onRestart, onRescore, busy, error }: Finished
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row" style={{ marginTop: 8 }}>
         <button className="btn" type="button" onClick={onClose} disabled={busy != null}>На главную</button>
-        <button className="link" type="button" onClick={onRestart} disabled={busy != null}>Пройти тест заново</button>
+        <button className="link" type="button" onClick={onRestart} disabled={busy != null}>{baseline ? 'Пройти тест уровня' : 'Пройти тест заново'}</button>
       </div>
     </section>
   );

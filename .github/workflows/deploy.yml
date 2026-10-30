@@ -56,6 +56,15 @@ jobs:
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply offerly --remote
 
+      - name: Seed first user (idempotent)
+        run: |
+          set -o pipefail
+          OUT=$(npx wrangler d1 execute offerly --remote --yes --file seed/first_user.sql 2>&1 | tr "\n\r" "  ") || { echo "::error title=seed::seed/first_user.sql не применился: ${OUT:0:600}"; exit 1; }
+          echo "::notice title=seed::применён seed/first_user.sql: ${OUT:0:300}"
+          Q="SELECT (SELECT count(*) FROM users WHERE email = 'ysamussenko@gmail.com') AS first_user, (SELECT count(*) FROM assessments WHERE kind = 'baseline') AS baseline, (SELECT count(*) FROM error_cards WHERE source = 'seed') AS seed_cards, (SELECT count(*) FROM error_cards) AS all_cards"
+          CNT=$(npx wrangler d1 execute offerly --remote --yes --json --command "$Q" 2>&1 | tr "\n\r" "  ")
+          echo "::notice title=seed counts::${CNT:0:500}"
+
       - name: Push mail secret to Pages (if set)
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
@@ -108,6 +117,9 @@ jobs:
           ASS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/assessment/score")
           echo "::notice title=assessment::GET /api/assessment без cookie → $ASG; POST /api/assessment/start → $AST; POST /api/assessment/answer → $ASA; POST /api/assessment/score → $ASS (ждём 401 везде)"
           [ "$ASG" = "401" ] && [ "$AST" = "401" ] && [ "$ASA" = "401" ] || { echo "::error title=assessment::неожиданные коды ответа"; exit 1; }
+          CRD=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/cards")
+          echo "::notice title=cards::GET /api/cards без cookie → $CRD (ждём 401)"
+          [ "$CRD" = "401" ] || { echo "::error title=cards::неожиданный код ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'

@@ -23,12 +23,14 @@ export type BankStat = { level: Level; kind: ItemKind; status: ItemStatus; count
 export type BankTopics = { levels: Level[]; kinds: { id: ItemKind; label: string }[]; topics: Topic[]; defaultCount: number; maxCount: number };
 export type GenerateResult = { ok: true; requested: number; verified: number; rejected: number; dropped: string[]; items: Item[] };
 export type AssessmentStatus = 'active' | 'finished' | 'abandoned';
+/** placement — тест уровня; checkpoint — контрольный срез; baseline — исходный срез вне приложения. */
+export type AssessmentKind = 'placement' | 'checkpoint' | 'baseline';
 export type TestItem = {
   attemptId: string; itemId: string; position: number; kind: ItemKind; kindLabel: string; prompt: string;
   options?: string[]; questions?: { question: string; options: string[] }[]; words?: { min: number; max: number };
 };
 export type Assessment = {
-  id: string; status: AssessmentStatus; total: number; answered: number; current: TestItem | null;
+  id: string; kind: AssessmentKind; status: AssessmentStatus; total: number; answered: number; current: TestItem | null;
   startedAt: string; finishedAt: string | null; level: Level | null; levelLabel: string | null;
   summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
   result: AssessmentResult | null;
@@ -42,6 +44,10 @@ export type AssessmentResult = {
   examples: ErrorExample[];
   writing: { level: Level; summary: string; rewrite: string | null; errors: number } | null;
   scoredAt: string | null; scoringNote: string | null;
+};
+export type ErrorCard = {
+  id: string; topic: string; topicLabel: string; rule: string | null; example: string | null; correction: string | null;
+  source: string | null; due: string | null; reps: number; lapses: number; retired: boolean; createdAt: string;
 };
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
@@ -86,6 +92,7 @@ export const api = {
   answerAssessment: (attemptId: string, answer: string | string[]) => post<{ ok: true; assessment: Assessment }>('/assessment/answer', { attemptId, answer }),
   abandonAssessment: () => post<{ ok: true; abandoned: boolean }>('/assessment/abandon', {}),
   scoreAssessment: (force = false) => post<{ ok: true; assessment: Assessment }>('/assessment/score', { force }),
+  cards: () => call<{ ok: true; topics: { id: string; label: string }[]; cards: ErrorCard[] }>('/cards'),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */

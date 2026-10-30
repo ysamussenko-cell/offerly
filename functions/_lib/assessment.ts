@@ -26,13 +26,16 @@ export const MIN_AT_LEVEL = 2;
 
 export const STATUSES = ['active', 'finished', 'abandoned'] as const;
 export type AssessmentStatus = typeof STATUSES[number];
+export const KINDS_OF_ASSESSMENT = ['placement', 'checkpoint', 'baseline'] as const;
+export type AssessmentKind = typeof KINDS_OF_ASSESSMENT[number];
 
 export const LEVEL_LABELS: Record<Level, string> = { A2: 'базовый', B1: 'средний', B2: 'выше среднего', C1: 'продвинутый' };
 
 export interface Assessment {
   id: string;
   userId: string;
-  kind: 'placement' | 'checkpoint';
+  /** placement — тест уровня в приложении; checkpoint — контрольный срез (4.3); baseline — исходный срез вне приложения (seed 2.7). */
+  kind: AssessmentKind;
   status: AssessmentStatus;
   startedAt: string;
   finishedAt: string | null;
@@ -190,6 +193,7 @@ export type TestItem = ReturnType<typeof testItem>;
 
 export interface View {
   id: string;
+  kind: AssessmentKind;
   status: AssessmentStatus;
   total: number;
   /** Сколько заданий отвечено. */
@@ -200,7 +204,7 @@ export interface View {
   finishedAt: string | null;
   level: Level | null;
   levelLabel: string | null;
-  /** После завершения: верные ответы адаптивной части, очки за чтение (0/50/100) и длина письма. */
+  /** После завершения: верные ответы адаптивной части, очки за чтение (0/50/100) и длина письма; у исходного среза null. */
   summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
   /** После завершения: пять осей, лестница и примеры ошибок; null — оценка ещё не считалась (тест 0.6.0). */
   result: Result | null;
@@ -215,7 +219,7 @@ export interface Result {
   examples: ErrorExample[];
   writing: { level: Level; summary: string; rewrite: string | null; errors: number } | null;
   scoredAt: string | null;
-  /** Почему письмо не оценено; null — всё посчитано. */
+  /** Почему письмо не оценено; у исходного среза — как он получен; null — всё посчитано. */
   scoringNote: string | null;
 }
 
@@ -254,7 +258,10 @@ export async function view(store: Store, a: Assessment, attempts?: Attempt[]): P
   }
   let summary: View['summary'] = null;
   let result: Result | null = null;
-  if (a.status === 'finished') {
+  if (a.status === 'finished' && a.kind === 'baseline') {
+    // Исходный срез: попыток в приложении нет, оси записаны seed — лестница и радар по ним, примеров ошибок нет (они в журнале).
+    result = buildResult(a, [], new Map());
+  } else if (a.status === 'finished') {
     const adaptive = list.filter(x => x.position <= ADAPTIVE_COUNT && x.correct != null);
     const reading = list.find(x => x.position === ADAPTIVE_COUNT + 1);
     const writing = list.find(x => x.position === ADAPTIVE_COUNT + 2);
@@ -262,7 +269,7 @@ export async function view(store: Store, a: Assessment, attempts?: Attempt[]): P
     result = buildResult(a, list, await itemsOf(store, list));
   }
   return {
-    id: a.id, status: a.status, total: TOTAL, answered, current, startedAt: a.startedAt, finishedAt: a.finishedAt,
+    id: a.id, kind: a.kind, status: a.status, total: TOTAL, answered, current, startedAt: a.startedAt, finishedAt: a.finishedAt,
     level: a.level, levelLabel: a.level ? LEVEL_LABELS[a.level] : null, summary, result,
   };
 }
@@ -412,6 +419,7 @@ export async function score(env: ProviderEnv, store: Store, a: Assessment, attem
 export async function rescore(env: ProviderEnv, store: Store, userId: string, opts: RunOpts = {}, force = false): Promise<View> {
   const a = await store.latestAssessment(userId);
   if (!a || a.status !== 'finished') throw new AssessmentError('assessment_none', 'завершённого теста нет');
+  if (a.kind === 'baseline') throw new AssessmentError('assessment_none', 'исходный срез получен вне приложения и не пересчитывается — пройдите тест уровня');
   const attempts = await store.listAttempts(a.id);
   await score(env, store, a, attempts, opts, force);
   return view(store, a, attempts);
@@ -438,7 +446,7 @@ export async function current(store: Store, userId: string): Promise<View | null
 export function d1AssessmentStore(db: D1Database): AssessmentStore {
   const n = (v: unknown) => v == null ? null : Number(v);
   const toA = (r: any): Assessment => ({
-    id: r.id, userId: r.user_id, kind: r.kind, status: (STATUSES as readonly string[]).includes(r.status) ? r.status : 'active',
+    id: r.id, userId: r.user_id, kind: (KINDS_OF_ASSESSMENT as readonly string[]).includes(r.kind) ? r.kind : 'placement', status: (STATUSES as readonly string[]).includes(r.status) ? r.status : 'active',
     startedAt: r.started_at, finishedAt: r.finished_at ?? null, level: r.level ?? null, currentLevel: r.current_level ?? START_LEVEL, updatedAt: r.updated_at ?? r.started_at,
     axes: r.scored_at ? { grammar: n(r.grammar), vocabulary: n(r.vocabulary), coherence: n(r.coherence), taskResponse: n(r.task_response), fluency: n(r.fluency) } : null,
     overall: n(r.overall), scoredAt: r.scored_at ?? null, scoringNote: r.scoring_note ?? null,
