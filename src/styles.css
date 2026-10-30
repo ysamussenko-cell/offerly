@@ -41,3 +41,13 @@ code, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .facts dd { margin: 0; font-family: Manrope, Inter, sans-serif; font-weight: 600; font-size: 18px; }
 .chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; }
 .chips li { font-size: 13px; padding: 4px 10px; border-radius: 8px; background: var(--paper); border: 1px solid var(--line); }
+.field select { font: inherit; font-size: 16px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; outline: none; max-width: 100%; }
+.field select:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(242, 165, 65, .25); }
+.field small { font-size: 13px; line-height: 1.4; }
+fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset.field legend { padding: 0; margin-bottom: 6px; }
+.questions { gap: 22px; }
+.q > span, .q > legend { color: var(--ink); font-weight: 500; font-size: 15px; display: flex; align-items: center; gap: 10px; }
+.qn { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; align-items: center; justify-content: center; background: var(--graphite); color: var(--paper); font-family: Manrope, Inter, sans-serif; font-size: 12px; font-weight: 800; flex: none; }
+@media (prefers-color-scheme: dark) { .qn { background: var(--amber); color: #141C2B; } }
+.facts small { font-size: 13px; }

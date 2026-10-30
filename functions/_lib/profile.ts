@@ -16,6 +16,12 @@ export interface Profile {
   resumeText: string | null;
   resumeName: string | null;
   resumeAt: string | null;
+  /** Анкета знакомства (см. onboarding.ts); null — вопрос ещё не отвечен. */
+  interviewDate: string | null;
+  interviewFormat: string | null;
+  minutesPerDay: number | null;
+  nativeLanguage: string | null;
+  onboardedAt: string | null;
   updatedAt: string;
 }
 
@@ -31,7 +37,9 @@ export interface Analysis { specialty: string | null; industry: string | null; y
 export const publicProfile = (p: Profile) => ({
   specialty: p.specialty, industry: p.industry, years: p.years, targetRole: p.targetRole, keywords: p.keywords,
   summary: p.summary, resumeName: p.resumeName, resumeAt: p.resumeAt, resumeChars: p.resumeText?.length ?? 0,
-  analyzed: Boolean(p.specialty || p.industry || p.keywords.length), updatedAt: p.updatedAt,
+  analyzed: Boolean(p.specialty || p.industry || p.keywords.length),
+  interviewDate: p.interviewDate, interviewFormat: p.interviewFormat, minutesPerDay: p.minutesPerDay,
+  nativeLanguage: p.nativeLanguage, onboardedAt: p.onboardedAt, onboarded: Boolean(p.onboardedAt), updatedAt: p.updatedAt,
 });
 
 const SYSTEM_PROMPT = `You read a candidate's résumé and return a compact professional profile for an English interview coach.
@@ -135,7 +143,10 @@ export function d1ProfileStore(db: D1Database): ProfileStore {
     return {
       userId: r.user_id, specialty: r.specialty ?? null, industry: r.industry ?? null, years: r.years ?? null,
       targetRole: r.target_role ?? null, keywords, summary: r.summary ?? null, resumeText: r.resume_text ?? null,
-      resumeName: r.resume_name ?? null, resumeAt: r.resume_at ?? null, updatedAt: r.updated_at,
+      resumeName: r.resume_name ?? null, resumeAt: r.resume_at ?? null,
+      interviewDate: r.interview_date ?? null, interviewFormat: r.interview_format ?? null,
+      minutesPerDay: r.minutes_per_day ?? null, nativeLanguage: r.native_language ?? null, onboardedAt: r.onboarded_at ?? null,
+      updatedAt: r.updated_at,
     };
   };
   return {
@@ -152,11 +163,13 @@ export function d1ProfileStore(db: D1Database): ProfileStore {
          specialty = NULL, industry = NULL, years = NULL, keywords = NULL, summary = NULL`,
       ).bind(userId, text, name, nowIso, nowIso).run();
     },
+    /** Целевую позицию модель заполняет только до анкеты: ответ пользователя важнее догадки по резюме. */
     async saveAnalysis(userId, a, nowIso) {
       await db.prepare(
         `INSERT INTO profiles (user_id, specialty, industry, years, target_role, keywords, summary, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET specialty = excluded.specialty, industry = excluded.industry, years = excluded.years,
-         target_role = excluded.target_role, keywords = excluded.keywords, summary = excluded.summary, updated_at = excluded.updated_at`,
+         target_role = CASE WHEN profiles.onboarded_at IS NULL THEN excluded.target_role ELSE profiles.target_role END,
+         keywords = excluded.keywords, summary = excluded.summary, updated_at = excluded.updated_at`,
       ).bind(userId, a.specialty, a.industry, a.years, a.targetRole, JSON.stringify(a.keywords), a.summary, nowIso).run();
     },
   };

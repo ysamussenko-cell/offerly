@@ -93,6 +93,9 @@ jobs:
           RES=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F 'file=@health.json;filename=cv.txt' "$P/api/resume")
           echo "::notice title=resume::GET /api/profile без cookie → $PROF (ждём 401); POST /api/resume без cookie → $RES (ждём 401)"
           [ "$PROF" = "401" ] && [ "$RES" = "401" ] || { echo "::error title=resume::неожиданные коды ответа"; exit 1; }
+          ONB=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"targetRole":"x"}' "$P/api/onboarding")
+          echo "::notice title=onboarding::PUT /api/onboarding без cookie → $ONB (ждём 401)"
+          [ "$ONB" = "401" ] || { echo "::error title=onboarding::неожиданный код ответа"; exit 1; }
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'

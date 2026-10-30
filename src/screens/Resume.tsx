@@ -1,5 +1,6 @@
 import { useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { api, ApiError, errorText, type Profile } from '../api';
+import { yearsText } from '../text';
 
 const ACCEPT = '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
 const MIN_CHARS = 200;
@@ -95,8 +96,8 @@ export default function Resume({ profile, onProfile, onCancel }: { profile: Prof
   );
 }
 
-/** Карточка профиля: что тренер понял из резюме. */
-export function ProfileCard({ profile, onReplace, onRetry }: { profile: Profile; onReplace: () => void; onRetry: () => Promise<void> }) {
+/** Карточка профиля: что тренер понял из резюме. Пока анкета не заполнена — ведёт к ней. */
+export function ProfileCard({ profile, onReplace, onRetry, onNext }: { profile: Profile; onReplace: () => void; onRetry: () => Promise<void>; onNext?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const when = profile.resumeAt ? new Date(profile.resumeAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : null;
@@ -131,18 +132,13 @@ export function ProfileCard({ profile, onReplace, onRetry }: { profile: Profile;
       {error && <p className="error" role="alert" style={{ marginTop: 12 }}>{error}</p>}
       <div className="row" style={{ marginTop: 20 }}>
         {!profile.analyzed && <button className="btn" type="button" disabled={busy} onClick={retry}>{busy ? 'Разбираю…' : 'Разобрать снова'}</button>}
-        <button className={profile.analyzed ? 'btn secondary' : 'link'} type="button" disabled={busy} onClick={onReplace}>Загрузить другое резюме</button>
+        {onNext && <button className="btn" type="button" disabled={busy} onClick={onNext}>Дальше — шесть вопросов</button>}
+        <button className={profile.analyzed && !onNext ? 'btn secondary' : 'link'} type="button" disabled={busy} onClick={onReplace}>Загрузить другое резюме</button>
         <span className="muted" style={{ fontSize: 14 }}>
           {profile.resumeName && profile.resumeName !== 'текст' ? profile.resumeName : 'вставленный текст'}{when ? `, ${when}` : ''}
         </span>
       </div>
-      <p className="muted" style={{ marginTop: 16, fontSize: 14 }}>Следующий шаг — короткая анкета и тест уровня; появятся в ближайших обновлениях.</p>
+      {onNext && <p className="muted" style={{ marginTop: 16, fontSize: 14 }}>Дальше — короткая анкета: цель, дата и формат собеседования, нагрузка. Две минуты.</p>}
     </section>
   );
-}
-
-function yearsText(n: number): string {
-  const mod10 = n % 10, mod100 = n % 100;
-  const word = mod10 === 1 && mod100 !== 11 ? 'год' : mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20) ? 'года' : 'лет';
-  return `${n} ${word}`;
 }

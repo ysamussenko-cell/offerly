@@ -3,6 +3,7 @@ import { api, type Health, type Profile, type User } from './api';
 import Login from './screens/Login';
 import { InstallButton } from './install';
 import Resume, { ProfileCard } from './screens/Resume';
+import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -12,6 +13,8 @@ export default function App() {
   const [auth, setAuth] = useState<Auth>({ state: 'loading' });
   const [profile, setProfile] = useState<ProfileState>({ state: 'loading' });
   const [replacing, setReplacing] = useState(false);
+  /** Анкета: 'auto' — открыть сразу после разбора резюме, 'open' — по кнопке, 'closed' — отложена или сохранена. */
+  const [survey, setSurvey] = useState<'auto' | 'open' | 'closed'>('auto');
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false, version: '-', db: 'error', ai: 'error' }));
@@ -19,7 +22,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); return; }
+    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); return; }
     api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
   }, [auth.state]);
 
@@ -28,6 +31,16 @@ export default function App() {
   }
 
   function gotProfile(p: Profile) { setProfile({ state: 'ready', profile: p }); setReplacing(false); }
+  function gotAnswers(p: Profile, u: User) {
+    setProfile({ state: 'ready', profile: p });
+    setSurvey('closed');
+    if (auth.state === 'in') setAuth({ ...auth, user: u });
+  }
+
+  const ready = auth.state === 'in' && profile.state === 'ready' ? profile.profile : undefined;
+  const showResume = ready !== undefined && (ready === null || replacing);
+  // Анкета открывается сама один раз — когда резюме разобрано, а ответов ещё нет; позже — по кнопке.
+  const showSurvey = ready != null && !showResume && (survey === 'open' || (survey === 'auto' && ready.analyzed && !ready.onboarded));
 
   return (
     <main className="wrap">
@@ -58,10 +71,21 @@ export default function App() {
 
       {auth.state === 'in' && profile.state === 'loading' && <section className="card"><p className="muted">Загружаю профиль…</p></section>}
 
-      {auth.state === 'in' && profile.state === 'ready' && (profile.profile === null || replacing
-        ? <Resume profile={profile.profile} onProfile={gotProfile} onCancel={replacing ? () => setReplacing(false) : undefined} />
-        : <ProfileCard profile={profile.profile} onReplace={() => setReplacing(true)}
-            onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }} />
+      {auth.state === 'in' && showResume && (
+        <Resume profile={ready ?? null} onProfile={gotProfile} onCancel={replacing ? () => setReplacing(false) : undefined} />
+      )}
+
+      {auth.state === 'in' && showSurvey && ready && (
+        <Questionnaire profile={ready} user={auth.user} onSaved={gotAnswers} onCancel={() => setSurvey('closed')} />
+      )}
+
+      {auth.state === 'in' && ready && !showResume && !showSurvey && (
+        <div className="stack" style={{ marginTop: 0 }}>
+          {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
+          <ProfileCard profile={ready} onReplace={() => setReplacing(true)}
+            onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}
+            onNext={ready.onboarded ? undefined : () => setSurvey('open')} />
+        </div>
       )}
 
       {auth.state !== 'loading' && (

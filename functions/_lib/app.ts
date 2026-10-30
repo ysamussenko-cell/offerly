@@ -7,13 +7,14 @@ import {
 import { loginCodeMail, sendMail, type MailEnv } from './mail';
 import { extractResumeText, ExtractError, MAX_FILE_BYTES, MIN_TEXT_CHARS, normalizeText, selfTestExtract } from './extract';
 import { analyzeResume, d1ProfileStore, publicProfile, SELF_TEST_RESUME, type ProfileStore } from './profile';
+import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onboarding';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -24,7 +25,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -178,6 +179,19 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const p = await c.get('store').getProfile(userId);
     return c.json({ ok: true, profile: p ? publicProfile(p) : null });
   }
+
+  // --- анкета знакомства ---
+
+  /** Шесть ответов анкеты. Часовой пояс пишется в users, остальное — в profiles; разбор резюме не трогается. */
+  app.put('/onboarding', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    const v = validateAnswers(body);
+    if (!v.ok) return c.json({ ok: false, error: 'onboarding_invalid', field: v.field, reason: v.reason }, 400);
+    await c.get('store').saveAnswers(user.id, v.answers, new Date().toISOString());
+    const p = await c.get('store').getProfile(user.id);
+    return c.json({ ok: true, profile: p ? publicProfile(p) : null, user: publicUser({ ...user, tz: v.answers.tz }) });
+  });
 
   return app;
 }
