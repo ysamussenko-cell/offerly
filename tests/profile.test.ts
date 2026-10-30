@@ -59,9 +59,22 @@ describe('analyzeResume', () => {
     const [, messages] = chatFn.mock.calls[1] as any;
     expect(messages.at(-1).content).toMatch(/not valid JSON/);
   });
-  it('после двух неудач — ошибка profile_failed', async () => {
+  it('после двух неудач — ошибка с началом ответа модели', async () => {
     const chatFn = vi.fn(async () => 'nope');
-    await expect(analyzeResume(env, 'resume', { chatFn })).rejects.toThrow('profile_failed');
+    await expect(analyzeResume(env, 'resume', { chatFn })).rejects.toThrow(/не вернула профиль/);
     expect(chatFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('JSON-режим модели', () => {
+  it('Workers AI получает json_schema, ответ-объект превращается в строку', async () => {
+    const { chat } = await import('../functions/_lib/providers');
+    const { ANALYSIS_SCHEMA } = await import('../functions/_lib/profile');
+    const run = vi.fn(async (_m: string, input: any) => {
+      expect(input.response_format).toEqual({ type: 'json_schema', json_schema: ANALYSIS_SCHEMA });
+      return { response: { specialty: 'x' } };
+    });
+    const env: any = { AI: { run }, DB: null, APP_NAME: 'Offerly' };
+    expect(await chat(env, [{ role: 'user', content: 'hi' }], { jsonSchema: ANALYSIS_SCHEMA })).toBe('{"specialty":"x"}');
   });
 });

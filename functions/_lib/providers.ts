@@ -24,14 +24,22 @@ export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: s
 export interface Env { DB: D1Database; AI: Ai; APP_NAME: string }
 
 /** Один вызов модели: встроенная через binding AI, остальные — OpenAI-совместимый HTTP или Anthropic. */
-export async function chat(env: Env, messages: ChatMessage[], opts: { provider?: ProviderId; apiKey?: string; model?: string; maxTokens?: number } = {}): Promise<string> {
+export interface ChatOpts { provider?: ProviderId; apiKey?: string; model?: string; maxTokens?: number;
+  /** JSON-схема ответа: Workers AI получает её как json_schema (ответ гарантированно валиден), OpenAI-совместимые — json_object. */
+  jsonSchema?: Record<string, unknown> }
+
+export async function chat(env: Env, messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
   const provider = PROVIDERS.find(p => p.id === (opts.provider ?? 'workers-ai'))!;
   const model = opts.model ?? provider.defaultModel;
   const maxTokens = opts.maxTokens ?? 1024;
 
   if (provider.id === 'workers-ai') {
-    const out: any = await env.AI.run(model as any, { messages, max_tokens: maxTokens });
-    return typeof out === 'string' ? out : (out.response ?? '');
+    const input: Record<string, unknown> = { messages, max_tokens: maxTokens };
+    if (opts.jsonSchema) input.response_format = { type: 'json_schema', json_schema: opts.jsonSchema };
+    const out: any = await env.AI.run(model as any, input as any);
+    if (typeof out === 'string') return out;
+    const r = out?.response;
+    return typeof r === 'string' ? r : r == null ? '' : JSON.stringify(r);
   }
   if (!opts.apiKey) throw new Error('Для этого провайдера нужен ключ');
 
@@ -51,7 +59,7 @@ export async function chat(env: Env, messages: ChatMessage[], opts: { provider?:
   const r = await fetch(provider.url!, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${opts.apiKey}` },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, ...(opts.jsonSchema ? { response_format: { type: 'json_object' } } : {}) }),
   });
   if (!r.ok) throw new Error(`${provider.short} ${r.status}: ${await r.text()}`);
   const j: any = await r.json();

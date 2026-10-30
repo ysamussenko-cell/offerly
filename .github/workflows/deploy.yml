@@ -93,7 +93,7 @@ jobs:
           RES=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F 'file=@health.json;filename=cv.txt' "$P/api/resume")
           echo "::notice title=resume::GET /api/profile без cookie → $PROF (ждём 401); POST /api/resume без cookie → $RES (ждём 401)"
           [ "$PROF" = "401" ] && [ "$RES" = "401" ] || { echo "::error title=resume::неожиданные коды ответа"; exit 1; }
-          curl -fsS "$P/api/health?deep=1" > deep.json
+          curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
-          node -e 'const h=require("./deep.json"); if(h.ai_chat!=="ok"){console.log("::warning title=ai_chat::"+h.ai_chat)}'
+          node -e 'const h=require("./deep.json"); if(h.ai_chat!=="ok"){console.log("::warning title=ai_chat::"+h.ai_chat)}; if(!String(h.analysis).startsWith("ok")){console.log("::warning title=analysis::"+h.analysis)}'

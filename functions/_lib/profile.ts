@@ -35,16 +35,28 @@ export const publicProfile = (p: Profile) => ({
 });
 
 const SYSTEM_PROMPT = `You read a candidate's résumé and return a compact professional profile for an English interview coach.
-Return ONLY a JSON object, no prose, no markdown fences, with exactly these keys:
-{
-  "specialty": string — the candidate's profession in Russian, 2–6 words (e.g. "инженер-теплоэнергетик"),
-  "industry": string — the industry in Russian, 1–4 words (e.g. "энергетика"),
-  "years": integer — total years of professional experience, estimated from dates; 0 if unknown,
-  "target_role": string|null — the role the résumé is aimed at, in Russian, or null,
-  "keywords": array of 10–20 strings — the candidate's professional terms IN ENGLISH, as they would be said in an English interview: tools, methods, domain terms, standards; lower case unless proper nouns,
-  "summary": string — 2–3 sentences in Russian, addressed to the candidate as «вы», stating plainly what you understood: who they are, how long they have worked, what they are strong in. Calm, direct, no exclamation marks, no emoji.
-}
+Return ONLY one JSON object with these keys and nothing else (no prose, no markdown fences, no comments):
+- specialty: the candidate's profession in Russian, 2–6 words, for example "инженер-теплоэнергетик";
+- industry: the industry in Russian, 1–4 words, for example "энергетика";
+- years: integer, total years of professional experience estimated from dates; 0 if unknown;
+- target_role: the role the résumé is aimed at, in Russian, or null;
+- keywords: array of 10–20 strings, the candidate's professional terms IN ENGLISH as they would be said in an English interview (tools, methods, domain terms, standards), lower case unless proper nouns;
+- summary: 2–3 sentences in Russian addressed to the candidate as «вы», stating plainly what you understood: who they are, how long they have worked, what they are strong in. Calm and direct, no exclamation marks.
 Use only facts present in the résumé. Do not invent employers, degrees or skills.`;
+
+/** Схема ответа для JSON-режима модели — ответ гарантированно разбирается. */
+export const ANALYSIS_SCHEMA = {
+  type: 'object',
+  properties: {
+    specialty: { type: 'string' },
+    industry: { type: 'string' },
+    years: { type: 'integer' },
+    target_role: { type: ['string', 'null'] },
+    keywords: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+  },
+  required: ['specialty', 'industry', 'years', 'keywords', 'summary'],
+};
 
 const RETRY_NOTE = 'Your previous answer was not valid JSON. Return only the JSON object described, nothing else.';
 
@@ -104,14 +116,14 @@ export async function analyzeResume(env: ProviderEnv, text: string, opts: Analyz
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: `RÉSUMÉ:\n\n${text.slice(0, MODEL_TEXT_CHARS)}` },
   ];
-  const chatOpts = { provider: opts.provider, apiKey: opts.apiKey, model: opts.model, maxTokens: 900 };
+  const chatOpts = { provider: opts.provider, apiKey: opts.apiKey, model: opts.model, maxTokens: 900, jsonSchema: ANALYSIS_SCHEMA };
   let reply = await call(env, messages, chatOpts);
   let a = normalizeAnalysis(extractJsonObject(reply));
   if (!a) {
     reply = await call(env, [...messages, { role: 'assistant', content: reply.slice(0, 2000) }, { role: 'user', content: RETRY_NOTE }], chatOpts);
     a = normalizeAnalysis(extractJsonObject(reply));
   }
-  if (!a) throw new Error('profile_failed');
+  if (!a) throw new Error(`модель не вернула профиль; ответ: «${reply.replace(/\s+/g, ' ').slice(0, 200)}»`);
   return a;
 }
 
@@ -149,3 +161,11 @@ export function d1ProfileStore(db: D1Database): ProfileStore {
     },
   };
 }
+
+/** Короткое тестовое резюме для самопроверки разбора (/api/health?deep=2). */
+export const SELF_TEST_RESUME = [
+  'Ivan Petrov — Thermal Power Engineer',
+  'Experience: 2011–2026, combined heat and power plant, boiler and steam turbine operation, heat balance calculations.',
+  'Energy audits of industrial sites; technical reports and feasibility studies.',
+  'Skills: boiler efficiency, turbine performance testing, energy audit, heat loss calculation, Excel, Python.',
+].join('\n');
