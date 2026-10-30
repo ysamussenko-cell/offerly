@@ -4,10 +4,10 @@
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "ca2bee1",
-    "run": 41092515079,
+    "commit": "45501ae",
+    "run": 41093639080,
     "version": "0.13.0",
-    "health": "Smoke test прошёл (health ok, db ok, ai ok, extract ok — проверяется шагом; аннотации health/extract в run 41092515079 не видны: лимит 10 notice на шаг, с 0.13.0 проверки разнесены по трём шагам)",
+    "health": "ok:true db:ok ai:ok mail:ok extract:ok ai_chat:ok analysis:ok (version 0.13.0, аннотация extract шага Deep check; аннотация health шага Health check в списке по-прежнему не видна — проверка самого шага прошла)",
     "seed": "first_user=1, baseline=1, seed_cards=14, all_cards=14, retired=0, fsrs_touched=0 (миграция 0013 применена)",
     "smoke": "lesson/bonus, achievements, achievements/seen, dashboard, lesson, program, cards, assessment, items, onboarding, resume, auth без cookie → 401/400 как ждём"
   },
