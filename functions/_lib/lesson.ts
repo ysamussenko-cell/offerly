@@ -80,6 +80,8 @@ export interface LessonStore {
   updateLesson(id: string, patch: LessonPatch): Promise<void>;
   /** Последнее занятие пользователя за дату (активное или завершённое). */
   lessonForDay(userId: string, dayDate: string): Promise<Lesson | null>;
+  /** Все занятия пользователя по дате (главный экран: серия, минуты недели, готовность). */
+  listLessons(userId: string): Promise<Lesson[]>;
   insertStep(s: LessonStep): Promise<void>;
   updateStep(id: string, patch: StepPatch): Promise<void>;
   listSteps(lessonId: string): Promise<LessonStep[]>;
@@ -471,6 +473,10 @@ export function d1LessonStore(db: D1Database): LessonStore {
     async lessonForDay(userId, dayDate) {
       const r = await db.prepare('SELECT * FROM lessons WHERE user_id = ? AND day_date = ? ORDER BY started_at DESC LIMIT 1').bind(userId, dayDate).first();
       return r ? toL(r) : null;
+    },
+    async listLessons(userId) {
+      const rs = await db.prepare('SELECT * FROM lessons WHERE user_id = ? ORDER BY day_date, started_at').bind(userId).all();
+      return (rs.results as any[]).map(toL);
     },
     async insertStep(s) {
       await db.prepare('INSERT INTO lesson_steps (id, lesson_id, user_id, position, part, item_id, card_id, level, answer, correct, score, feedback, detail, created_at, answered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')

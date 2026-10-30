@@ -22,6 +22,9 @@ export interface Profile {
   minutesPerDay: number | null;
   nativeLanguage: string | null;
   onboardedAt: string | null;
+  /** Целевой уровень CEFR (seed 2.7; настройка — 4.6) и своя недельная цель в минутах (3.4); null — по умолчанию. */
+  targetLevel: string | null;
+  weeklyGoalMinutes: number | null;
   updatedAt: string;
 }
 
@@ -39,7 +42,8 @@ export const publicProfile = (p: Profile) => ({
   summary: p.summary, resumeName: p.resumeName, resumeAt: p.resumeAt, resumeChars: p.resumeText?.length ?? 0,
   analyzed: Boolean(p.specialty || p.industry || p.keywords.length),
   interviewDate: p.interviewDate, interviewFormat: p.interviewFormat, minutesPerDay: p.minutesPerDay,
-  nativeLanguage: p.nativeLanguage, onboardedAt: p.onboardedAt, onboarded: Boolean(p.onboardedAt), updatedAt: p.updatedAt,
+  nativeLanguage: p.nativeLanguage, onboardedAt: p.onboardedAt, onboarded: Boolean(p.onboardedAt),
+  targetLevel: p.targetLevel, weeklyGoalMinutes: p.weeklyGoalMinutes, updatedAt: p.updatedAt,
 });
 
 const SYSTEM_PROMPT = `You read a candidate's résumé and return a compact professional profile for an English interview coach.
@@ -146,6 +150,7 @@ export function d1ProfileStore(db: D1Database): ProfileStore {
       resumeName: r.resume_name ?? null, resumeAt: r.resume_at ?? null,
       interviewDate: r.interview_date ?? null, interviewFormat: r.interview_format ?? null,
       minutesPerDay: r.minutes_per_day ?? null, nativeLanguage: r.native_language ?? null, onboardedAt: r.onboarded_at ?? null,
+      targetLevel: r.target_level ?? null, weeklyGoalMinutes: r.weekly_goal_minutes == null ? null : Number(r.weekly_goal_minutes),
       updatedAt: r.updated_at,
     };
   };

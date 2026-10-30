@@ -9,6 +9,7 @@ import Assessment, { TestCard, type Mode } from './screens/Assessment';
 import { JournalCard } from './screens/Journal';
 import { ProgramCard } from './screens/Program';
 import Lesson, { LessonCard } from './screens/Lesson';
+import { HomeCard } from './screens/Home';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -99,6 +100,7 @@ export default function App() {
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && !lesson && (
         <div className="stack" style={{ marginTop: 0 }}>
+          {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenLesson={() => setLesson(true)} />}
           {ready.analyzed && <LessonCard refreshKey={testRuns} onOpen={() => setLesson(true)} />}
           {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}
           {ready.analyzed && <TestCard onOpen={setTesting} refreshKey={testRuns} />}

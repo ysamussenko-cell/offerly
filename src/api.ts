@@ -4,7 +4,7 @@ export type Profile = {
   specialty: string | null; industry: string | null; years: number | null; targetRole: string | null; keywords: string[];
   summary: string | null; resumeName: string | null; resumeAt: string | null; resumeChars: number; analyzed: boolean;
   interviewDate: string | null; interviewFormat: InterviewFormat | null; minutesPerDay: number | null; nativeLanguage: string | null;
-  onboardedAt: string | null; onboarded: boolean; updatedAt: string;
+  onboardedAt: string | null; onboarded: boolean; targetLevel: string | null; weeklyGoalMinutes: number | null; updatedAt: string;
 };
 export type Answers = {
   targetRole: string; interviewDate: string | null; interviewFormat: InterviewFormat; minutesPerDay: number; tz: string; nativeLanguage: string;
@@ -88,6 +88,22 @@ export type LessonToday = {
   ok: true; warmup: number; reviewMax: number; today: string; day: ProgramDay | null; available: boolean;
   reason: 'no_program' | 'no_day' | 'rehearsal' | 'checkpoint' | null; lesson: Lesson | null;
 };
+export type WeekStatus = 'done' | 'active' | 'today' | 'planned' | 'missed' | 'frozen' | 'unavailable' | 'free';
+export type WeekDay = { date: string; weekday: string; today: boolean; past: boolean; day: ProgramDay | null; status: WeekStatus; minutes: number; score: number | null };
+export type Dashboard = {
+  ok: true; gainPerLesson: number; missPenalty: number; missCap: number; freezesPerWeek: number; goalMin: number; goalMax: number; goalDays: number;
+  today: string;
+  readiness: {
+    value: number | null; base: number | null; baseKind: AssessmentKind | null; baseDate: string | null; level: Level | null;
+    gained: number; lost: number; lessons: number; missed: number;
+    forecast: { perDay: number; next: { level: Level; points: number; days: number | null } | null; atInterview: number | null; target: { level: Level; points: number; reached: boolean } };
+  };
+  countdown: { interviewDate: string | null; daysLeft: number | null };
+  streak: { current: number; best: number; todayDone: boolean; freezeAvailable: boolean; frozen: string[]; missed: string[]; lastDone: string | null };
+  goal: { minutes: number; custom: boolean; done: number; left: number; default: number; percent: number };
+  week: WeekDay[];
+  program: { exists: boolean; endDate: string | null; done: number; total: number };
+};
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -138,6 +154,8 @@ export const api = {
   lesson: () => call<LessonToday>('/lesson'),
   startLesson: () => post<{ ok: true; lesson: Lesson }>('/lesson/start', {}),
   answerLesson: (stepId: string, answer: string) => post<{ ok: true; lesson: Lesson }>('/lesson/answer', { stepId, answer }),
+  dashboard: () => call<Dashboard>('/dashboard'),
+  saveGoal: (minutes: number | null) => put<Dashboard>('/dashboard/goal', { minutes }),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -172,6 +190,7 @@ export const ERRORS: Record<string, string> = {
   lesson_none: 'Активного занятия на сегодня нет. Вернитесь на главную и начните занятие.',
   lesson_stale: 'Этот шаг уже закрыт — экран обновлён, ответьте на текущий.',
   lesson_eval_failed: 'Модель не оценила письмо. Текст на месте — отправьте ещё раз через минуту.',
+  goal_invalid: 'Недельная цель — целое число минут от 15 до 1260.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 

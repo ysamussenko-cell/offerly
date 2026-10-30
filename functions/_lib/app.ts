@@ -13,13 +13,14 @@ import { d1CardStore, publicCard, CARD_TOPICS, type CardStore } from './cards';
 import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
 import { d1ProgramStore, generateProgram, swapDays, current as currentProgram, ProgramError, PROGRAM_TOPICS, PROGRAM_DAYS, type ProgramStore } from './program';
 import { d1LessonStore, today as lessonToday, startOrResume as startLesson, answer as answerLesson, LessonError, WARMUP_COUNT, REVIEW_MAX, type LessonStore } from './lesson';
+import { d1DashboardStore, dashboard, parseGoal, GAIN_PER_LESSON, MISS_PENALTY, MISS_CAP, FREEZES_PER_WEEK, GOAL_MIN, GOAL_MAX, GOAL_DAYS_DEFAULT, type DashboardStore } from './dashboard';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -30,7 +31,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -348,6 +349,28 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const body = await c.req.json().catch(() => ({}));
     try { return c.json({ ok: true, ...lessonMeta, lesson: await answerLesson(c.env, c.get('store'), user.id, body.stepId, body.answer, user.tz, await domainOf(c)) }); }
     catch (e) { return lessonFail(c, e); }
+  });
+
+  // --- главный экран ---
+
+  const dashboardMeta = { gainPerLesson: GAIN_PER_LESSON, missPenalty: MISS_PENALTY, missCap: MISS_CAP, freezesPerWeek: FREEZES_PER_WEEK, goalMin: GOAL_MIN, goalMax: GOAL_MAX, goalDays: GOAL_DAYS_DEFAULT };
+
+  /** Готовность 0–100 с разбором и прогнозом, обратный отсчёт, серия с заморозкой, недельная цель и план недели. */
+  app.get('/dashboard', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const p = await c.get('store').getProfile(user.id);
+    return c.json({ ok: true, ...dashboardMeta, ...(await dashboard(c.get('store'), user.id, user.tz, p)) });
+  });
+
+  /** Своя недельная цель: {minutes} — целое от GOAL_MIN до GOAL_MAX; null — вернуться к значению по умолчанию. */
+  app.put('/dashboard/goal', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    const v = parseGoal(body?.minutes);
+    if (!v.ok) return c.json({ ok: false, error: 'goal_invalid', reason: v.reason }, 400);
+    await c.get('store').saveWeeklyGoal(user.id, v.minutes, new Date().toISOString());
+    const p = await c.get('store').getProfile(user.id);
+    return c.json({ ok: true, ...dashboardMeta, ...(await dashboard(c.get('store'), user.id, user.tz, p)) });
   });
 
   return app;
