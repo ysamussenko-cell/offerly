@@ -56,6 +56,17 @@ jobs:
       - name: Apply D1 migrations
         run: npx wrangler d1 migrations apply offerly --remote
 
+      - name: Push mail secret to Pages (if set)
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          if [ -n "$RESEND_API_KEY" ]; then
+            OUT=$(printf '%s' "$RESEND_API_KEY" | npx wrangler pages secret put RESEND_API_KEY --project-name offerly 2>&1 | tr "\n\r" "  ")
+            echo "::notice title=mail::RESEND_API_KEY передан в Pages: ${OUT:0:300}"
+          else
+            echo "::notice title=mail::RESEND_API_KEY не задан — вход по почте вернёт mail_not_configured"
+          fi
+
       - name: Deploy to Cloudflare Pages
         id: deploy
         run: |

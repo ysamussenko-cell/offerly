@@ -13,3 +13,4 @@ binding = "AI"
 
 [vars]
 APP_NAME = "Offerly"
+MAIL_FROM = "Offerly <onboarding@resend.dev>"

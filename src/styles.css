@@ -17,3 +17,13 @@ code, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .muted { color: var(--muted); }
 .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .ok { color: var(--mint-text); } .bad { color: var(--coral-text); }
+.topbar { justify-content: space-between; margin-bottom: 32px; }
+.stack { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
+.field input { font: inherit; font-size: 16px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; outline: none; }
+.field input:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(242, 165, 65, .25); }
+.code-input { font-size: 28px !important; letter-spacing: .3em; max-width: 260px; }
+.error { color: var(--coral-text); margin: 0; font-size: 14px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.link { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; text-decoration: underline; cursor: pointer; }
+.link:disabled { opacity: .5; cursor: default; }
