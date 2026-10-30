@@ -81,5 +81,11 @@ jobs:
       - name: Smoke test
         run: |
           sleep 20
-          curl -fsS "${{ steps.deploy.outputs.prod }}/api/health" | tee health.json
-          node -e 'const h=require("./health.json"); if(!h.ok){console.error("health not ok", h); process.exit(1)}'
+          P="${{ steps.deploy.outputs.prod }}"
+          curl -fsS "$P/api/health" | tee health.json
+          echo "::notice title=health::$(tr -d '\n' < health.json)"
+          node -e 'const h=require("./health.json"); if(!h.ok||h.db!=="ok"||h.ai!=="ok"){console.error("health not ok", h); process.exit(1)}'
+          ME=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/me")
+          REQ=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"email":"bad"}' "$P/api/auth/request")
+          echo "::notice title=auth::GET /api/me без cookie → $ME (ждём 401); POST /api/auth/request с плохим адресом → $REQ (ждём 400)"
+          [ "$ME" = "401" ] && [ "$REQ" = "400" ] || { echo "::error title=auth::неожиданные коды ответа"; exit 1; }

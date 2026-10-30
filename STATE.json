@@ -1,11 +1,16 @@
 {
   "current_task": null,
-  "last_completed": "0 Каркас",
+  "last_completed": "2.1 Регистрация по почте с кодом (без пароля)",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "HEAD"
+    "commit": "8d3e44e",
+    "run": 41001523873,
+    "version": "0.2.0"
   },
   "defects": [],
-  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error."
+  "pending_from_yuriy": [
+    "Добавить в Repository secrets GitHub ключ RESEND_API_KEY (resend.com → API Keys); без него письма с кодом не отправляются (API отвечает mail_not_configured). Отправитель по умолчанию onboarding@resend.dev доставляет только на адрес владельца аккаунта Resend; для других адресов нужен свой домен и MAIL_FROM в wrangler.toml."
+  ],
+  "notes": "Адрес offerly.pages.dev занят чужим проектом; рабочий адрес — offerly-c8b.pages.dev. Деплой: GitHub Actions, D1 offerly (uuid 205ced2d-2918-47bf-a0a9-eca22400708e). Логи Actions из облака не читаются (прокси), диагностика — через аннотации ::notice/::error; WebFetch к pages.dev из плановой сессии не проходит без подтверждения, поэтому живая проверка /api/health и /api/auth/* выполняется шагом Smoke test в workflow (аннотации health и auth). Локально API проверяется через `wrangler pages dev dist` с .dev.vars DEV_ECHO_CODE=1 — код входа возвращается в ответе."
 }
