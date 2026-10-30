@@ -64,7 +64,7 @@ export default function App() {
             onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }} />
       )}
 
-      {auth.state === 'in' && (
+      {auth.state !== 'loading' && (
         <div className="row" style={{ marginTop: 16 }}>
           <InstallButton />
           <a className="link" href="/api/health">Состояние сервиса</a>
