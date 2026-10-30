@@ -4,9 +4,9 @@
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "cb2e845",
-    "run": 41011488803,
-    "version": "0.3.2"
+    "commit": "470c56d",
+    "run": 41011844205,
+    "version": "0.3.3"
   },
   "defects": [],
   "pending_from_yuriy": [
