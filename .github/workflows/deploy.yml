@@ -87,13 +87,18 @@ jobs:
           echo "::notice title=url::production=$PROD preview=$PREVIEW"
           echo "prod=$PROD" >> "$GITHUB_OUTPUT"
 
-      - name: Smoke test
+      # GitHub показывает не больше 10 аннотаций notice на шаг — проверки разнесены по трём шагам.
+      - name: Health check
         run: |
           sleep 20
           P="${{ steps.deploy.outputs.prod }}"
           curl -fsS "$P/api/health" | tee health.json
           echo "::notice title=health::$(tr -d '\n' < health.json)"
           node -e 'const h=require("./health.json"); if(!h.ok||h.db!=="ok"||h.ai!=="ok"){console.error("health not ok", h); process.exit(1)}'
+
+      - name: Smoke test
+        run: |
+          P="${{ steps.deploy.outputs.prod }}"
           ME=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/me")
           REQ=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"email":"bad"}' "$P/api/auth/request")
           echo "::notice title=auth::GET /api/me без cookie → $ME (ждём 401); POST /api/auth/request с плохим адресом → $REQ (ждём 400)"
@@ -139,6 +144,10 @@ jobs:
           DSG=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"minutes":100}' "$P/api/dashboard/goal")
           echo "::notice title=dashboard::GET /api/dashboard без cookie → $DSH; PUT /api/dashboard/goal → $DSG (ждём 401 везде)"
           [ "$DSH" = "401" ] && [ "$DSG" = "401" ] || { echo "::error title=dashboard::неожиданные коды ответа"; exit 1; }
+
+      - name: Deep check (extract, model, analysis)
+        run: |
+          P="${{ steps.deploy.outputs.prod }}"
           curl -fsS "$P/api/health?deep=2" > deep.json
           echo "::notice title=extract::$(tr -d '\n' < deep.json)"
           node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
