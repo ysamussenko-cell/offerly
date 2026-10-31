@@ -221,10 +221,24 @@ export interface Reminder { title: string; body: string; url: string; tag: strin
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const cardsShort = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'карточка' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'карточки' : 'карточек'}`;
 
+/** Экран, который клик по уведомлению открывает сразу (6.1): имена и параметр `?screen=` — те же, что в src/nav.ts. */
+export function reminderScreen(d: Pick<DigestData, 'programExists' | 'day' | 'todayDone'>): 'lesson' | 'rehearsal' | 'checkpoint' | null {
+  if (!d.programExists || !d.day || d.todayDone) return null;
+  if (d.day.format === 'rehearsal') return 'rehearsal';
+  if (d.day.format === 'checkpoint') return 'checkpoint';
+  return 'lesson';
+}
+
+/** Адрес для клика по уведомлению: главный экран приложения или сразу экран дня. */
+export function reminderUrl(appUrl: string, screen: ReturnType<typeof reminderScreen>): string {
+  const base = appUrl.replace(/\/+$/, '');
+  return screen ? `${base}/?screen=${screen}` : `${base}/`;
+}
+
 /** Короткий текст уведомления из данных письма: заголовок — задание дня, тело — карточки, серия, минуты недели. */
 export function buildReminder(d: DigestData, env: Pick<PushEnv, 'APP_NAME' | 'APP_URL'>): Reminder {
   const appName = env.APP_NAME || 'Offerly';
-  const url = env.APP_URL || DEFAULT_APP_URL;
+  const url = reminderUrl(env.APP_URL || DEFAULT_APP_URL, reminderScreen(d));
   const v = d.view;
   const parts: string[] = [];
   if (!d.programExists) parts.push('Составьте программу на четыре недели — карточка «Программа»');

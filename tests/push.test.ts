@@ -206,7 +206,7 @@ describe('напоминание', () => {
     expect(r.body).toMatch(/серия \d+ (день|дня|дней)/);
     expect(r.body).toMatch(/неделя: осталось \d+ мин/);
     expect(r.body).toContain('до собеседования 20 дней');
-    expect(r).toMatchObject({ url: 'https://offerly-c8b.pages.dev', tag: PUSH_TOPIC });
+    expect(r).toMatchObject({ url: 'https://offerly-c8b.pages.dev/?screen=lesson', tag: PUSH_TOPIC }); // клик — сразу занятие (6.1)
     expect(r.body).not.toMatch(/undefined|null|NaN/);
   });
   it('без программы — зовёт составить; без карточек — так и пишет; длина укладывается в полезную нагрузку', async () => {
@@ -234,7 +234,7 @@ describe('проход расписания', () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
     const payload = JSON.parse(await br1.decrypt((fetchFn.mock.calls[0] as any)[1].body));
     expect(payload.title).toBe('Offerly: Занятие · Артикли');
-    expect(payload.url).toBe('https://offerly-c8b.pages.dev');
+    expect(payload.url).toBe('https://offerly-c8b.pages.dev/?screen=lesson'); // клик открывает занятие дня (6.1)
     expect(mem.pushSettings.get('u1')).toMatchObject({ sentOn: TODAY, note: 'sent:2/2' });
     expect(mem.pushSettings.get('u1')!.sentAt).toBe(at('07:50').toISOString());
     expect(mem.pushSubs.map(s => s.lastSentAt)).toEqual([at('07:50').toISOString(), at('07:50').toISOString()]);
@@ -508,7 +508,7 @@ describe('D1 и Worker', () => {
     const payload = JSON.parse(await br.decrypt((fixed.mock.calls[0] as any)[1].body));
     expect(payload.title).toBe('Offerly: Программы ещё нет');
     expect(payload.body).toContain('к повтору 14 карточек');
-    expect(payload.url).toBe('https://offerly-c8b.pages.dev');
+    expect(payload.url).toBe('https://offerly-c8b.pages.dev/'); // программы нет — главный экран
     expect(db.prepare('SELECT sent_on, note FROM push_settings').get()).toEqual({ sent_on: '2026-11-02', note: 'sent' });
     const s1 = await status(wenv, new Date('2026-11-02T03:00:00.000Z'));
     expect(s1.push).toEqual({ vapid: 'db', users: 1, states: { sent: 1 } });

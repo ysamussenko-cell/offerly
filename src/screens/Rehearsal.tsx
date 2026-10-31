@@ -6,6 +6,8 @@ import { submitShortcut } from '../hotkeys';
 import { Diff } from './Lesson';
 import { MicButton, SpeakButton, useRecorder } from '../Recorder';
 import { fluencyTone, mergeTranscript, speechLine } from '../voice';
+import { useWakeLock } from '../wakeLock';
+import { autoFocusFields } from '../mobile';
 
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
@@ -75,6 +77,9 @@ type Props = { onClose: () => void };
 
 /** Экран репетиции: один вопрос интервьюера на экране, ответ текстом; разбора между вопросами нет, как на настоящем
  *  интервью — после последнего ответа экзаменатор разбирает весь разговор. */
+/** На телефоне поле ответа не берёт фокус само — экранная клавиатура закрыла бы задание (src/mobile.ts). */
+const focusOnOpen = autoFocusFields();
+
 export default function Rehearsal({ onClose }: Props) {
   const [view, setView] = useState<View | null>(null);
   const [busy, setBusy] = useState<'start' | 'answer' | 'review' | null>('start');
@@ -135,6 +140,8 @@ export default function Rehearsal({ onClose }: Props) {
   const finished = view?.status === 'finished';
   const recordable = cur != null && busy == null && rec.available && rec.state !== 'processing';
   const keyCtx = { submit: canSend, cancel: busy !== 'answer' && rec.state === 'idle', busy: busy != null, recordable };
+  // Телефон (6.1): пока отвечаете на вопросы, экран не гаснет.
+  useWakeLock(!finished && cur != null);
   useHotkeys(keyCtx, { onSubmit: send, onCancel: onClose, onRecordStart: rec.start, onRecordStop: rec.stop });
 
   if (finished && view) return <Debrief view={view} onClose={onClose} onReview={review} busy={busy === 'review'} error={error} unlocked={unlocked} />;
@@ -160,7 +167,7 @@ export default function Rehearsal({ onClose }: Props) {
           </div>
           <label className="field">
             <span>{kindHint(cur.kind)} Ответ по-английски, {cur.words.min}–{cur.words.max} слов — голосом или текстом, как сказали бы вслух.</span>
-            <textarea value={text} onChange={e => { setText(e.target.value); if (!e.target.value.trim()) setSpeech(null); }} rows={8} disabled={busy != null || rec.state !== 'idle'} autoFocus lang="en" spellCheck={false} />
+            <textarea value={text} onChange={e => { setText(e.target.value); if (!e.target.value.trim()) setSpeech(null); }} rows={8} disabled={busy != null || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="ответ" />
           {speech && <p className={`speech-line ${fluencyTone(speech.fluency)}`}>С голоса: {speechLine(speech)}. Беглость этой записи войдёт в оси разбора; текст перед отправкой можно поправить.</p>}

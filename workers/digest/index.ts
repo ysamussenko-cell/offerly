@@ -13,7 +13,7 @@ import { d1RehearsalStore } from '../../functions/_lib/rehearsal';
 import { d1DigestStore, digestState, runDigest, CRON, type DigestEnv, type Store as DigestDeps } from '../../functions/_lib/digest';
 import { d1PushStore, runPush, VAPID_SETTING_KEY, type PushEnv, type Store as PushDeps } from '../../functions/_lib/push';
 
-export const VERSION = '0.23.0';
+export const VERSION = '0.24.0';
 
 export type Store = DigestDeps & PushDeps;
 

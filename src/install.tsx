@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isStandalone } from './mobile';
 
 type InstallState = 'unknown' | 'installed' | 'prompt' | 'manual';
 
@@ -18,8 +19,7 @@ export function useInstall() {
   const [evt, setEvt] = useState<any>(null);
 
   useEffect(() => {
-    const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true;
-    if (standalone) { setState('installed'); return; }
+    if (isStandalone()) { setState('installed'); return; }
     const onPrompt = (e: Event) => { e.preventDefault(); setEvt(e); setState('prompt'); };
     const onInstalled = () => { setEvt(null); setState('installed'); };
     window.addEventListener('beforeinstallprompt', onPrompt);

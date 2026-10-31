@@ -5,6 +5,8 @@ import { KeyHints, useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { MicButton, SpeakButton, useRecorder, type Recorder } from '../Recorder';
 import { mergeTranscript } from '../voice';
+import { useWakeLock } from '../wakeLock';
+import { autoFocusFields } from '../mobile';
 import { longDate, plural } from '../text';
 import ResultView from './Result';
 
@@ -110,6 +112,9 @@ export const TITLES: Record<TestKind, { test: string; result: string; finished: 
 
 /** Экран теста: одно задание на экране, прогресс сверху, ответ — кнопками или текстом.
  *  В режиме result показывает разбор последнего завершённого теста (считая оценку, если её ещё нет). */
+/** На телефоне поле ответа не берёт фокус само — экранная клавиатура закрыла бы задание (src/mobile.ts). */
+const focusOnOpen = autoFocusFields();
+
 export default function Assessment({ onClose, mode = 'test', kind = 'placement' }: Props) {
   const ops = opsFor(kind);
   const titles = TITLES[kind];
@@ -189,6 +194,8 @@ export default function Assessment({ onClose, mode = 'test', kind = 'placement' 
     busy: busy != null,
     recordable,
   };
+  // Телефон (6.1): пока тест идёт, экран не гаснет.
+  useWakeLock(!!testing);
   useHotkeys(keyCtx, {
     onSubmit: send,
     onCancel: onClose,
@@ -249,7 +256,7 @@ export default function Assessment({ onClose, mode = 'test', kind = 'placement' 
           <p className="task">{cur.prompt}</p>
           <label className="field">
             <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте — или продиктуйте исправленное предложение целиком.</span>
-            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null || rec.state !== 'idle'} autoFocus />
+            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="исправление" />
         </>
@@ -297,7 +304,7 @@ function WritingInput({ prompt, words, text, setText, disabled, rec }: { prompt:
       </div>
       <label className="field">
         <span>Текст на английском, {words.min}–{words.max} слов — наберите или продиктуйте. Отвечайте на задание, а не вокруг него.</span>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled || rec.state !== 'idle'} autoFocus lang="en" spellCheck={false} />
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} />
       </label>
       <MicButton rec={rec} disabled={disabled} what="ответ" />
       <p className={`hint ${tone}`}>{wordsText(n)} · цель {words.min}–{words.max}{n > 0 && n < 30 ? ' · меньше тридцати не принимается' : ''}</p>

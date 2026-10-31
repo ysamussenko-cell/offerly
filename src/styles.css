@@ -256,7 +256,8 @@ kbd { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; l
 
 /* мобильная вёрстка: один столбец, крупные цели для пальца, таблица банка прокручивается */
 @media (max-width: 640px) {
-  .wrap { padding: 20px 16px calc(32px + env(safe-area-inset-bottom)); }
+  /* safe-area: под «чёлкой» и полосой жестов в установленном приложении (status bar black-translucent — контент заходит под него) */
+  .wrap { padding: calc(20px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
   .card { padding: 18px 16px; border-radius: 14px; }
   .topbar { margin-bottom: 20px; gap: 8px 12px; }
   .brand { font-size: 24px; }
@@ -271,6 +272,18 @@ kbd { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; l
   .passage { font-size: 15px; padding: 12px; }
   .choice { padding: 12px; font-size: 15px; }
   .offline { margin-top: -8px; }
+}
+/* палец вместо мыши (6.1): цели не меньше 44 px, ссылки-кнопки в шапке с запасом по высоте */
+@media (hover: none) and (pointer: coarse) {
+  .btn, .mic, .tab { min-height: 44px; }
+  .choice { min-height: 48px; }
+  .link { padding: 8px 0; }
+  .topbar .link, .footer .link { padding: 10px 0; }
+  .field input, .field select { min-height: 48px; }
+}
+/* установленное приложение: без «потянуть, чтобы обновить» (перезагрузка посреди занятия) и без резинового отскока */
+@media (display-mode: standalone) {
+  html, body { overscroll-behavior-y: contain; }
 }
 @media (max-width: 480px) {
   .row > .btn { flex: 1 1 auto; text-align: center; }

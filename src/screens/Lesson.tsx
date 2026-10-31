@@ -7,6 +7,8 @@ import { KeyHints, useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { MicButton, SpeakButton, useRecorder } from '../Recorder';
 import { mergeTranscript } from '../voice';
+import { useWakeLock } from '../wakeLock';
+import { autoFocusFields } from '../mobile';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
@@ -109,6 +111,9 @@ type Props = { onClose: () => void };
 
 /** Экран занятия: один шаг на экране, после ответа — разбор (верно или нет, строка объяснения, как написано и как надо
  *  с подсветкой изменений), затем следующий шаг; после последнего — итог занятия. */
+/** На телефоне поле ответа не берёт фокус само — экранная клавиатура закрыла бы задание (src/mobile.ts). */
+const focusOnOpen = autoFocusFields();
+
 export default function Lesson({ onClose }: Props) {
   const [view, setView] = useState<View | null>(null);
   const [busy, setBusy] = useState<'start' | 'answer' | null>('start');
@@ -180,6 +185,8 @@ export default function Lesson({ onClose }: Props) {
     busy: busy != null,
     recordable,
   };
+  // Телефон (6.1): пока идёт занятие, экран не гаснет.
+  useWakeLock(!inSummary);
   useHotkeys(keyCtx, {
     onSubmit: send,
     onNext: next,
@@ -226,7 +233,7 @@ export default function Lesson({ onClose }: Props) {
           {cur.part === 'bonus' && <p className="muted hint" style={{ margin: '0 0 8px' }}>Задача ступенью выше вашего уровня. Верно — вклад занятия в готовность ×{view?.bonus?.multiplier ?? 2}; неверно — ничего не отнимается.</p>}
           <label className="field">
             <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте — или продиктуйте исправленное предложение целиком.</span>
-            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={fieldOff} autoFocus />
+            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="исправление" />
         </>
@@ -238,7 +245,7 @@ export default function Lesson({ onClose }: Props) {
           <p className="task">{cur.prompt}</p>
           <label className="field">
             <span>Так вы написали раньше. Исправьте ошибку — как надо, текстом или голосом.</span>
-            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={fieldOff} autoFocus />
+            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="исправление" />
         </>
@@ -253,7 +260,7 @@ export default function Lesson({ onClose }: Props) {
           </div>
           <label className="field">
             <span>Текст на английском, {cur.words!.min}–{cur.words!.max} слов — наберите или продиктуйте. Отвечайте на задание, а не вокруг него.</span>
-            <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={fieldOff} autoFocus lang="en" spellCheck={false} />
+            <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="ответ" />
           <WordCount n={countWords(text)} min={cur.words!.min} max={cur.words!.max} />
