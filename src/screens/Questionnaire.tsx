@@ -1,4 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { KeyHints, useHotkeys } from '../KeyHints';
 import { api, errorText, type Answers, type InterviewFormat, type Profile, type User } from '../api';
 import { countdownText, FORMAT_LABELS, LANGUAGES, longDate, minutesText, timeZoneList, todayIn, tzLabel } from '../text';
 
@@ -34,6 +35,10 @@ export default function Questionnaire({ profile, user, onSaved, onCancel }: Prop
   const set = <K extends keyof Answers>(k: K, v: Answers[K]) => setA(prev => ({ ...prev, [k]: v }));
 
   const canSubmit = a.targetRole.trim().length >= 2 && a.nativeLanguage.trim().length >= 2 && !busy;
+  const formRef = useRef<HTMLFormElement>(null);
+  // Esc — закрыть анкету (если её можно отложить), Ctrl+Enter — сохранить из любого поля; обычный Enter в поле отправляет форму сам браузер.
+  const keyCtx = { submit: canSubmit, cancel: Boolean(onCancel) && !busy, busy };
+  useHotkeys(keyCtx, { onSubmit: () => formRef.current?.requestSubmit(), onCancel: () => onCancel?.() });
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -51,7 +56,7 @@ export default function Questionnaire({ profile, user, onSaved, onCancel }: Prop
         По ответам тренер поставит цель, рассчитает срок и подберёт нагрузку. Всё можно изменить позже.
       </p>
 
-      <form onSubmit={submit} className="stack questions">
+      <form ref={formRef} onSubmit={submit} className="stack questions">
         <label className="field q">
           <span><b className="qn">1</b>На какую позицию готовитесь</span>
           <input type="text" value={a.targetRole} onChange={e => set('targetRole', e.target.value)} maxLength={120} required autoFocus
@@ -118,9 +123,10 @@ export default function Questionnaire({ profile, user, onSaved, onCancel }: Prop
 
         {error && <p className="error" role="alert">{error}</p>}
         <div className="row">
-          <button className="btn" type="submit" disabled={!canSubmit}>{busy ? 'Сохраняю…' : profile?.onboarded ? 'Сохранить' : 'Готово'}</button>
-          {onCancel && <button className="link" type="button" disabled={busy} onClick={onCancel}>{profile?.onboarded ? 'Отмена' : 'Заполнить позже'}</button>}
+          <button className="btn" type="submit" disabled={!canSubmit} aria-keyshortcuts="Control+Enter Meta+Enter">{busy ? 'Сохраняю…' : profile?.onboarded ? 'Сохранить' : 'Готово'}</button>
+          {onCancel && <button className="link" type="button" disabled={busy} onClick={onCancel} aria-keyshortcuts="Escape">{profile?.onboarded ? 'Отмена' : 'Заполнить позже'}</button>}
         </div>
+        <KeyHints ctx={{ ...keyCtx, submit: true, busy: false }} textEntry />
       </form>
     </section>
   );

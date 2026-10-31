@@ -477,8 +477,9 @@ describe('API занятия', () => {
       expect(s1.status).toBe(409); expect(await s1.json()).toMatchObject({ error: 'lesson_unavailable', reason: g1.reason });
       return;
     }
-    // тема дня может быть любой — подложим задания по ней
-    for (const l of ['B1', 'B2'] as Level[]) for (let i = 0; i < 3; i++) { mem.items.push(makeItem('mcq', l, g1.day.topic)); mem.items.push(makeItem('correction', l, g1.day.topic)); }
+    // тема дня может быть любой — подложим задания по ней; суббота в первый день программы — смешанное повторение,
+    // а без пройденных занятий и карточек разминка берёт spelling (warmupTopics)
+    for (const topic of [g1.day.topic, 'spelling']) for (const l of ['B1', 'B2'] as Level[]) for (let i = 0; i < 3; i++) { mem.items.push(makeItem('mcq', l, topic)); mem.items.push(makeItem('correction', l, topic)); }
     const s2: any = await (await post('/lesson/start', {}, cookie)).json();
     expect(s2.ok).toBe(true); expect(s2.lesson.current.position).toBe(1);
     expect(JSON.stringify(s2.lesson.current)).not.toContain('"answer"');

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, errorText, type User } from '../api';
+import { useHotkeys } from '../KeyHints';
 
 type Step = { kind: 'email' } | { kind: 'code'; email: string; echoCode?: string };
 
@@ -21,6 +22,8 @@ export default function Login({ onLogin }: { onLogin: (user: User, isNew: boolea
   }, [resendIn]);
 
   useEffect(() => { if (step.kind === 'code') codeRef.current?.focus(); }, [step.kind]);
+  // Esc на шаге кода — вернуться к вводу почты. Enter отправляет формы сам браузер.
+  useHotkeys({ cancel: step.kind === 'code' && !busy, busy }, { onCancel: () => { setStep({ kind: 'email' }); setError(null); } });
 
   async function requestCode(target: string) {
     setBusy(true); setError(null);
@@ -87,7 +90,7 @@ export default function Login({ onLogin }: { onLogin: (user: User, isNew: boolea
           <button className="btn secondary" type="button" disabled={busy || resendIn > 0} onClick={() => requestCode(step.email)}>
             {resendIn > 0 ? `Отправить снова через ${resendIn} с` : 'Отправить снова'}
           </button>
-          <button className="link" type="button" disabled={busy} onClick={() => { setStep({ kind: 'email' }); setError(null); }}>Другой адрес</button>
+          <button className="link" type="button" disabled={busy} onClick={() => { setStep({ kind: 'email' }); setError(null); }} aria-keyshortcuts="Escape">Другой адрес</button>
         </div>
       </form>
     </section>

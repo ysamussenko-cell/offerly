@@ -1,6 +1,7 @@
 import { useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { api, ApiError, errorText, type Profile } from '../api';
 import { yearsText } from '../text';
+import { useHotkeys } from '../KeyHints';
 
 const ACCEPT = '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain';
 const MIN_CHARS = 200;
@@ -16,6 +17,8 @@ export default function Resume({ profile, onProfile, onCancel }: { profile: Prof
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const busy = phase.kind !== 'idle';
+  // Esc — оставить текущее резюме (когда экран открыт поверх готового профиля).
+  useHotkeys({ cancel: Boolean(onCancel) && !busy, busy }, { onCancel: () => onCancel?.() });
 
   async function run(task: () => Promise<{ profile: Profile }>) {
     setError(null);
@@ -91,7 +94,7 @@ export default function Resume({ profile, onProfile, onCancel }: { profile: Prof
       )}
 
       {error && <p className="error" role="alert" style={{ marginTop: 12 }}>{error}</p>}
-      {onCancel && <div style={{ marginTop: 12 }}><button className="link" type="button" disabled={busy} onClick={onCancel}>Оставить текущее резюме</button></div>}
+      {onCancel && <div style={{ marginTop: 12 }}><button className="link" type="button" disabled={busy} onClick={onCancel} aria-keyshortcuts="Escape">Оставить текущее резюме</button></div>}
     </section>
   );
 }

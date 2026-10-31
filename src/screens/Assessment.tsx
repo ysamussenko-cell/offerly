@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorText, type Assessment as View } from '../api';
+import { KeyHints, useHotkeys } from '../KeyHints';
+import { submitShortcut } from '../hotkeys';
 import { longDate, plural } from '../text';
 import ResultView from './Result';
 
@@ -137,21 +139,31 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
     } finally { setBusy(null); }
   }
 
-  // Горячие клавиши на всём экране: 1–4 — вариант, Enter (для выбора) и Ctrl+Enter (везде) — отправить.
-  const latest = useRef({ cur, busy, canSend, send });
-  latest.current = { cur, busy, canSend, send };
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      const { cur, busy, canSend, send } = latest.current;
-      if (!cur || busy) return;
-      const tag = (e.target as HTMLElement | null)?.tagName ?? '';
-      const typing = tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT';
-      if (cur.kind === 'mcq' && !typing && /^[1-4]$/.test(e.key)) { setChoice(LETTERS[Number(e.key) - 1]); e.preventDefault(); return; }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || (cur.kind === 'mcq' && !typing))) { e.preventDefault(); if (canSend) send(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // Горячие клавиши на всём экране (src/hotkeys.ts): 1–4 — вариант (в чтении — первый неотвеченный вопрос),
+  // Enter (для выбора) и Ctrl+Enter (везде) — отправить, Esc — прервать и вернуться на главную.
+  const testing = view?.status === 'active' && cur != null;
+  const textEntry = cur?.kind === 'correction' || cur?.kind === 'writing';
+  const choices = cur?.kind === 'mcq' ? cur.options!.length : cur?.kind === 'reading' ? Math.max(...cur.questions!.map(q => q.options.length)) : 0;
+  const keyCtx = {
+    choices: testing ? choices : 0,
+    submit: testing && canSend,
+    cancel: view?.status !== 'finished' && busy !== 'answer' && busy !== 'score', // на экране результата Esc слушает Finished
+    busy: busy != null,
+  };
+  useHotkeys(keyCtx, {
+    onSubmit: send,
+    onCancel: onClose,
+    onChoose: i => {
+      if (!cur) return;
+      if (cur.kind === 'mcq') { if (i < cur.options!.length) setChoice(LETTERS[i]); return; }
+      if (cur.kind === 'reading') {
+        // Цифра отвечает на первый вопрос без ответа; когда оба отвечены — меняет ответ второго.
+        const open = pair.findIndex(x => x == null);
+        const qi = open === -1 ? pair.length - 1 : open;
+        if (i < (cur.questions![qi]?.options.length ?? 0)) setPair(p => p.map((x, k) => k === qi ? LETTERS[i] : x));
+      }
+    },
+  });
 
   if (view?.status === 'finished') return <Finished view={view} onClose={onClose} onRestart={restart} onRescore={rescore} busy={busy} error={error} />;
   if (mode === 'result' && !view) {
@@ -188,7 +200,6 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
                 onClick={() => setChoice(LETTERS[i])} disabled={busy != null}><span className="mono key">{i + 1}</span>{o}</button>
             ))}
           </div>
-          <p className="muted hint">Клавиши 1–4 выбирают вариант, Enter отправляет.</p>
         </>
       )}
 
@@ -199,7 +210,6 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
             <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null} autoFocus />
           </label>
-          <p className="muted hint">Ctrl+Enter отправляет.</p>
         </>
       )}
 
@@ -223,9 +233,10 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
       {cur && cur.kind === 'writing' && <WritingInput prompt={cur.prompt} words={cur.words!} text={text} setText={setText} disabled={busy != null} />}
 
       <div className="row" style={{ marginTop: 20 }}>
-        <button className="btn" type="button" onClick={send} disabled={!canSend}>{busy === 'answer' ? (cur?.position === view?.total ? 'Оцениваю…' : 'Принимаю…') : 'Ответить'}</button>
-        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'}>Прервать — продолжу позже</button>
+        <button className="btn" type="button" onClick={send} disabled={!canSend} aria-keyshortcuts={submitShortcut(textEntry)}>{busy === 'answer' ? (cur?.position === view?.total ? 'Оцениваю…' : 'Принимаю…') : 'Ответить'}</button>
+        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Прервать — продолжу позже</button>
       </div>
+      {cur && <KeyHints ctx={{ ...keyCtx, submit: testing, busy: false }} textEntry={textEntry} />}
       {busy === 'answer' && cur?.position !== view?.total && <p className="muted hint">Следующее задание подбирается из банка; если там пусто, модель напишет его — до минуты.</p>}
       {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">Письмо проверяется по рубрике и образцу, считаются пять осей — до минуты.</p>}
       {error && <p className="error" role="alert">{error}</p>}
@@ -244,7 +255,6 @@ function WritingInput({ prompt, words, text, setText, disabled }: { prompt: stri
         <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled} autoFocus lang="en" spellCheck={false} />
       </label>
       <p className={`hint ${tone}`}>{wordsText(n)} · цель {words.min}–{words.max}{n > 0 && n < 30 ? ' · меньше тридцати не принимается' : ''}</p>
-      <p className="muted hint">Ctrl+Enter отправляет.</p>
     </>
   );
 }
@@ -255,6 +265,8 @@ function Finished({ view, onClose, onRestart, onRescore, busy, error }: Finished
   const s = view.summary;
   const r = view.result;
   const baseline = view.kind === 'baseline';
+  const keyCtx = { cancel: busy == null };
+  useHotkeys(keyCtx, { onCancel: onClose });
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -282,9 +294,10 @@ function Finished({ view, onClose, onRestart, onRescore, busy, error }: Finished
       )}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="row" style={{ marginTop: 8 }}>
-        <button className="btn" type="button" onClick={onClose} disabled={busy != null}>На главную</button>
+        <button className="btn" type="button" onClick={onClose} disabled={busy != null} aria-keyshortcuts="Escape">На главную</button>
         <button className="link" type="button" onClick={onRestart} disabled={busy != null}>{baseline ? 'Пройти тест уровня' : 'Пройти тест заново'}</button>
       </div>
+      <KeyHints ctx={keyCtx} />
     </section>
   );
 }

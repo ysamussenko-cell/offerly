@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, errorText, type Program, type ProgramDay } from '../api';
 import { daysText, longDate, plural } from '../text';
+import { useHotkeys } from '../KeyHints';
 
 type Props = { refreshKey?: number; interviewDate?: string | null };
 
@@ -20,6 +21,8 @@ export function ProgramCard({ refreshKey, interviewDate }: Props) {
   const [busy, setBusy] = useState(false);
   const [swap, setSwap] = useState<{ on: boolean; first: string | null }>({ on: false, first: null });
   const [open, setOpen] = useState<Set<number>>(new Set());
+  // Esc — выйти из режима перестановки тем (сброс первого выбранного занятия).
+  useHotkeys({ cancel: swap.on, busy }, { onCancel: () => setSwap({ on: false, first: null }) });
 
   useEffect(() => {
     api.program().then(r => setState({ loaded: true, program: r.program, error: null })).catch(e => setState({ loaded: true, program: null, error: errorText(e) }));

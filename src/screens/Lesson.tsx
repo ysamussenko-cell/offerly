@@ -3,6 +3,8 @@ import { api, errorText, type Achievement, type Lesson as View, type LessonStepD
 import { longDate, minutesText, plural } from '../text';
 import { changedWords, wordDiff } from '../diff';
 import { reviewOutcome } from './Journal';
+import { KeyHints, useHotkeys } from '../KeyHints';
+import { submitShortcut } from '../hotkeys';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
@@ -159,25 +161,25 @@ export default function Lesson({ onClose }: Props) {
     finally { setBusy(null); }
   }
 
-  // Горячие клавиши: 1–4 — вариант, Enter — отправить выбор или перейти дальше, Ctrl+Enter — отправить текст.
-  const latest = useRef({ cur, busy, canSend, last, send, next });
-  latest.current = { cur, busy, canSend, last, send, next };
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      const { cur, busy, canSend, last, send, next } = latest.current;
-      if (busy) return;
-      const tag = (e.target as HTMLElement | null)?.tagName ?? '';
-      const typing = tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT';
-      if (last) { if (e.key === 'Enter' && (!typing || e.ctrlKey || e.metaKey)) { e.preventDefault(); next(); } return; }
-      if (!cur) return;
-      if (cur.kind === 'mcq' && !typing && /^[1-4]$/.test(e.key)) { setChoice(LETTERS[Number(e.key) - 1]); e.preventDefault(); return; }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || (cur.kind === 'mcq' && !typing))) { e.preventDefault(); if (canSend) send(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // Горячие клавиши (src/hotkeys.ts): 1–4 — вариант, Enter — отправить выбор или перейти дальше после разбора,
+  // Ctrl+Enter — отправить текст, Esc — прервать занятие (продолжится с того же шага).
+  const inSummary = view?.status === 'finished' && !last && !cur;
+  const textEntry = cur?.kind === 'correction' || cur?.kind === 'card' || cur?.kind === 'writing';
+  const keyCtx = {
+    choices: !last && cur?.kind === 'mcq' ? cur.options!.length : 0,
+    submit: !last && cur != null && canSend,
+    next: last != null,
+    cancel: !inSummary && busy !== 'answer',
+    busy: busy != null,
+  };
+  useHotkeys(keyCtx, {
+    onSubmit: send,
+    onNext: next,
+    onCancel: onClose,
+    onChoose: i => { if (cur?.kind === 'mcq' && i < cur.options!.length) setChoice(LETTERS[i]); },
+  });
 
-  if (view?.status === 'finished' && !last && !cur) return <Summary view={view} onClose={onClose} onBonus={bonus} busy={busy != null} error={error} unlocked={unlocked} />;
+  if (inSummary) return <Summary view={view} onClose={onClose} onBonus={bonus} busy={busy != null} error={error} unlocked={unlocked} />;
 
   const progress = view ? (view.answered / view.total) * 100 : 0;
   return (
@@ -203,7 +205,6 @@ export default function Lesson({ onClose }: Props) {
                 onClick={() => setChoice(LETTERS[i])} disabled={busy != null}><span className="mono key">{i + 1}</span>{o}</button>
             ))}
           </div>
-          <p className="muted hint">Клавиши 1–4 выбирают вариант, Enter отправляет.</p>
         </>
       )}
 
@@ -216,7 +217,6 @@ export default function Lesson({ onClose }: Props) {
             <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null} autoFocus />
           </label>
-          <p className="muted hint">Ctrl+Enter отправляет.</p>
         </>
       )}
 
@@ -228,7 +228,6 @@ export default function Lesson({ onClose }: Props) {
             <span>Так вы написали раньше. Исправьте ошибку — как надо.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null} autoFocus />
           </label>
-          <p className="muted hint">Ctrl+Enter отправляет.</p>
         </>
       )}
 
@@ -241,20 +240,19 @@ export default function Lesson({ onClose }: Props) {
             <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={busy != null} autoFocus lang="en" spellCheck={false} />
           </label>
           <WordCount n={countWords(text)} min={cur.words!.min} max={cur.words!.max} />
-          <p className="muted hint">Ctrl+Enter отправляет.</p>
         </>
       )}
 
       <div className="row" style={{ marginTop: 20 }}>
         {last ? (
-          <button className="btn" type="button" onClick={next}>{view?.status === 'finished' && !view.current ? 'К итогу' : 'Дальше'}</button>
+          <button className="btn" type="button" onClick={next} aria-keyshortcuts="Enter">{view?.status === 'finished' && !view.current ? 'К итогу' : 'Дальше'}</button>
         ) : (
-          <button className="btn" type="button" onClick={send} disabled={!canSend}>{busy === 'answer' ? (cur?.kind === 'writing' ? 'Оцениваю…' : 'Проверяю…') : 'Ответить'}</button>
+          <button className="btn" type="button" onClick={send} disabled={!canSend} aria-keyshortcuts={submitShortcut(textEntry)}>{busy === 'answer' ? (cur?.kind === 'writing' ? 'Оцениваю…' : 'Проверяю…') : 'Ответить'}</button>
         )}
-        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'}>Прервать — продолжу позже</button>
+        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Прервать — продолжу позже</button>
       </div>
       {busy === 'answer' && cur?.kind === 'writing' && <p className="muted hint">Письмо проверяется по рубрике и образцу — до минуты.</p>}
-      {last && <p className="muted hint">Enter — дальше.</p>}
+      {(last || cur) && <KeyHints ctx={{ ...keyCtx, submit: !last && cur != null, busy: false }} textEntry={textEntry} />}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
@@ -346,6 +344,8 @@ function Summary({ view, onClose, onBonus, busy, error, unlocked }: SummaryProps
   const b = view.bonus;
   const allSteps = b?.step ? [...view.steps, b.step] : view.steps;
   const newCards = allSteps.reduce((n, s) => n + (s.newCards ?? 0), 0);
+  const keyCtx = { cancel: !busy };
+  useHotkeys(keyCtx, { onCancel: onClose });
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -411,8 +411,9 @@ function Summary({ view, onClose, onBonus, busy, error, unlocked }: SummaryProps
         </div>
       )}
       <div className="row" style={{ marginTop: 16 }}>
-        <button className="btn" type="button" onClick={onClose}>На главную</button>
+        <button className="btn" type="button" onClick={onClose} aria-keyshortcuts="Escape">На главную</button>
       </div>
+      <KeyHints ctx={keyCtx} />
       <p className="muted hint">Пройденный день отмечен в программе{p.review.total ? `; ${cardsText(p.review.total)} ${p.review.total === 1 ? 'получила' : 'получили'} новый срок повтора` : ''}.</p>
     </section>
   );
