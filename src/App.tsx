@@ -18,11 +18,20 @@ import { AchievementsCard } from './screens/Achievements';
 import { DigestCard } from './screens/Digest';
 import { PushCard } from './screens/Push';
 import Settings from './screens/Settings';
+import Install from './screens/Install';
+import { INSTALL_PATH, screenFor } from './installPage';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
 
 export default function App() {
+  // Страница установки (5.1) — отдельный путь /install без входа; всё остальное — приложение. Полная перезагрузка по ссылке:
+  // оболочка в предкэше service worker, поэтому и без сети страница открывается.
+  if (screenFor(window.location.pathname) === 'install') return <Install />;
+  return <Shell />;
+}
+
+function Shell() {
   const [health, setHealth] = useState<Health | null>(null);
   const [auth, setAuth] = useState<Auth>({ state: 'loading' });
   const [profile, setProfile] = useState<ProfileState>({ state: 'loading' });
@@ -91,6 +100,7 @@ export default function App() {
           <section className="card" style={{ marginBottom: 16 }}>
             <h2>Личный тренер английского для собеседования</h2>
             <p className="muted">Загрузите резюме, пройдите короткий тест уровня по своей специальности и занимайтесь по индивидуальной программе 20 минут в день.</p>
+            <p className="muted" style={{ fontSize: 14, margin: '8px 0 0' }}>Работает в браузере, ставится как приложение на компьютер и телефон — <a className="link" href={INSTALL_PATH}>как установить</a>.</p>
           </section>
           <Login onLogin={(user, isNew) => setAuth({ state: 'in', user, isNew })} />
         </>
@@ -145,6 +155,7 @@ export default function App() {
       {auth.state !== 'loading' && (
         <div className="row footer">
           <InstallButton />
+          <a className="link" href={INSTALL_PATH}>Установка на компьютер и телефон</a>
           <ThemeSwitch />
           <a className="link" href="/api/health">Состояние сервиса</a>
         </div>

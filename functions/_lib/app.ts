@@ -21,8 +21,9 @@ import { d1SpeechStore, recordSpeech, speak, publicSpeech, validateTtsText, self
 import { d1DigestStore, parseNotifyAt, digestState, nextDigest, buildDigest, sendDigestNow, localClock, minutesOf, DEFAULT_NOTIFY_AT, SEND_WINDOW_MINUTES, CRON_STEP_MINUTES, type DigestStore } from './digest';
 import { d1PushStore, vapidKeys, parseSubscribeBody, publicSubscription, sendPushNow, sentOnIfPassed, PushError, VAPID_SETTING_KEY, type PushEnv, type PushStore } from './push';
 import { d1SettingsStore, masterKey, parseKeyBody, saveKey, checkKey, userProvider, publicKey, providerOptions, decryptSecret, exportData, exportCounts, exportFileName, SettingsError, type SettingsEnv, type SettingsStore } from './settings';
+import { fetchRelease, CACHE_SECONDS as RELEASE_CACHE_SECONDS, type ReleaseEnv } from './release';
 
-export interface Env extends ProviderEnv, MailEnv, PushEnv, SettingsEnv {
+export interface Env extends ProviderEnv, MailEnv, PushEnv, SettingsEnv, ReleaseEnv {
   /** Адрес приложения для ссылок в письмах; без него — адрес по умолчанию из digest.ts. */
   APP_URL?: string;
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
@@ -95,6 +96,12 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       }
     }
     return c.json(out);
+  });
+
+  /** Страница установки (5.1): есть ли установщик для Windows в последнем релизе GitHub. Открытый маршрут — страница доступна без входа. */
+  app.get('/release', async (c) => {
+    const release = await fetchRelease(c.env);
+    return c.json({ ok: true, ...release }, 200, { 'cache-control': `public, max-age=${RELEASE_CACHE_SECONDS}` });
   });
 
   app.get('/providers', (c) => c.json(PROVIDERS.map(({ id, name, short, keyUrl, defaultModel, free }) => ({ id, name, short, keyUrl, defaultModel, free }))));

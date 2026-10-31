@@ -188,6 +188,10 @@ export type Settings = {
   reply?: string;
   removed?: boolean;
 };
+/** Релиз десктопной сборки для страницы установки (5.1): установщик Windows из latest.json последнего релиза GitHub. */
+export type Release =
+  | { ok: true; available: true; version: string; publishedAt: string | null; notes: string | null; windows: { url: string; name: string; signed: boolean }; releasesUrl: string }
+  | { ok: true; available: false; reason: 'none' | 'no_windows' | 'error'; detail: string | null; releasesUrl: string };
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing'; push?: 'env' | 'db' | 'pending' | 'error' };
 
 export class ApiError extends Error {
@@ -227,6 +231,7 @@ const del = <T,>(path: string, body: unknown) =>
 
 export const api = {
   health: () => call<Health>('/health'),
+  release: () => call<Release>('/release'),
   me: () => call<{ ok: true; user: User }>('/me'),
   requestCode: (email: string) => post<{ ok: true; delivery: 'email' | 'echo'; code?: string; expiresAt: string }>('/auth/request', { email }),
   verifyCode: (email: string, code: string) => post<{ ok: true; user: User; isNew: boolean }>('/auth/verify', { email, code }),

@@ -236,3 +236,15 @@ jobs:
           STE=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/export")
           echo "::notice title=settings::GET /api/settings без cookie → $STG; PUT /api/settings/key → $STK; POST /api/settings/key/check → $STC; DELETE → $STD; PUT /api/settings/notifications → $STN; GET /api/export → $STE (ждём 401 везде)"
           [ "$STG" = "401" ] && [ "$STK" = "401" ] && [ "$STC" = "401" ] && [ "$STD" = "401" ] && [ "$STN" = "401" ] && [ "$STE" = "401" ] || { echo "::error title=settings::неожиданные коды ответа"; exit 1; }
+
+      # Страница установки (5.1): /install отдаётся оболочкой SPA (Pages без 404.html подставляет index.html), /api/release открыт без cookie
+      # и отвечает 200 с полем available даже без релизов (404 от GitHub → available:false, reason:none).
+      - name: Install page check
+        run: |
+          P="${{ steps.deploy.outputs.prod }}"
+          INS=$(curl -s -o install.html -w '%{http_code}' "$P/install"); ROOT=$(grep -c 'id="root"' install.html || true)
+          REL=$(curl -s -o release.json -w '%{http_code}' "$P/api/release")
+          RELS=$(node -e 'const r=require("./release.json"); console.log(r.available ? "установщик "+r.version+" → "+r.windows.name : "без установщика: "+r.reason+(r.detail?" ("+r.detail+")":""))' 2>/dev/null || echo "ответ не JSON")
+          CC=$(curl -s -D - -o /dev/null "$P/api/release" | grep -i '^cache-control' | tr -d '\r\n')
+          echo "::notice title=install::GET /install → $INS (оболочка SPA: $ROOT); GET /api/release → $REL, $RELS; $CC"
+          [ "$INS" = "200" ] && [ "$ROOT" != "0" ] && [ "$REL" = "200" ] || { echo "::error title=install::страница установки или /api/release не отвечают"; exit 1; }

@@ -247,6 +247,13 @@ kbd { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; l
 .theme-switch .row { gap: 6px; }
 .offline { margin: -16px 0 16px; padding: 10px 14px; border: 1px solid var(--coral); border-radius: 12px; background: rgba(224, 101, 91, .1); color: var(--coral-text); font-size: 14px; }
 
+/* страница установки (5.1): шаги и две колонки для телефона */
+.steps { margin: 0; padding-left: 22px; font-size: 15px; line-height: 1.55; }
+.steps li { margin: 4px 0; }
+.steps li::marker { font-family: Manrope, Inter, sans-serif; font-weight: 800; color: var(--amber-text); }
+.phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
+.phones strong { display: block; font-family: Manrope, Inter, sans-serif; font-size: 15px; margin-bottom: 6px; }
+
 /* мобильная вёрстка: один столбец, крупные цели для пальца, таблица банка прокручивается */
 @media (max-width: 640px) {
   .wrap { padding: 20px 16px calc(32px + env(safe-area-inset-bottom)); }
