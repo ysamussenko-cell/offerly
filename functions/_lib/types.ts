@@ -4,6 +4,10 @@
  *  кода во время выполнения модуль не несёт, а из items.ts берётся лишь тип уровня. */
 import type { Level } from './items';
 
+/** Байты с собственным буфером (не SharedArrayBuffer): такие принимают Blob, Response, WebCrypto и под типами DOM, и под типами Workers —
+ *  тесты клиента и API проверяются одним tsconfig.tests.json, поэтому модули байтов объявляют именно этот тип. */
+export type Bytes = Uint8Array<ArrayBuffer>;
+
 /** Одно выданное задание теста или среза; ответ и оценка заполняются по мере прохождения. */
 export interface Attempt {
   id: string;

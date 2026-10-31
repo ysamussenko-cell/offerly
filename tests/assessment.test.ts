@@ -16,7 +16,7 @@ const SHORT = Array.from({ length: 8 }, () => 'The boiler efficiency test shows 
 /** Принятое задание банка нужного вида и уровня; тема — по кругу, чтобы проверять «не повторять тему подряд». */
 export function makeItem(kind: Kind, level: Level, topic = TOPICS[seq % TOPICS.length].id, status: Item['status'] = 'verified'): Item {
   const n = ++seq;
-  const base = { id: `it${n}`, kind, level, topic, domain: null, rubric: null, explanation: 'правило одной строкой', status, checkNote: null, checkedLevel: null, fingerprint: `fp${n}`, source: 'test', createdAt: `2026-10-30T00:00:${String(n % 60).padStart(2, '0')}Z`, verifiedAt: null };
+  const base = { id: `it${n}`, kind, level, topic, domain: null, rubric: null, explanation: 'правило одной строкой', status, checkNote: null, checkedLevel: null, writingFormat: null, fingerprint: `fp${n}`, source: 'test', createdAt: `2026-10-30T00:00:${String(n % 60).padStart(2, '0')}Z`, verifiedAt: null };
   if (kind === 'mcq') return { ...base, prompt: `We finished ___ energy audit number ${n} last week.`, options: ['a', 'an', 'the', '—'], answer: 'C' };
   if (kind === 'correction') return { ...base, prompt: `The turbine have been inspected ${n} times since the overhaul.`, options: null, answer: `The turbine has been inspected ${n} times since the overhaul.` };
   if (kind === 'reading') return { ...base, prompt: PASSAGE, options: [

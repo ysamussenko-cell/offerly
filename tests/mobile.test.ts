@@ -352,7 +352,7 @@ describe('клик по уведомлению открывает экран д�
       day: { format: 'rehearsal', formatLabel: 'репетиция интервью', topicLabel: '', writingLabel: null } as unknown as DigestData['day'],
       view: { streak: { current: 0 }, goal: { left: 10 }, countdown: { daysLeft: null } },
     } as unknown as DigestData;
-    const r = buildReminder(d, { APP_URL: 'https://offerly-c8b.pages.dev' });
+    const r = buildReminder(d, { APP_NAME: 'Offerly', APP_URL: 'https://offerly-c8b.pages.dev' });
     expect(r.url).toBe('https://offerly-c8b.pages.dev/?screen=rehearsal');
     expect(r.title).toBe('Offerly: Репетиция интервью');
   });

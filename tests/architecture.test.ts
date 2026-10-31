@@ -139,6 +139,23 @@ describe('тесты и версии', () => {
     expect(untested.filter(f => !['src/nav.ts', 'src/wakeLock.ts', 'src/manifest.ts'].includes(f))).toEqual([]);
   });
 
+  it('типы тестов проверяются: tsconfig.tests.json покрывает tests/** типами DOM и Workers вместе, Actions гоняет lint:tests перед сборкой', () => {
+    const cfg = JSON.parse(readFileSync('tsconfig.tests.json', 'utf-8'));
+    expect(cfg.extends).toBe('./tsconfig.app.json');
+    expect(cfg.include).toEqual(['tests']);
+    expect(cfg.compilerOptions.types).toEqual(expect.arrayContaining(['node', '@cloudflare/workers-types']));
+    expect(cfg.compilerOptions.noEmit).toBe(true);
+    const scripts = JSON.parse(readFileSync('package.json', 'utf-8')).scripts as Record<string, string>;
+    expect(scripts['lint:tests']).toBe('tsc -p tsconfig.tests.json');
+    const workflow = readFileSync('.github/workflows/deploy.yml', 'utf-8');
+    expect(workflow.indexOf('npm run lint:tests')).toBeGreaterThan(workflow.indexOf('run: npm test'));
+    expect(workflow.indexOf('npm run lint:tests')).toBeLessThan(workflow.indexOf('run: npm run build'));
+    // Байты, которые уходят в Blob/Response/WebCrypto, объявлены типом Bytes (Uint8Array<ArrayBuffer>) — иначе под типами DOM тесты не сойдутся.
+    expect(readFileSync('functions/_lib/types.ts', 'utf-8')).toMatch(/export type Bytes = Uint8Array<ArrayBuffer>;/);
+    const tsVersion = JSON.parse(readFileSync('package.json', 'utf-8')).devDependencies.typescript as string;
+    expect(Number(tsVersion.replace(/^\D*/, '').split('.')[1])).toBeGreaterThanOrEqual(7); // Uint8Array<…> появился в TypeScript 5.7
+  });
+
   it('версия одна во всех пяти местах', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf-8')).version as string;
     expect(pkg).toMatch(/^\d+\.\d+\.\d+$/);

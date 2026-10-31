@@ -52,7 +52,8 @@ describe('начальные ответы анкеты', () => {
   const base: Profile = {
     specialty: 'инженер', industry: 'энергетика', years: 15, targetRole: 'главный энергетик', keywords: [], summary: null,
     resumeName: 'cv.pdf', resumeAt: null, resumeChars: 1000, analyzed: true,
-    interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, onboarded: false, updatedAt: '',
+    interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, onboarded: false,
+    targetLevel: null, weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: '',
   };
   it('до анкеты — цель из резюме, пояс из браузера, 20 минут и неизвестный формат', () => {
     const a = initialAnswers(base, user);

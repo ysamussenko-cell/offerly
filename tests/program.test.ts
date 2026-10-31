@@ -28,7 +28,7 @@ const assessment = (axes: Record<string, number | null>, kind: Assessment['kind'
 });
 const item = (id: string, topic: string): Item => ({
   id, kind: 'mcq', level: 'B1', topic, domain: null, prompt: '___', options: ['a', 'b', 'c', 'd'], answer: 'A', rubric: null, explanation: null,
-  status: 'verified', checkNote: null, checkedLevel: null, fingerprint: id, source: 'test', createdAt: NOW, verifiedAt: null,
+  status: 'verified', checkNote: null, checkedLevel: null, writingFormat: null, fingerprint: id, source: 'test', createdAt: NOW, verifiedAt: null,
 });
 const attempt = (itemId: string, correct: number | null): Attempt => ({
   id: `t${++seq}`, userId: USER, assessmentId: 'a1', itemId, position: 1, level: 'B1', answer: 'B', correct, score: correct == null ? null : correct * 100,

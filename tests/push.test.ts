@@ -44,13 +44,13 @@ const card = (due: string | null, retired = 0): ErrorCard => ({
   id: `c${++seq}`, userId: 'u1', topic: 'articles', rule: 'r', example: 'a', correction: 'b', source: 'seed', origin: null, stability: 1, difficulty: 5, due, reps: 0, lapses: 0, retired, streak: 0, reviewedAt: null, createdAt: '2026-10-30T00:00:00.000Z',
 } as unknown as ErrorCard);
 const env: PushEnv = { APP_NAME: 'Offerly', APP_URL: 'https://offerly-c8b.pages.dev' };
-const utf8 = (s: string) => new TextEncoder().encode(s);
+const utf8 = (s: string) => new TextEncoder().encode(s) as Uint8Array<ArrayBuffer>;
 const pushOk = () => vi.fn(async () => new Response(null, { status: 201 }));
 
 /** Подписка браузера: своя пара ECDH и секрет auth — как сделал бы PushManager. */
 async function fakeBrowser() {
   const kp = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as CryptoKeyPair;
-  const pub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+  const pub = new Uint8Array((await crypto.subtle.exportKey('raw', kp.publicKey)) as ArrayBuffer);
   const auth = crypto.getRandomValues(new Uint8Array(16));
   const sub = (over: Partial<PushSubscription> = {}): PushSubscription => ({
     id: `s${++seq}`, userId: 'u1', endpoint: `https://fcm.googleapis.com/fcm/send/${seq}`, p256dh: b64url.encode(pub), auth: b64url.encode(auth), userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36',
@@ -63,7 +63,7 @@ async function fakeBrowser() {
     const asPub = body.slice(21, 21 + idlen), record = body.slice(21 + idlen);
     const asKey = await crypto.subtle.importKey('raw', asPub, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
     const ecdh = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: asKey } as any, kp.privateKey, 256));
-    const hk = async (s: Uint8Array, ikm: Uint8Array, info: Uint8Array, n: number) => new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: s, info }, await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']), n * 8));
+    const hk = async (s: Uint8Array<ArrayBuffer>, ikm: Uint8Array<ArrayBuffer>, info: Uint8Array<ArrayBuffer>, n: number) => new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: s, info }, await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']), n * 8));
     const ikm = await hk(auth, ecdh, concat(utf8('WebPush: info\0'), pub, asPub), 32);
     const cek = await hk(salt, ikm, utf8('Content-Encoding: aes128gcm\0'), 16);
     const nonce = await hk(salt, ikm, utf8('Content-Encoding: nonce\0'), 12);

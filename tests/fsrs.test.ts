@@ -73,7 +73,7 @@ describe('повтор карточки', () => {
     expect(intervals[1]).toBeGreaterThan(intervals[0]);
     // после двух верных неверный: серия 0, карточка завтра, стабильность упала
     let t: FsrsState = review(fresh, 'good', TODAY);
-    t = review(t, 'good', t.reviewedAt);
+    t = review(t, 'good', t.reviewedAt!);
     const stableBefore = t.stability;
     const miss = review(t, 'again', '2026-11-20');
     expect(miss).toMatchObject({ streak: 0, lapses: 1, reps: 2, due: '2026-11-21', retired: false });

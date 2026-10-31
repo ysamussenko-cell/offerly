@@ -11,7 +11,7 @@
  *  последние четыре знака ключа — сам ключ не возвращается никогда. */
 import { PROVIDERS, chat, type Env as ProviderEnv, type ProviderId, type UserProvider } from './providers';
 import type { Assessment } from './assessment';
-import type { Attempt } from './types';
+import type { Attempt, Bytes } from './types';
 import type { SpeechTake } from './voice';
 import { DomainError } from './errors';
 
@@ -57,16 +57,16 @@ const b64url = {
     let s = ''; for (const b of bytes) s += String.fromCharCode(b);
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   },
-  decode(s: string): Uint8Array {
+  decode(s: string): Bytes {
     const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
     return Uint8Array.from(b, c => c.charCodeAt(0));
   },
 };
-const utf8 = (s: string) => new TextEncoder().encode(s);
+const utf8 = (s: string): Bytes => new TextEncoder().encode(s) as Bytes;
 
 /** Мастер-ключ: из секрета окружения (SHA-256 строки) или из app_settings (создаётся один раз). */
 export async function masterKey(env: SettingsEnv, store: Pick<SettingsStore, 'getSetting' | 'initSetting'>, nowIso = new Date().toISOString()): Promise<{ key: CryptoKey; source: 'env' | 'db' }> {
-  let raw: Uint8Array;
+  let raw: Bytes;
   let source: 'env' | 'db';
   if (env.KEYS_SECRET && env.KEYS_SECRET.trim()) {
     raw = new Uint8Array(await crypto.subtle.digest('SHA-256', utf8(env.KEYS_SECRET.trim())));

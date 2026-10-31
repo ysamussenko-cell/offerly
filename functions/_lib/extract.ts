@@ -1,6 +1,7 @@
 /** Извлечение текста резюме на Worker: PDF (pdf.js через unpdf), DOCX (zip + word/document.xml), обычный текст.
  *  Никаких внешних сервисов — файл не покидает Worker и не сохраняется в исходном виде. */
 import { DomainError } from './errors';
+import type { Bytes } from './types';
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_TEXT_CHARS = 60_000;
@@ -52,8 +53,8 @@ export function normalizeText(raw: string): string {
 export interface Extracted { kind: ResumeKind; text: string; pages?: number }
 
 /** Главная точка входа: байты файла → нормализованный текст. Бросает ExtractError с кодом для API. */
-export async function extractResumeText(name: string, mime: string | undefined, data: ArrayBuffer | Uint8Array): Promise<Extracted> {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+export async function extractResumeText(name: string, mime: string | undefined, data: ArrayBuffer | Bytes): Promise<Extracted> {
+  const bytes: Bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   if (bytes.byteLength > MAX_FILE_BYTES) throw new ExtractError('resume_too_large');
   const kind = detectKind(name, mime, bytes);
   if (!kind) throw new ExtractError('resume_unsupported');
@@ -106,7 +107,7 @@ function tinyPdf(line: string): Uint8Array {
 }
 
 /** DOCX-минимум: zip без сжатия с одним word/document.xml. */
-function tinyDocx(line: string): Uint8Array {
+function tinyDocx(line: string): Bytes {
   const enc = new TextEncoder();
   const name = enc.encode('word/document.xml');
   const data = enc.encode(`<w:document><w:body><w:p><w:r><w:t>${line}</w:t></w:r></w:p></w:body></w:document>`);
@@ -150,7 +151,7 @@ export function docxXmlToText(xml: string): string {
   return decodeXmlEntities(body);
 }
 
-export async function extractDocx(bytes: Uint8Array): Promise<string> {
+export async function extractDocx(bytes: Bytes): Promise<string> {
   const entries = readZipDirectory(bytes);
   const doc = entries.find(e => e.name === 'word/document.xml');
   if (!doc) throw new ExtractError('resume_unsupported');
@@ -191,7 +192,7 @@ export function readZipDirectory(bytes: Uint8Array): ZipEntry[] {
   return entries;
 }
 
-export async function readZipEntry(bytes: Uint8Array, e: ZipEntry): Promise<Uint8Array> {
+export async function readZipEntry(bytes: Bytes, e: ZipEntry): Promise<Bytes> {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (e.localOffset + 30 > bytes.length || dv.getUint32(e.localOffset, true) !== 0x04034b50) throw new ExtractError('resume_unreadable');
   const nameLen = dv.getUint16(e.localOffset + 26, true);
@@ -203,7 +204,7 @@ export async function readZipEntry(bytes: Uint8Array, e: ZipEntry): Promise<Uint
   throw new ExtractError('resume_unreadable');
 }
 
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+async function inflateRaw(data: Bytes): Promise<Bytes> {
   const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }

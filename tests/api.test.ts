@@ -137,7 +137,7 @@ describe('API резюме и профиля', () => {
     const { call, post, mem } = makeApp({ DEV_ECHO_CODE: '1' }, aiRun);
     const { cookie } = await signIn(post);
     const fd = new FormData();
-    fd.append('file', new File([makeDocx(SAMPLE_RESUME) as BlobPart], 'resume.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
+    fd.append('file', new File([makeDocx(SAMPLE_RESUME)], 'resume.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
     const r = await call('/resume', { method: 'POST', headers: { cookie }, body: fd });
     expect(r.status).toBe(200);
     const j: any = await r.json();
@@ -156,7 +156,7 @@ describe('API резюме и профиля', () => {
     const { call, post } = makeApp({ DEV_ECHO_CODE: '1' }, async () => ({ response: PROFILE_JSON }));
     const { cookie } = await signIn(post);
     const fd = new FormData();
-    fd.append('file', new File([makePdf(SAMPLE_RESUME) as BlobPart], 'cv.pdf', { type: 'application/pdf' }));
+    fd.append('file', new File([makePdf(SAMPLE_RESUME)], 'cv.pdf', { type: 'application/pdf' }));
     expect((await call('/resume', { method: 'POST', headers: { cookie }, body: fd })).status).toBe(200);
     const r = await post('/resume', { text: SAMPLE_RESUME.join('\n') }, { cookie });
     expect(r.status).toBe(200);
@@ -166,9 +166,9 @@ describe('API резюме и профиля', () => {
   it('ошибки файла — понятные коды', async () => {
     const { call, post } = makeApp({ DEV_ECHO_CODE: '1' });
     const { cookie } = await signIn(post);
-    const send = async (name: string, bytes: Uint8Array, type?: string) => {
+    const send = async (name: string, bytes: Uint8Array<ArrayBuffer>, type?: string) => {
       const fd = new FormData();
-      fd.append('file', new File([bytes as BlobPart], name, type ? { type } : undefined));
+      fd.append('file', new File([bytes], name, type ? { type } : undefined));
       const r = await call('/resume', { method: 'POST', headers: { cookie }, body: fd });
       return { status: r.status, error: ((await r.json()) as any).error };
     };
@@ -220,7 +220,7 @@ describe('письмо с кодом', () => {
   });
   it('без ключа не делает запросов', async () => {
     const f = vi.fn();
-    expect(await sendMail({}, 'a@b.cc', loginCodeMail('1', 1), f as any)).toEqual({ sent: false, reason: 'not_configured' });
+    expect(await sendMail({ APP_NAME: 'Offerly' }, 'a@b.cc', loginCodeMail('1', 1), f as any)).toEqual({ sent: false, reason: 'not_configured' });
     expect(f).not.toHaveBeenCalled();
   });
 });

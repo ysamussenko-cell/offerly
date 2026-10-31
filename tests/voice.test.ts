@@ -233,9 +233,9 @@ describe('маршруты /api/voice', () => {
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
     return { mem, call, post, h: { cookie }, env };
   }
-  const upload = (call: any, h: any, bytes: Uint8Array, type: string, name = 'answer.wav') => {
+  const upload = (call: any, h: any, bytes: Uint8Array<ArrayBuffer>, type: string, name = 'answer.wav') => {
     const fd = new FormData();
-    fd.append('audio', new File([bytes as BlobPart], name, { type }));
+    fd.append('audio', new File([bytes], name, { type }));
     return call('/voice/transcribe', { method: 'POST', headers: h, body: fd });
   };
   it('без входа — 401 на transcribe, speak и meta', async () => {

@@ -16,6 +16,7 @@ import type { User } from './auth';
 import type { Profile } from './profile';
 import { collectDigest, digestState, headlineOf, daysText, localClock, SEND_WINDOW_MINUTES, DEFAULT_APP_URL, type ContentStore, type DigestData, type DigestState, type RunOpts } from './digest';
 import { DomainError } from './errors';
+import type { Bytes } from './types';
 
 /** Сколько живёт напоминание в push-службе, если устройство офлайн: столько же, сколько окно отправки. */
 export const PUSH_TTL_SECONDS = SEND_WINDOW_MINUTES * 60;
@@ -73,7 +74,7 @@ export const b64url = {
     for (const b of bytes) s += String.fromCharCode(b);
     return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   },
-  decode(s: string): Uint8Array {
+  decode(s: string): Bytes {
     const std = s.replace(/-/g, '+').replace(/_/g, '/');
     const bin = atob(std + '='.repeat((4 - (std.length % 4)) % 4));
     const out = new Uint8Array(bin.length);
@@ -82,14 +83,14 @@ export const b64url = {
   },
 };
 
-const utf8 = (s: string) => new TextEncoder().encode(s);
-export function concat(...parts: Uint8Array[]): Uint8Array {
+const utf8 = (s: string): Bytes => new TextEncoder().encode(s) as Bytes;
+export function concat(...parts: Uint8Array[]): Bytes {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let o = 0;
   for (const p of parts) { out.set(p, o); o += p.length; }
   return out;
 }
-const safeDecode = (s: unknown): Uint8Array | null => {
+const safeDecode = (s: unknown): Bytes | null => {
   if (typeof s !== 'string' || !/^[A-Za-z0-9_-]+=*$/.test(s)) return null;
   try { return b64url.decode(s); } catch { return null; }
 };
@@ -151,13 +152,13 @@ export const vapidSubject = (env: Pick<PushEnv, 'VAPID_SUBJECT' | 'APP_URL'>) =>
 
 // ---------- шифрование aes128gcm (RFC 8291 + RFC 8188) ----------
 
-async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
+async function hkdf(salt: Bytes, ikm: Bytes, info: Bytes, length: number): Promise<Bytes> {
   const key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, key, length * 8));
 }
 
 /** Ключи подписки из браузера: p256dh — 65 байт, auth — 16 байт; иначе подписка не годится. */
-export function parseSubscriptionKeys(p256dh: unknown, auth: unknown): { uaPublic: Uint8Array; authSecret: Uint8Array } | null {
+export function parseSubscriptionKeys(p256dh: unknown, auth: unknown): { uaPublic: Bytes; authSecret: Bytes } | null {
   const uaPublic = safeDecode(p256dh), authSecret = safeDecode(auth);
   if (!uaPublic || !authSecret || uaPublic.length !== 65 || uaPublic[0] !== 4 || authSecret.length !== 16) return null;
   return { uaPublic, authSecret };
@@ -165,7 +166,7 @@ export function parseSubscriptionKeys(p256dh: unknown, auth: unknown): { uaPubli
 
 /** Тело запроса к push-службе: заголовок (salt ‖ rs ‖ idlen ‖ ключ сервера) и одна запись AES-128-GCM с разделителем 0x02.
  *  Ключи и соль задаются только в тестах — в бою для каждого сообщения новая эфемерная пара ECDH и случайная соль. */
-export async function encryptPayload(sub: Pick<PushSubscription, 'p256dh' | 'auth'>, plaintext: Uint8Array, opts: { keyPair?: CryptoKeyPair; salt?: Uint8Array } = {}): Promise<Uint8Array> {
+export async function encryptPayload(sub: Pick<PushSubscription, 'p256dh' | 'auth'>, plaintext: Bytes, opts: { keyPair?: CryptoKeyPair; salt?: Bytes } = {}): Promise<Bytes> {
   const keys = parseSubscriptionKeys(sub.p256dh, sub.auth);
   if (!keys) throw new PushError('subscription_invalid');
   if (plaintext.length > MAX_PAYLOAD_BYTES) throw new PushError('payload_too_large');
@@ -197,7 +198,7 @@ export interface SendOpts { fetchFn?: typeof fetch; nowSec?: number; ttl?: numbe
 /** Одно сообщение одной подписке. 404/410 — подписки больше нет (gone), её надо удалить. */
 export async function sendWebPush(keys: VapidKeys, env: Pick<PushEnv, 'VAPID_SUBJECT' | 'APP_URL'>, sub: Pick<PushSubscription, 'endpoint' | 'p256dh' | 'auth'>, payload: unknown, opts: SendOpts = {}): Promise<Delivery> {
   const fetchFn = opts.fetchFn ?? fetch;
-  let body: Uint8Array, authorization: string;
+  let body: Bytes, authorization: string;
   try {
     body = await encryptPayload(sub, utf8(JSON.stringify(payload)));
     authorization = await vapidAuthorization(keys, sub.endpoint, vapidSubject(env), opts.nowSec);

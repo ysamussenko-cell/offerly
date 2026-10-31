@@ -165,7 +165,7 @@ describe('исходный срез и журнал в API', () => {
 
   it('GET /api/cards: без cookie 401; с cookie — карточки с подписью темы, к повтору первыми', async () => {
     const { mem, user, get } = await loggedIn();
-    expect((await get('/cards').then(r => r.status))).toBe(200);
+    expect((await get('/cards')).status).toBe(200);
     const base = { userId: user.id, rule: 'r', example: 'e', correction: 'c', source: 'seed', origin: null, stability: 1, difficulty: 5, reps: 0, lapses: 0, streak: 0, reviewedAt: null, createdAt: '2026-10-30T00:00:00.000Z' };
     mem.cards.push({ ...base, id: 'c2', topic: 'task-response', due: '2026-11-02', retired: false });
     mem.cards.push({ ...base, id: 'c3', topic: 'articles', due: '2026-10-30', retired: true });

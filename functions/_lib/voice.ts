@@ -8,6 +8,7 @@
  *  переводится в балл по опорным точкам TEMPO_POINTS (A2 ≈ 60 слов/мин, B1 ≈ 85, B2 ≈ 110–135, C1 ≈ 160),
  *  паузы и заполнители снимают баллы. Это не оценка содержания — её даёт экзаменатор по расшифровке. */
 import type { Env as ProviderEnv } from './providers';
+import type { Bytes } from './types';
 import { DomainError } from './errors';
 
 /** Модель распознавания: турбо принимает base64 и отдаёт длительность и метки слов; запасная — массив байтов. */
@@ -74,7 +75,7 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-export function fromBase64(b64: string): Uint8Array {
+export function fromBase64(b64: string): Bytes {
   const s = atob(b64.replace(/^data:[^,]*,/, ''));
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
@@ -214,9 +215,9 @@ export function validateTtsText(raw: unknown): { ok: true; text: string } | { ok
 }
 
 /** Приводит ответ MeloTTS к байтам MP3: base64 в поле audio, либо бинарный ответ. null — звука нет. */
-export async function normalizeTts(raw: unknown): Promise<Uint8Array | null> {
+export async function normalizeTts(raw: unknown): Promise<Bytes | null> {
   if (!raw) return null;
-  if (raw instanceof Uint8Array) return raw.length ? raw : null;
+  if (raw instanceof Uint8Array) return raw.length ? new Uint8Array(raw) : null;
   if (raw instanceof ArrayBuffer) return raw.byteLength ? new Uint8Array(raw) : null;
   if (typeof (raw as any).arrayBuffer === 'function') { const b = new Uint8Array(await (raw as any).arrayBuffer()); return b.length ? b : null; }
   if (typeof raw === 'string') { try { const b = fromBase64(raw); return b.length ? b : null; } catch { return null; } }
@@ -225,9 +226,9 @@ export async function normalizeTts(raw: unknown): Promise<Uint8Array | null> {
 }
 
 /** Озвучка реплики тренера: MP3 от MeloTTS. */
-export async function speak(env: ProviderEnv, text: string, opts: VoiceOpts = {}): Promise<{ audio: Uint8Array; mime: string; model: string }> {
+export async function speak(env: ProviderEnv, text: string, opts: VoiceOpts = {}): Promise<{ audio: Bytes; mime: string; model: string }> {
   const run = runner(env, opts);
-  let audio: Uint8Array | null;
+  let audio: Bytes | null;
   try { audio = await normalizeTts(await run(TTS_MODEL, { prompt: text, lang: 'en' })); }
   catch (e) { throw new VoiceError('tts_failed', String(e instanceof Error ? e.message : e).slice(0, 300)); }
   if (!audio) throw new VoiceError('tts_failed', 'модель не вернула звук');

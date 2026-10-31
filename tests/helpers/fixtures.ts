@@ -1,7 +1,7 @@
 import { deflateRawSync } from 'node:zlib';
 
 /** Минимальный корректный PDF с одним шрифтом Helvetica и текстом построчно (без сжатия). */
-export function makePdf(lines: string[]): Uint8Array {
+export function makePdf(lines: string[]): Uint8Array<ArrayBuffer> {
   const esc = (s: string) => s.replace(/[()\\]/g, m => '\\' + m);
   const content = 'BT /F1 12 Tf 50 750 Td 14 TL ' + lines.map(l => `(${esc(l)}) Tj T*`).join(' ') + ' ET';
   const objs = [
@@ -17,11 +17,11 @@ export function makePdf(lines: string[]): Uint8Array {
   const xref = out.length;
   out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
   out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  return new TextEncoder().encode(out);
+  return new TextEncoder().encode(out) as Uint8Array<ArrayBuffer>;
 }
 
 /** ZIP из набора файлов: method 0 (хранение) или 8 (deflate), как пишут Word и LibreOffice. */
-export function makeZip(files: Record<string, string>, method: 0 | 8 = 8): Uint8Array {
+export function makeZip(files: Record<string, string>, method: 0 | 8 = 8): Uint8Array<ArrayBuffer> {
   const enc = new TextEncoder();
   const parts: Uint8Array[] = [];
   const central: Uint8Array[] = [];
@@ -47,7 +47,7 @@ export function makeZip(files: Record<string, string>, method: 0 | 8 = 8): Uint8
 }
 
 /** DOCX из абзацев: по одному <w:p> на строку, с разбивкой на несколько <w:t> как у Word. */
-export function makeDocx(paragraphs: string[], method: 0 | 8 = 8): Uint8Array {
+export function makeDocx(paragraphs: string[], method: 0 | 8 = 8): Uint8Array<ArrayBuffer> {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const body = paragraphs.map(p => {
     const mid = Math.floor(p.length / 2);

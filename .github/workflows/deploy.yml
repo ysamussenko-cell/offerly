@@ -34,6 +34,14 @@ jobs:
           if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then echo "::error title=secrets::CLOUDFLARE_ACCOUNT_ID пуст"; exit 1; fi
       - run: npm ci
       - run: npm test
+      # Типы тестов и их помощников (tests/**) проверяются отдельным tsconfig.tests.json: типы DOM и Workers вместе,
+      # поэтому expectTypeOf в tests/types.test.ts срабатывает по-настоящему. Падение останавливает деплой.
+      - name: Typecheck tests
+        run: |
+          CODE=0; OUT=$(npm run lint:tests 2>&1) || CODE=$?
+          ERRORS=$(echo "$OUT" | grep -cE 'error TS' || true)
+          echo "::notice title=typecheck tests::tsconfig.tests.json: $([ "$CODE" = 0 ] && echo ok || echo "ошибок типов: $ERRORS; первая: $(echo "$OUT" | grep -m1 -E 'error TS' | cut -c1-400)")"
+          exit $CODE
       - run: npm run build
 
       # Сценарии Playwright (e2e/*.e2e.ts) на собранном dist: вход по коду, главный экран, занятие, тест, настройки, телефон, /install.
