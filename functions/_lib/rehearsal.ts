@@ -7,7 +7,9 @@
  *  Как на настоящем интервью, разбора между вопросами нет: ученик отвечает на все вопросы, после последнего
  *  экзаменатор разбирает весь разговор одним вызовом (scoring.ts: та же шкала и оси, что у письма): балл
  *  и строка по каждому ответу, что сказано хорошо, какие три фразы стоит заменить (цитаты проверяются
- *  на присутствие в ответах — модель не должна выдумывать), оценка по пяти осям (беглость речи — с голосом, 4.2).
+ *  на присутствие в ответах — модель не должна выдумывать), оценка по пяти осям. Беглость речи (4.2) считается
+ *  по меркам записей голоса (voice.ts): ответ, продиктованный голосом, ссылается на запись speech_takes по id,
+ *  ось — среднее беглости по таким ответам; без голосовых ответов она пуста, как раньше.
  *  Три фразы уходят карточками в журнал (cards.ts, source = rehearsal), день программы отмечается пройденным
  *  со сводным баллом. Сбой экзаменатора репетицию не роняет: она закрывается с причиной в review_note,
  *  разбор можно запросить снова (POST /api/rehearsal/review). Репетицию можно начать и вне плана —
@@ -21,6 +23,7 @@ import type { AssessmentStore } from './assessment';
 import { publicDay, type ProgramDay, type ProgramStore, type PublicDay } from './program';
 import type { Profile } from './profile';
 import { todayIn } from './onboarding';
+import { speechSummary, type SpeechMetrics, type SpeechStore } from './voice';
 
 export const QUESTION_KINDS = ['experience', 'mistake', 'explain', 'star', 'role'] as const;
 export type QuestionKind = typeof QUESTION_KINDS[number];
@@ -83,12 +86,14 @@ export interface Turn {
   answer: string | null;
   score: number | null;
   feedback: string | null;
+  /** Запись речи (speech_takes.id), если ответ продиктован голосом; null — ответ набран. */
+  speechId: string | null;
   createdAt: string;
   answeredAt: string | null;
 }
 
 export type RehearsalPatch = Partial<Pick<Rehearsal, 'status' | 'axes' | 'overall' | 'review' | 'reviewNote' | 'finishedAt' | 'updatedAt'>>;
-export type TurnPatch = Partial<Pick<Turn, 'answer' | 'score' | 'feedback' | 'answeredAt'>>;
+export type TurnPatch = Partial<Pick<Turn, 'answer' | 'score' | 'feedback' | 'speechId' | 'answeredAt'>>;
 
 export interface RehearsalStore {
   createRehearsal(r: Rehearsal, turns: Turn[]): Promise<void>;
@@ -101,7 +106,7 @@ export interface RehearsalStore {
   listTurns(rehearsalId: string): Promise<Turn[]>;
 }
 
-export type Store = RehearsalStore & CardStore & ProgramStore & Pick<AssessmentStore, 'latestFinishedAssessment'>;
+export type Store = RehearsalStore & CardStore & ProgramStore & Pick<AssessmentStore, 'latestFinishedAssessment'> & Partial<SpeechStore>;
 
 export class RehearsalError extends Error {
   constructor(public code: 'rehearsal_none' | 'rehearsal_stale' | 'rehearsal_finished' | 'answer_invalid' | 'rehearsal_eval_failed', message?: string, public reason?: string) { super(message ?? code); }
@@ -288,7 +293,7 @@ export function reviewPrompt(r: Pick<Rehearsal, 'targetRole' | 'level'>, turns: 
     ...turns.map(t => [
       `QUESTION ${t.position} (${t.kind}): ${t.question}`,
       `WHAT A STRONG ANSWER CONTAINS (Russian):\n${t.rubric.map(x => `- ${x}`).join('\n')}`,
-      `CANDIDATE'S ANSWER:\n${t.answer ?? '(no answer)'}`,
+      `${t.speechId ? "CANDIDATE'S ANSWER (spoken; automatic transcript — ignore punctuation and capitalisation):" : "CANDIDATE'S ANSWER:"}\n${t.answer ?? '(no answer)'}`,
     ].join('\n')),
   ].join('\n\n');
   return [{ role: 'system', content: system }, { role: 'user', content: user }];
@@ -347,9 +352,11 @@ export const parseReview = (s: string | null | undefined): RehearsalReview | nul
   try { const o = JSON.parse(s); return o && typeof o === 'object' && o.axes ? o as RehearsalReview : null; } catch { return null; }
 };
 
-/** Пять осей репетиции: четыре от экзаменатора, беглость — null до голоса; сводный балл — по весам осей. */
-export function rehearsalAxes(review: Pick<RehearsalReview, 'axes'>): { axes: Axes; overall: number; level: Level } {
-  const axes: Axes = { grammar: review.axes.grammar, vocabulary: review.axes.vocabulary, coherence: review.axes.coherence, taskResponse: review.axes.taskResponse, fluency: null };
+/** Пять осей репетиции: четыре от экзаменатора, беглость — среднее по меркам голосовых ответов (null, если ни один
+ *  ответ не продиктован); сводный балл — по весам осей. */
+export function rehearsalAxes(review: Pick<RehearsalReview, 'axes'>, speeches: Pick<SpeechMetrics, 'fluency'>[] = []): { axes: Axes; overall: number; level: Level } {
+  const fluency = speeches.length ? round(speeches.reduce((s, x) => s + x.fluency, 0) / speeches.length) : null;
+  const axes: Axes = { grammar: review.axes.grammar, vocabulary: review.axes.vocabulary, coherence: review.axes.coherence, taskResponse: review.axes.taskResponse, fluency };
   const overall = round(blend(AXES.map(k => [axes[k], AXIS_WEIGHTS[k]])) ?? 0);
   return { axes, overall, level: scoreToLevel(overall) };
 }
@@ -369,6 +376,8 @@ export interface CurrentTurn { turnId: string; position: number; kind: QuestionK
 export interface TurnView {
   turnId: string; position: number; kind: QuestionKind; kindLabel: string; question: string; rubric: string[];
   answer: string | null; words: number | null; answered: boolean; score: number | null; feedback: string | null;
+  /** Мерки речи, если ответ продиктован голосом: темп, паузы, заполнители, беглость. */
+  speech: SpeechMetrics | null;
 }
 
 export interface Result {
@@ -387,6 +396,8 @@ export interface View {
   /** Сценарий написан моделью (true) или встроенный (false). */
   scripted: boolean;
   total: number; answered: number;
+  /** Сколько ответов продиктовано голосом. */
+  spoken: number;
   current: CurrentTurn | null;
   turns: TurnView[];
   result: Result | null;
@@ -395,8 +406,21 @@ export interface View {
   startedAt: string; finishedAt: string | null;
 }
 
-export async function view(store: Pick<Store, 'listCards'>, r: Rehearsal, turns: Turn[], day: ProgramDay | null, today: string): Promise<View> {
+/** Мерки речи по голосовым ответам — из speech_takes по speechId каждого ответа. */
+async function speechesOf(store: Pick<Store, 'getSpeech'>, turns: Turn[]): Promise<Map<string, SpeechMetrics>> {
+  const out = new Map<string, SpeechMetrics>();
+  if (!store.getSpeech) return out;
+  for (const t of turns) {
+    if (!t.speechId) continue;
+    const s = await store.getSpeech(t.speechId, t.userId);
+    if (s) out.set(t.id, speechSummary(s));
+  }
+  return out;
+}
+
+export async function view(store: Pick<Store, 'listCards' | 'getSpeech'>, r: Rehearsal, turns: Turn[], day: ProgramDay | null, today: string): Promise<View> {
   const review = parseReview(r.review);
+  const speeches = await speechesOf(store, turns);
   const pending = r.status === 'active' ? turns.find(t => t.answeredAt == null) ?? null : null;
   const cards = await store.listCards(r.userId);
   const newCards = cards.filter(c => c.origin?.startsWith(`rehearsal:${r.id}:`)).length;
@@ -409,9 +433,9 @@ export async function view(store: Pick<Store, 'listCards'>, r: Rehearsal, turns:
   } : null;
   return {
     id: r.id, status: r.status, date: r.dayDate, day: day ? publicDay(day, today) : null, targetRole: r.targetRole, level: r.level, scripted: r.scriptModel != null,
-    total: turns.length, answered: turns.filter(t => t.answeredAt != null).length,
+    total: turns.length, answered: turns.filter(t => t.answeredAt != null).length, spoken: speeches.size,
     current: pending ? { turnId: pending.id, position: pending.position, kind: pending.kind, kindLabel: KIND_LABELS[pending.kind], question: pending.question, words: { min: ANSWER_WORDS.target[0], max: ANSWER_WORDS.target[1] } } : null,
-    turns: turns.map(t => ({ turnId: t.id, position: t.position, kind: t.kind, kindLabel: KIND_LABELS[t.kind], question: t.question, rubric: t.rubric, answer: t.answer, words: t.answer ? countWords(t.answer) : null, answered: t.answeredAt != null, score: t.score, feedback: t.feedback })),
+    turns: turns.map(t => ({ turnId: t.id, position: t.position, kind: t.kind, kindLabel: KIND_LABELS[t.kind], question: t.question, rubric: t.rubric, answer: t.answer, words: t.answer ? countWords(t.answer) : null, answered: t.answeredAt != null, score: t.score, feedback: t.feedback, speech: speeches.get(t.id) ?? null })),
     result, reviewNote: r.reviewNote, startedAt: r.startedAt, finishedAt: r.finishedAt,
   };
 }
@@ -460,7 +484,7 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
     const script = await writeScript(env, domainOf(profile), targetRole, level, opts);
     const ts = now();
     const created: Rehearsal = { id: id(), userId, programDayId: day && day.status !== 'done' ? day.id : null, dayDate: t, targetRole, level, status: 'active', questionCount: script.questions.length, scriptModel: script.model, axes: null, overall: null, review: null, reviewNote: script.note ? `сценарий встроенный: ${script.note}` : null, startedAt: ts, finishedAt: null, updatedAt: ts };
-    const turns: Turn[] = script.questions.map((q, i) => ({ id: id(), rehearsalId: created.id, userId, position: i + 1, kind: q.kind, question: q.question, rubric: q.rubric, answer: null, score: null, feedback: null, createdAt: ts, answeredAt: null }));
+    const turns: Turn[] = script.questions.map((q, i) => ({ id: id(), rehearsalId: created.id, userId, position: i + 1, kind: q.kind, question: q.question, rubric: q.rubric, answer: null, score: null, feedback: null, speechId: null, createdAt: ts, answeredAt: null }));
     await store.createRehearsal(created, turns);
     return view(store, created, turns, day, t);
   }
@@ -468,7 +492,9 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
 }
 
 /** Принять ответ на текущий вопрос; после последнего — закрыть репетицию, разобрать разговор, завести карточки,
- *  отметить день программы. Сбой экзаменатора репетицию не роняет — причина в reviewNote. */
+ *  отметить день программы. Сбой экзаменатора репетицию не роняет — причина в reviewNote.
+ *  raw — текст ответа или {text, speechId}: speechId — запись речи пользователя (voice.ts), если ответ продиктован;
+ *  неизвестная или чужая запись — answer_invalid с причиной speech_unknown. */
 export async function answer(env: ProviderEnv, store: Store, userId: string, turnId: unknown, raw: unknown, tz: string, profile: Profile | null, opts: RunOpts = {}): Promise<View> {
   const now = opts.now ?? (() => new Date().toISOString());
   const t = todayIn(tz, new Date(now()));
@@ -479,10 +505,17 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, tur
   const pending = turns.find(x => x.answeredAt == null);
   if (!pending) throw new RehearsalError('rehearsal_stale', 'вопросов не осталось');
   if (typeof turnId !== 'string' || turnId !== pending.id) throw new RehearsalError('rehearsal_stale', 'ответ относится не к текущему вопросу');
-  const v = validateAnswer(raw);
+  const body = raw && typeof raw === 'object' ? raw as { text?: unknown; speechId?: unknown } : { text: raw, speechId: null };
+  const v = validateAnswer(body.text);
   if (!v.ok) throw new RehearsalError('answer_invalid', undefined, v.reason);
+  let speechId: string | null = null;
+  if (body.speechId != null && body.speechId !== '') {
+    const s = typeof body.speechId === 'string' && store.getSpeech ? await store.getSpeech(body.speechId, userId) : null;
+    if (!s) throw new RehearsalError('answer_invalid', 'запись речи не найдена', 'speech_unknown');
+    speechId = s.id;
+  }
   const ts = now();
-  const patch: TurnPatch = { answer: v.answer, answeredAt: ts };
+  const patch: TurnPatch = { answer: v.answer, speechId, answeredAt: ts };
   await store.updateTurn(pending.id, patch);
   Object.assign(pending, patch);
   const day = await dayById(store, r.programDayId);
@@ -509,7 +542,7 @@ async function score(env: ProviderEnv, store: Store, r: Rehearsal, turns: Turn[]
     if (day && day.status !== 'done') { await store.updateProgramDay(day.id, { status: 'done', score: null, completedAt: now(), updatedAt: now() }); day.status = 'done'; }
     return false;
   }
-  const s = rehearsalAxes(review);
+  const s = rehearsalAxes(review, [...(await speechesOf(store, turns)).values()]);
   const ts = now();
   const patch: RehearsalPatch = { axes: s.axes, overall: s.overall, review: JSON.stringify(review), reviewNote: null, updatedAt: ts };
   await store.updateRehearsal(r.id, patch);
@@ -569,12 +602,12 @@ export function d1RehearsalStore(db: D1Database): RehearsalStore {
     try { const p = JSON.parse(r.rubric ?? '[]'); if (Array.isArray(p)) rubric = p.map(String); } catch { rubric = []; }
     return {
       id: r.id, rehearsalId: r.rehearsal_id, userId: r.user_id, position: Number(r.position), kind: (QUESTION_KINDS as readonly string[]).includes(r.kind) ? r.kind : 'experience',
-      question: r.question, rubric, answer: r.answer ?? null, score: n(r.score), feedback: r.feedback ?? null, createdAt: r.created_at, answeredAt: r.answered_at ?? null,
+      question: r.question, rubric, answer: r.answer ?? null, score: n(r.score), feedback: r.feedback ?? null, speechId: r.speech_id ?? null, createdAt: r.created_at, answeredAt: r.answered_at ?? null,
     };
   };
   const COLS: Record<string, string> = {
     status: 'status', overall: 'overall', review: 'review', reviewNote: 'review_note', finishedAt: 'finished_at', updatedAt: 'updated_at',
-    answer: 'answer', score: 'score', feedback: 'feedback', answeredAt: 'answered_at',
+    answer: 'answer', score: 'score', feedback: 'feedback', speechId: 'speech_id', answeredAt: 'answered_at',
   };
   const AXIS_COLS: Record<Axis, string> = { grammar: 'grammar', vocabulary: 'vocabulary', coherence: 'coherence', taskResponse: 'task_response', fluency: 'fluency' };
   const setClause = (patch: Record<string, unknown>) => {

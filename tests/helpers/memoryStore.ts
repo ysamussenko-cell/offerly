@@ -9,6 +9,7 @@ import type { Lesson, LessonStep, LessonStore } from '../../functions/_lib/lesso
 import type { DashboardStore } from '../../functions/_lib/dashboard';
 import type { AchievementRow, AchievementStore, AnswerRecord } from '../../functions/_lib/achievements';
 import type { Rehearsal, RehearsalStore, Turn } from '../../functions/_lib/rehearsal';
+import type { SpeechStore, SpeechTake } from '../../functions/_lib/voice';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -26,13 +27,14 @@ export function memoryStore() {
   const achievements: AchievementRow[] = [];
   const rehearsals: Rehearsal[] = [];
   const turns: Turn[] = [];
+  const speeches: SpeechTake[] = [];
   const patchInto = (target: any, patch: object) => Object.assign(target, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
     interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, targetLevel: null, weeklyGoalMinutes: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -171,6 +173,9 @@ export function memoryStore() {
     async listRehearsals(userId) { return rehearsals.filter(x => x.userId === userId).sort((p, q) => p.dayDate.localeCompare(q.dayDate) || p.startedAt.localeCompare(q.startedAt)).map(r => ({ ...r })); },
     async updateTurn(id, patch) { const t = turns.find(x => x.id === id); if (t) patchInto(t, patch); },
     async listTurns(rehearsalId) { return turns.filter(t => t.rehearsalId === rehearsalId).sort((p, q) => p.position - q.position).map(t => ({ ...t, rubric: [...t.rubric] })); },
+
+    async insertSpeech(s) { speeches.push({ ...s }); },
+    async getSpeech(id, userId) { const s = speeches.find(x => x.id === id && x.userId === userId); return s ? { ...s } : null; },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches };
 }

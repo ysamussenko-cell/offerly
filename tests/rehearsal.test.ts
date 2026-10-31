@@ -143,7 +143,7 @@ describe('ответ и разбор', () => {
     expect(r).toMatchObject({ ok: true, answer: ANSWERS[0] });
   });
   it('подсказка экзаменатору: все вопросы с рубриками и ответами, позиция и уровень', () => {
-    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: ANSWERS[i], score: null, feedback: null, createdAt: NOW, answeredAt: NOW }));
+    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: ANSWERS[i], score: null, feedback: null, speechId: null, createdAt: NOW, answeredAt: NOW }));
     const [sys, user] = reviewPrompt({ targetRole: 'OpenTrain AI', level: 'B2' }, turns, DOMAIN);
     expect(sys.content).toContain(`exactly ${REPLACEMENTS} phrases`);
     expect(user.content).toContain('QUESTION 5 (role)');
@@ -152,7 +152,7 @@ describe('ответ и разбор', () => {
     expect(user.content).toContain('Target level: B2');
   });
   it('нормализация разбора: фразы только из ответов, не больше трёх, баллы по позициям; без осей — null', () => {
-    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: ANSWERS[i], score: null, feedback: null, createdAt: NOW, answeredAt: NOW }));
+    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: ANSWERS[i], score: null, feedback: null, speechId: null, createdAt: NOW, answeredAt: NOW }));
     const n = normalizeReview(REVIEW, turns)!;
     expect(n.axes).toEqual({ grammar: 62, vocabulary: 58, coherence: 60, taskResponse: 66 });
     expect(n.level).toBe('B2');
@@ -169,7 +169,7 @@ describe('ответ и разбор', () => {
     expect(normalizeReview('x', turns)).toBeNull();
   });
   it('reviewRehearsal: повторная попытка при мусоре, затем ошибка с хвостом ответа', async () => {
-    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: ANSWERS[i], score: null, feedback: null, createdAt: NOW, answeredAt: NOW }));
+    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: ANSWERS[i], score: null, feedback: null, speechId: null, createdAt: NOW, answeredAt: NOW }));
     let calls = 0;
     const r = await reviewRehearsal(ENV, { targetRole: null, level: 'B2' }, turns, DOMAIN, { chatFn: async () => { calls++; return calls === 1 ? 'hmm' : JSON.stringify(REVIEW); }, now: () => NOW });
     expect(calls).toBe(2);
@@ -305,7 +305,7 @@ describe('хранилище D1 (node:sqlite)', () => {
     db.exec(`INSERT INTO users (id, email) VALUES ('${USER}', 'a@b.cc')`);
     const store = d1RehearsalStore(d1Of(db));
     const r: Rehearsal = { id: 'r1', userId: USER, programDayId: 'd1', dayDate: TODAY, targetRole: 'OpenTrain AI', level: 'B2', status: 'active', questionCount: 5, scriptModel: 'm', axes: null, overall: null, review: null, reviewNote: null, startedAt: NOW, finishedAt: null, updatedAt: NOW };
-    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r1', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: null, score: null, feedback: null, createdAt: NOW, answeredAt: null }));
+    const turns: Turn[] = SCRIPT.questions.map((q, i) => ({ id: `t${i}`, rehearsalId: 'r1', userId: USER, position: i + 1, kind: q.kind as Turn['kind'], question: q.question, rubric: q.rubric, answer: null, score: null, feedback: null, speechId: null, createdAt: NOW, answeredAt: null }));
     await store.createRehearsal(r, turns);
     expect(await store.rehearsalForDay(USER, TODAY)).toEqual(r);
     expect(await store.rehearsalForDay(USER, '2026-10-31')).toBeNull();

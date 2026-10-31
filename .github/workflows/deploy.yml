@@ -164,3 +164,11 @@ jobs:
           RHB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/abandon")
           echo "::notice title=rehearsal::GET /api/rehearsal без cookie → $RHG; POST /api/rehearsal/start → $RHS; POST /api/rehearsal/answer → $RHA; POST /api/rehearsal/review → $RHR; POST /api/rehearsal/abandon → $RHB (ждём 401 везде)"
           [ "$RHG" = "401" ] && [ "$RHS" = "401" ] && [ "$RHA" = "401" ] && [ "$RHR" = "401" ] && [ "$RHB" = "401" ] || { echo "::error title=rehearsal::неожиданные коды ответа"; exit 1; }
+          # голос (4.2): маршруты без cookie → 401; голосовой контур (MeloTTS → Whisper) уже прогнан в deep=2 — строка voice
+          VT=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F 'audio=@health.json;type=audio/wav;filename=a.wav' "$P/api/voice/transcribe")
+          VS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"text":"hello"}' "$P/api/voice/speak")
+          VM=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/voice/meta")
+          VOICE=$(node -e 'const h=require("./deep.json"); console.log(String(h.voice))')
+          echo "::notice title=voice::POST /api/voice/transcribe без cookie → $VT; POST /api/voice/speak → $VS; GET /api/voice/meta → $VM (ждём 401 везде); контур: $VOICE"
+          [ "$VT" = "401" ] && [ "$VS" = "401" ] && [ "$VM" = "401" ] || { echo "::error title=voice::неожиданные коды ответа"; exit 1; }
+          case "$VOICE" in ok:*) ;; *) echo "::warning title=voice::голосовой контур не подтверждён: $VOICE";; esac

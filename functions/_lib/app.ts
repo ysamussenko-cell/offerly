@@ -16,13 +16,14 @@ import { d1LessonStore, today as lessonToday, startOrResume as startLesson, answ
 import { d1DashboardStore, dashboard, parseGoal, GAIN_PER_LESSON, MISS_PENALTY, MISS_CAP, FREEZES_PER_WEEK, GOAL_MIN, GOAL_MAX, GOAL_DAYS_DEFAULT, type DashboardStore } from './dashboard';
 import { d1AchievementStore, syncAchievements, ACHIEVEMENTS, type AchievementStore } from './achievements';
 import { d1RehearsalStore, today as rehearsalToday, startOrResume as startRehearsal, answer as answerRehearsal, rescore as rescoreRehearsal, abandon as abandonRehearsal, RehearsalError, QUESTION_COUNT, ANSWER_WORDS, REPLACEMENTS, type RehearsalStore } from './rehearsal';
+import { d1SpeechStore, recordSpeech, speak, publicSpeech, validateTtsText, selfTestVoice, VoiceError, MAX_AUDIO_BYTES, MAX_SECONDS, MAX_TTS_CHARS, STT_MODEL, TTS_MODEL, type SpeechStore } from './voice';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -33,7 +34,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -74,6 +75,8 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
           const a = await analyzeResume(c.env, SELF_TEST_RESUME);
           out.analysis = `ok: ${a.specialty} / ${a.industry} / ${a.years} лет / ${a.keywords.length} терминов`;
         } catch (e) { out.analysis = `error: ${String(e instanceof Error ? e.message : e).slice(0, 400)}`; }
+        // голосовой контур: MeloTTS озвучивает фразу, Whisper её распознаёт — проверка обеих моделей без записи с микрофона
+        out.voice = await selfTestVoice(c.env);
       }
     }
     return c.json(out);
@@ -395,10 +398,58 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const user = c.get('auth')!.user;
     const body = await c.req.json().catch(() => ({}));
     try {
-      const rehearsal = await answerRehearsal(c.env, c.get('store'), user.id, body.turnId, body.answer, user.tz, await profileOf(c));
+      const raw = body.speechId ? { text: body.answer, speechId: body.speechId } : body.answer;
+      const rehearsal = await answerRehearsal(c.env, c.get('store'), user.id, body.turnId, raw, user.tz, await profileOf(c));
       return c.json({ ok: true, ...rehearsalMeta, rehearsal, unlocked: await unlocked(c) });
     } catch (e) { return rehearsalFail(c, e); }
   });
+
+  // --- голос ---
+
+  const VOICE_STATUS: Record<VoiceError['code'], number> = { audio_missing: 400, audio_unsupported: 415, audio_too_large: 413, audio_empty: 422, stt_failed: 502, tts_failed: 502, tts_text_invalid: 400 };
+  const voiceFail = (c: any, e: unknown) => {
+    if (e instanceof VoiceError) return c.json({ ok: false, error: e.code, detail: e.message !== e.code ? e.message : undefined }, VOICE_STATUS[e.code]);
+    throw e;
+  };
+  const voiceMeta = { maxBytes: MAX_AUDIO_BYTES, maxSeconds: MAX_SECONDS, maxChars: MAX_TTS_CHARS, stt: STT_MODEL, tts: TTS_MODEL };
+
+  /** Распознать запись речи: multipart с полем audio (WAV 16 кГц моно — клиент перекодирует сам; WebM/MP4/OGG/MP3 — как есть).
+   *  Ответ — запись speech_takes: расшифровка и мерки (темп, паузы, заполнители, беглость); её id передаётся с ответом
+   *  репетиции, чтобы беглость вошла в оси. Текст расшифровки ученик может поправить перед отправкой. */
+  app.post('/voice/transcribe', requireAuth, async (c) => {
+    const userId = c.get('auth')!.user.id;
+    const len = Number(c.req.header('content-length') ?? 0);
+    if (len > MAX_AUDIO_BYTES + 4096) return c.json({ ok: false, error: 'audio_too_large' }, 413);
+    const ct = c.req.header('content-type') ?? '';
+    let bytes: Uint8Array | null = null; let mime = '';
+    if (ct.includes('multipart/form-data')) {
+      const body = await c.req.parseBody();
+      const file = body.audio ?? body.file;
+      if (file instanceof File) { bytes = new Uint8Array(await file.arrayBuffer()); mime = file.type || ''; }
+    } else if (ct.startsWith('audio/') || ct.startsWith('video/')) {
+      bytes = new Uint8Array(await c.req.arrayBuffer()); mime = ct;
+    }
+    try {
+      const p = await c.get('store').getProfile(userId);
+      const hint = p?.keywords?.length ? p.keywords.slice(0, 12).join(', ') : undefined;
+      const take = await recordSpeech(c.env, c.get('store'), userId, bytes ?? new Uint8Array(0), mime, { hint });
+      return c.json({ ok: true, ...voiceMeta, speech: publicSpeech(take) });
+    } catch (e) { return voiceFail(c, e); }
+  });
+
+  /** Озвучить реплику тренера: {text} до MAX_TTS_CHARS знаков → MP3 (MeloTTS). */
+  app.post('/voice/speak', requireAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const v = validateTtsText(body?.text);
+    if (!v.ok) return c.json({ ok: false, error: 'tts_text_invalid', reason: v.reason }, 400);
+    try {
+      const s = await speak(c.env, v.text);
+      return new Response(s.audio, { status: 200, headers: { 'content-type': s.mime, 'cache-control': 'private, max-age=3600', 'x-tts-model': s.model } });
+    } catch (e) { return voiceFail(c, e); }
+  });
+
+  /** Справочник голоса: пределы записи и текста, модели. */
+  app.get('/voice/meta', requireAuth, (c) => c.json({ ok: true, ...voiceMeta }));
 
   /** Разобрать последнюю завершённую репетицию заново: когда разбора нет (сбой модели) или {force: true}. */
   app.post('/rehearsal/review', requireAuth, async (c) => {

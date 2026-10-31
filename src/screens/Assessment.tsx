@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api, errorText, type Assessment as View } from '../api';
 import { KeyHints, useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
+import { MicButton, SpeakButton, useRecorder, type Recorder } from '../Recorder';
+import { mergeTranscript } from '../voice';
 import { longDate, plural } from '../text';
 import ResultView from './Result';
 
@@ -86,6 +88,9 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
   const [pair, setPair] = useState<(string | null)[]>([null, null]);
   const [text, setText] = useState('');
   const startedFor = useRef<string | null>(null);
+  /** Голосовой ответ: письмо дописывается расшифровкой, исправление — заменяется целиком (в поле лежит исходное предложение). */
+  const curKind = useRef<string | null>(null);
+  const rec = useRecorder(s => setText(t => curKind.current === 'writing' ? mergeTranscript(t, s.text) : s.text.trim()));
 
   useEffect(() => {
     if (mode === 'result') {
@@ -110,6 +115,7 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
   }
 
   const cur = view?.current ?? null;
+  curKind.current = cur?.kind ?? null;
   // Новое задание — чистые поля; для исправления в поле подставляется исходное предложение.
   useEffect(() => {
     if (!cur || startedFor.current === cur.attemptId) return;
@@ -123,7 +129,7 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
     if (cur.kind === 'reading') return pair.every(Boolean) ? (pair as string[]) : null;
     return text.trim() || null;
   };
-  const canSend = answerValue() != null && busy == null;
+  const canSend = answerValue() != null && busy == null && rec.state === 'idle';
 
   async function send() {
     const v = answerValue();
@@ -144,15 +150,19 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
   const testing = view?.status === 'active' && cur != null;
   const textEntry = cur?.kind === 'correction' || cur?.kind === 'writing';
   const choices = cur?.kind === 'mcq' ? cur.options!.length : cur?.kind === 'reading' ? Math.max(...cur.questions!.map(q => q.options.length)) : 0;
+  const recordable = testing && textEntry && busy == null && rec.available && rec.state !== 'processing';
   const keyCtx = {
     choices: testing ? choices : 0,
     submit: testing && canSend,
-    cancel: view?.status !== 'finished' && busy !== 'answer' && busy !== 'score', // на экране результата Esc слушает Finished
+    cancel: view?.status !== 'finished' && busy !== 'answer' && busy !== 'score' && rec.state === 'idle', // на экране результата Esc слушает Finished
     busy: busy != null,
+    recordable,
   };
   useHotkeys(keyCtx, {
     onSubmit: send,
     onCancel: onClose,
+    onRecordStart: rec.start,
+    onRecordStop: rec.stop,
     onChoose: i => {
       if (!cur) return;
       if (cur.kind === 'mcq') { if (i < cur.options!.length) setChoice(LETTERS[i]); return; }
@@ -207,9 +217,10 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
         <>
           <p className="task">{cur.prompt}</p>
           <label className="field">
-            <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте.</span>
-            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null} autoFocus />
+            <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте — или продиктуйте исправленное предложение целиком.</span>
+            <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null || rec.state !== 'idle'} autoFocus />
           </label>
+          <MicButton rec={rec} disabled={busy != null} what="исправление" />
         </>
       )}
 
@@ -230,13 +241,13 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
         </>
       )}
 
-      {cur && cur.kind === 'writing' && <WritingInput prompt={cur.prompt} words={cur.words!} text={text} setText={setText} disabled={busy != null} />}
+      {cur && cur.kind === 'writing' && <WritingInput prompt={cur.prompt} words={cur.words!} text={text} setText={setText} disabled={busy != null} rec={rec} />}
 
       <div className="row" style={{ marginTop: 20 }}>
         <button className="btn" type="button" onClick={send} disabled={!canSend} aria-keyshortcuts={submitShortcut(textEntry)}>{busy === 'answer' ? (cur?.position === view?.total ? 'Оцениваю…' : 'Принимаю…') : 'Ответить'}</button>
         <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Прервать — продолжу позже</button>
       </div>
-      {cur && <KeyHints ctx={{ ...keyCtx, submit: testing, busy: false }} textEntry={textEntry} />}
+      {cur && <KeyHints ctx={{ ...keyCtx, submit: testing, busy: false, recordable: testing && textEntry && rec.available }} textEntry={textEntry} />}
       {busy === 'answer' && cur?.position !== view?.total && <p className="muted hint">Следующее задание подбирается из банка; если там пусто, модель напишет его — до минуты.</p>}
       {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">Письмо проверяется по рубрике и образцу, считаются пять осей — до минуты.</p>}
       {error && <p className="error" role="alert">{error}</p>}
@@ -244,16 +255,20 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
   );
 }
 
-function WritingInput({ prompt, words, text, setText, disabled }: { prompt: string; words: { min: number; max: number }; text: string; setText: (s: string) => void; disabled: boolean }) {
+function WritingInput({ prompt, words, text, setText, disabled, rec }: { prompt: string; words: { min: number; max: number }; text: string; setText: (s: string) => void; disabled: boolean; rec: Recorder }) {
   const n = countWords(text);
   const tone = n === 0 ? 'muted' : n < 30 ? 'bad' : n < words.min || n > words.max ? 'warn' : 'ok';
   return (
     <>
-      <p className="task">{prompt}</p>
+      <div className="task-row">
+        <p className="task">{prompt}</p>
+        <SpeakButton text={prompt} label="Озвучить задание" />
+      </div>
       <label className="field">
-        <span>Текст на английском, {words.min}–{words.max} слов. Отвечайте на задание, а не вокруг него.</span>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled} autoFocus lang="en" spellCheck={false} />
+        <span>Текст на английском, {words.min}–{words.max} слов — наберите или продиктуйте. Отвечайте на задание, а не вокруг него.</span>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled || rec.state !== 'idle'} autoFocus lang="en" spellCheck={false} />
       </label>
+      <MicButton rec={rec} disabled={disabled} what="ответ" />
       <p className={`hint ${tone}`}>{wordsText(n)} · цель {words.min}–{words.max}{n > 0 && n < 30 ? ' · меньше тридцати не принимается' : ''}</p>
     </>
   );

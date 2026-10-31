@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText, rehearsalErrorText, type Achievement, type Rehearsal as View, type RehearsalToday } from '../api';
+import { api, errorText, rehearsalErrorText, type Achievement, type Rehearsal as View, type RehearsalToday, type Speech } from '../api';
 import { longDate, minutesText, plural } from '../text';
 import { KeyHints, useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { Diff } from './Lesson';
+import { MicButton, SpeakButton, useRecorder } from '../Recorder';
+import { fluencyTone, mergeTranscript, speechLine } from '../voice';
 
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
@@ -40,8 +42,9 @@ export function RehearsalCard({ onOpen, refreshKey }: CardProps) {
         <>
           <p className="muted" style={{ marginTop: d ? 0 : 12, fontSize: 14 }}>
             Интервьюер задаёт {t.questions} вопросов по целевой позиции: опыт, разбор ошибки из вашей области, объяснение понятия неспециалисту,
-            поведенческий вопрос (STAR), мотивация. Отвечаете текстом по-английски, {t.words.target[0]}–{t.words.target[1]} слов на вопрос.
-            Разбор — после последнего ответа: пять осей, что сказано хорошо, {t.replacements} фразы заменить (они уйдут в журнал). Можно прервать и продолжить.
+            поведенческий вопрос (STAR), мотивация. Отвечаете по-английски — голосом (кнопка-микрофон, расшифровку можно поправить) или текстом,
+            {t.words.target[0]}–{t.words.target[1]} слов на вопрос; вопрос можно озвучить голосом интервьюера.
+            Разбор — после последнего ответа: пять осей (беглость речи — по голосовым ответам), что сказано хорошо, {t.replacements} фразы заменить (они уйдут в журнал). Можно прервать и продолжить.
           </p>
           {!t.scheduled && <p className="muted" style={{ fontSize: 14 }}>Сегодня по программе не репетиция, но провести её можно и вне плана — в серию и готовность она засчитается как занятие.</p>}
           <button className={t.scheduled ? 'btn' : 'btn secondary'} type="button" onClick={onOpen}>Начать репетицию</button>
@@ -77,8 +80,11 @@ export default function Rehearsal({ onClose }: Props) {
   const [busy, setBusy] = useState<'start' | 'answer' | 'review' | null>('start');
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState('');
+  /** Запись речи, из которой пришёл текст ответа; её id уходит с ответом — беглость войдёт в оси разбора. */
+  const [speech, setSpeech] = useState<Speech | null>(null);
   const [unlocked, setUnlocked] = useState<Achievement[]>([]);
   const startedFor = useRef<string | null>(null);
+  const rec = useRecorder(s => { setText(t => mergeTranscript(t, s.text)); setSpeech(s); });
 
   useEffect(() => {
     api.startRehearsal().then(r => setView(r.rehearsal)).catch(e => setError(errorText(e))).finally(() => setBusy(null));
@@ -88,18 +94,18 @@ export default function Rehearsal({ onClose }: Props) {
   useEffect(() => {
     if (!cur || startedFor.current === cur.turnId) return;
     startedFor.current = cur.turnId;
-    setText(''); setError(null);
+    setText(''); setSpeech(null); setError(null);
   }, [cur]);
 
   const words = countWords(text);
-  const canSend = cur != null && text.trim().length > 0 && busy == null;
+  const canSend = cur != null && text.trim().length > 0 && busy == null && rec.state === 'idle';
   const isLast = view != null && cur != null && cur.position === view.total;
 
   async function send() {
     if (!cur || !text.trim() || busy) return;
     setBusy('answer'); setError(null);
     try {
-      const r = await api.answerRehearsal(cur.turnId, text.trim());
+      const r = await api.answerRehearsal(cur.turnId, text.trim(), speech?.id ?? null);
       setView(r.rehearsal);
       if (r.unlocked?.length) setUnlocked(u => [...u, ...r.unlocked.filter(a => !u.some(x => x.code === a.code))]);
     } catch (e) {
@@ -127,8 +133,9 @@ export default function Rehearsal({ onClose }: Props) {
   }
 
   const finished = view?.status === 'finished';
-  const keyCtx = { submit: canSend, cancel: busy !== 'answer', busy: busy != null };
-  useHotkeys(keyCtx, { onSubmit: send, onCancel: onClose });
+  const recordable = cur != null && busy == null && rec.available && rec.state !== 'processing';
+  const keyCtx = { submit: canSend, cancel: busy !== 'answer' && rec.state === 'idle', busy: busy != null, recordable };
+  useHotkeys(keyCtx, { onSubmit: send, onCancel: onClose, onRecordStart: rec.start, onRecordStop: rec.stop });
 
   if (finished && view) return <Debrief view={view} onClose={onClose} onReview={review} busy={busy === 'review'} error={error} unlocked={unlocked} />;
 
@@ -147,11 +154,16 @@ export default function Rehearsal({ onClose }: Props) {
       {cur && (
         <>
           <p className="muted hint" style={{ margin: '0 0 6px' }}>Интервьюер{view?.level ? ` · ваш уровень ${view.level}` : ''}{view && !view.scripted ? ' · встроенный сценарий' : ''}</p>
-          <p className="task" lang="en">{cur.question}</p>
+          <div className="task-row">
+            <p className="task" lang="en">{cur.question}</p>
+            <SpeakButton text={cur.question} label="Озвучить вопрос" />
+          </div>
           <label className="field">
-            <span>{kindHint(cur.kind)} Ответ по-английски, {cur.words.min}–{cur.words.max} слов — как сказали бы вслух.</span>
-            <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={busy != null} autoFocus lang="en" spellCheck={false} />
+            <span>{kindHint(cur.kind)} Ответ по-английски, {cur.words.min}–{cur.words.max} слов — голосом или текстом, как сказали бы вслух.</span>
+            <textarea value={text} onChange={e => { setText(e.target.value); if (!e.target.value.trim()) setSpeech(null); }} rows={8} disabled={busy != null || rec.state !== 'idle'} autoFocus lang="en" spellCheck={false} />
           </label>
+          <MicButton rec={rec} disabled={busy != null} what="ответ" />
+          {speech && <p className={`speech-line ${fluencyTone(speech.fluency)}`}>С голоса: {speechLine(speech)}. Беглость этой записи войдёт в оси разбора; текст перед отправкой можно поправить.</p>}
           <WordCount n={words} min={cur.words.min} max={cur.words.max} />
         </>
       )}
@@ -164,7 +176,7 @@ export default function Rehearsal({ onClose }: Props) {
         {view && view.answered === 0 && cur && busy == null && <button className="link" type="button" onClick={restart}>Другой сценарий</button>}
       </div>
       {busy === 'answer' && isLast && <p className="muted hint">Экзаменатор читает все ответы: пять осей, что сказано хорошо, три фразы заменить — до минуты.</p>}
-      {cur && <KeyHints ctx={{ ...keyCtx, submit: true, busy: false }} textEntry />}
+      {cur && <KeyHints ctx={{ ...keyCtx, submit: true, busy: false, recordable: rec.available }} textEntry />}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
@@ -212,7 +224,8 @@ function Debrief({ view, onClose, onReview, busy, error, unlocked }: DebriefProp
               <li key={a.id} className={a.score == null ? 'off' : ''}><span>{a.label}</span><b>{a.score ?? '—'}</b></li>
             ))}
           </ul>
-          {res.axes.some(a => a.score == null) && <p className="muted hint" style={{ marginTop: -8 }}>Беглость речи измеряется с голосовым ответом — появится вместе с записью голоса.</p>}
+          {res.axes.some(a => a.score == null) && <p className="muted hint" style={{ marginTop: -8 }}>Беглость речи считается по голосовым ответам — в этой репетиции все ответы набраны текстом.</p>}
+          {view.spoken > 0 && <p className="muted hint" style={{ marginTop: -8 }}>Голосом отвечено на {view.spoken} из {view.total}: беглость — среднее по темпу, паузам и заполнителям этих ответов.</p>}
           {res.strengths.length > 0 && (
             <>
               <h3 className="result-h">Что сказано хорошо</h3>
@@ -275,6 +288,7 @@ function Debrief({ view, onClose, onReview, busy, error, unlocked }: DebriefProp
               </div>
               <p className="prompt" lang="en">{t.question}</p>
               {t.answer && <p className="passage" lang="en">{t.answer}</p>}
+              {t.speech && <p className={`speech-line ${fluencyTone(t.speech.fluency)}`}>Голосом: {speechLine(t.speech)}.</p>}
               {t.feedback && <p className="review-note">{t.feedback}</p>}
               <p className="muted hint">Сильный ответ: {t.rubric.join('; ')}.</p>
             </div>

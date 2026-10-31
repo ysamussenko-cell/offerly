@@ -115,9 +115,15 @@ export type Dashboard = {
   program: { exists: boolean; endDate: string | null; done: number; total: number };
 };
 export type RehearsalKind = 'experience' | 'mistake' | 'explain' | 'star' | 'role';
+export type SpeechMetrics = { words: number; duration: number; wpm: number; pauses: number; longestPause: number; fillers: number; fluency: number };
+/** Запись речи после распознавания: расшифровка и мерки; id передаётся с ответом репетиции. */
+export type Speech = SpeechMetrics & { id: string; text: string; createdAt: string };
+export type VoiceMeta = { maxBytes: number; maxSeconds: number; maxChars: number; stt: string; tts: string };
 export type RehearsalTurn = {
   turnId: string; position: number; kind: RehearsalKind; kindLabel: string; question: string; rubric: string[];
   answer: string | null; words: number | null; answered: boolean; score: number | null; feedback: string | null;
+  /** Мерки речи, если ответ продиктован голосом. */
+  speech: SpeechMetrics | null;
 };
 export type Replacement = { original: string; better: string; note: string; topic: string | null; topicLabel: string | null };
 export type RehearsalResult = {
@@ -126,7 +132,7 @@ export type RehearsalResult = {
 };
 export type Rehearsal = {
   id: string; status: 'active' | 'finished' | 'abandoned'; date: string; day: ProgramDay | null;
-  targetRole: string | null; level: Level; scripted: boolean; total: number; answered: number;
+  targetRole: string | null; level: Level; scripted: boolean; total: number; answered: number; spoken: number;
   current: { turnId: string; position: number; kind: RehearsalKind; kindLabel: string; question: string; words: { min: number; max: number } } | null;
   turns: RehearsalTurn[]; result: RehearsalResult | null; reviewNote: string | null; startedAt: string; finishedAt: string | null;
 };
@@ -151,6 +157,15 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(r.status, j.error ?? 'request_failed', j);
   return j as T;
+}
+
+/** Запрос, отдающий не JSON, а файл (озвучка): ошибки по-прежнему приходят JSON-ом. */
+async function callBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  let r: Response;
+  try { r = await fetch(`/api${path}`, { credentials: 'same-origin', ...init }); }
+  catch { throw networkFailure(typeof navigator === 'undefined' || navigator.onLine !== false); }
+  if (!r.ok) { const j: any = await r.json().catch(() => ({})); throw new ApiError(r.status, j.error ?? 'request_failed', j); }
+  return r.blob();
 }
 
 const post = <T,>(path: string, body: unknown) =>
@@ -193,12 +208,20 @@ export const api = {
   bonusLesson: (accept: boolean) => post<{ ok: true; lesson: Lesson }>('/lesson/bonus', { accept }),
   rehearsal: () => call<RehearsalToday>('/rehearsal'),
   startRehearsal: () => post<{ ok: true; rehearsal: Rehearsal }>('/rehearsal/start', {}),
-  answerRehearsal: (turnId: string, answer: string) => post<{ ok: true; rehearsal: Rehearsal; unlocked: Achievement[] }>('/rehearsal/answer', { turnId, answer }),
+  answerRehearsal: (turnId: string, answer: string, speechId: string | null = null) => post<{ ok: true; rehearsal: Rehearsal; unlocked: Achievement[] }>('/rehearsal/answer', speechId ? { turnId, answer, speechId } : { turnId, answer }),
   reviewRehearsal: (force = false) => post<{ ok: true; rehearsal: Rehearsal }>('/rehearsal/review', { force }),
   abandonRehearsal: () => post<{ ok: true; abandoned: boolean }>('/rehearsal/abandon', {}),
   achievements: () => call<Achievements>('/achievements'),
   achievementsSeen: () => post<{ ok: true }>('/achievements/seen', {}),
   dashboard: () => call<Dashboard>('/dashboard'),
+  /** Запись речи → расшифровка и мерки (Whisper на Workers AI). */
+  transcribe: (audio: Blob, name = 'answer.wav') => {
+    const fd = new FormData();
+    fd.append('audio', audio, name);
+    return call<{ ok: true; speech: Speech } & VoiceMeta>('/voice/transcribe', { method: 'POST', body: fd });
+  },
+  /** Озвучка реплики тренера → MP3 (MeloTTS). */
+  speak: (text: string) => callBlob('/voice/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }),
   saveGoal: (minutes: number | null) => put<Dashboard>('/dashboard/goal', { minutes }),
 };
 
@@ -242,6 +265,13 @@ export const ERRORS: Record<string, string> = {
   rehearsal_finished: 'Репетиция уже завершена.',
   rehearsal_eval_failed: 'Экзаменатор не разобрал разговор. Ответы сохранены — нажмите «Разобрать снова» через минуту.',
   goal_invalid: 'Недельная цель — целое число минут от 15 до 1260.',
+  audio_missing: 'Запись не ушла на сервер. Попробуйте ещё раз.',
+  audio_unsupported: 'Сервер не принял формат записи. Попробуйте другой браузер.',
+  audio_too_large: 'Запись длиннее предела. Говорите короче — до двух минут.',
+  audio_empty: 'В записи не нашлось речи. Скажите ответ ближе к микрофону.',
+  stt_failed: 'Модель распознавания не ответила. Повторите через минуту или ответьте текстом.',
+  tts_failed: 'Озвучить не удалось: модель не ответила. Попробуйте позже.',
+  tts_text_invalid: 'Нечего озвучивать.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 
@@ -270,6 +300,7 @@ export const REHEARSAL_REFUSALS: Record<string, string> = {
   empty: 'Ответ пустой. Напишите, что сказали бы интервьюеру.',
   too_short: 'Ответ короче пятнадцати слов. На интервью так не отвечают — разверните мысль, цель 40–150 слов.',
   too_long: 'Ответ длиннее четырёхсот слов. Интервьюер столько не слушает — сократите до 40–150.',
+  speech_unknown: 'Запись голоса не найдена на сервере. Отправьте ответ текстом или запишите снова.',
 };
 
 export const errorText = (e: unknown) => {
