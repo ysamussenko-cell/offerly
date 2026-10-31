@@ -1,5 +1,5 @@
 {
-  "current_task": null,
+  "current_task": "Постоянно / архитектурный обзор 31.10.2026 и охранный тест (0.25.1) — коммит отправлен, ждём деплой",
   "last_completed": "Постоянно / Playwright на ключевые сценарии (0.25.0): стенд e2e/server.ts — Node http: dist статикой с SPA-подстановкой index.html, /api/* → createApp(memoryStore) с DEV_ECHO_CODE и отключённой моделью, RELEASE_URL на 404 стенда; e2e/seed.ts — POST /__e2e/seed {email}: разбор резюме, анкета (tz Asia/Almaty), baseline B1/53, банк 4 темы × 4 уровня (3 mcq + 2 correction, ключ mcq всегда C) + письма, две карточки due вчера, день программы lesson на сегодня; e2e/helpers.ts (openWorld/login/seed/card/shot; телефон — --blink-settings pointer coarse/hover none); e2e/app.e2e.ts (7 сценариев: вход, главный, занятие клавишами и мышью, назад, тест уровня без ключа в API, настройки, выход) и e2e/phone.e2e.ts (4: без горизонтальной прокрутки, занятие на телефоне с скрытыми подсказками и без автофокуса, назад, /install + манифест с ярлыками); vitest.e2e.config.ts, tsconfig.e2e.json (npm run e2e / e2e:stand / lint:e2e); deploy.yml: кэш Chromium, playwright install, шаг E2E с аннотацией e2e перед деплоем. Версия 0.25.0 в package.json, [[route]].ts, workers/digest/index.ts, tauri.conf.json, Cargo.toml/Cargo.lock.",
   "last_deploy": {
     "status": "ok",
