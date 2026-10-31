@@ -15,13 +15,14 @@ import { d1ProgramStore, generateProgram, swapDays, current as currentProgram, P
 import { d1LessonStore, today as lessonToday, startOrResume as startLesson, answer as answerLesson, bonus as bonusLesson, LessonError, WARMUP_COUNT, REVIEW_MAX, BONUS_MULTIPLIER, BONUS_CHANCE, type LessonStore } from './lesson';
 import { d1DashboardStore, dashboard, parseGoal, GAIN_PER_LESSON, MISS_PENALTY, MISS_CAP, FREEZES_PER_WEEK, GOAL_MIN, GOAL_MAX, GOAL_DAYS_DEFAULT, type DashboardStore } from './dashboard';
 import { d1AchievementStore, syncAchievements, ACHIEVEMENTS, type AchievementStore } from './achievements';
+import { d1RehearsalStore, today as rehearsalToday, startOrResume as startRehearsal, answer as answerRehearsal, rescore as rescoreRehearsal, abandon as abandonRehearsal, RehearsalError, QUESTION_COUNT, ANSWER_WORDS, REPLACEMENTS, type RehearsalStore } from './rehearsal';
 
 export interface Env extends ProviderEnv, MailEnv {
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -32,7 +33,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -363,6 +364,54 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const body = await c.req.json().catch(() => ({}));
     try { return c.json({ ok: true, ...lessonMeta, lesson: await bonusLesson(c.env, c.get('store'), user.id, user.tz, await domainOf(c), body?.accept !== false) }); }
     catch (e) { return lessonFail(c, e); }
+  });
+
+  // --- репетиция интервью ---
+
+  const REHEARSAL_STATUS: Record<RehearsalError['code'], number> = { rehearsal_none: 404, rehearsal_stale: 409, rehearsal_finished: 409, answer_invalid: 400, rehearsal_eval_failed: 502 };
+  const rehearsalFail = (c: any, e: unknown) => {
+    if (e instanceof RehearsalError) return c.json({ ok: false, error: e.code, reason: e.reason, detail: e.message !== e.code ? e.message : undefined }, REHEARSAL_STATUS[e.code]);
+    throw e;
+  };
+  const rehearsalMeta = { questions: QUESTION_COUNT, words: ANSWER_WORDS, replacements: REPLACEMENTS };
+  const profileOf = async (c: any) => c.get('store').getProfile(c.get('auth')!.user.id);
+
+  /** Сегодня: репетиция ли по программе, сегодняшняя репетиция (идёт — с текущим вопросом, прошла — с разбором) и последняя прежняя. */
+  app.get('/rehearsal', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    return c.json({ ok: true, ...rehearsalMeta, ...(await rehearsalToday(c.get('store'), user.id, user.tz)) });
+  });
+
+  /** Начать репетицию (модель пишет сценарий по целевой позиции — до минуты; не написала — встроенный) или продолжить начатую. */
+  app.post('/rehearsal/start', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    try { return c.json({ ok: true, ...rehearsalMeta, rehearsal: await startRehearsal(c.env, c.get('store'), user.id, user.tz, await profileOf(c)) }); }
+    catch (e) { return rehearsalFail(c, e); }
+  });
+
+  /** Ответ на текущий вопрос: {turnId, answer}. После последнего — разбор всего разговора моделью (до минуты):
+   *  пять осей, что сказано хорошо, три фразы заменить (уходят в журнал). Сбой разбора — reviewNote, повтор через /rehearsal/review. */
+  app.post('/rehearsal/answer', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const rehearsal = await answerRehearsal(c.env, c.get('store'), user.id, body.turnId, body.answer, user.tz, await profileOf(c));
+      return c.json({ ok: true, ...rehearsalMeta, rehearsal, unlocked: await unlocked(c) });
+    } catch (e) { return rehearsalFail(c, e); }
+  });
+
+  /** Разобрать последнюю завершённую репетицию заново: когда разбора нет (сбой модели) или {force: true}. */
+  app.post('/rehearsal/review', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json({ ok: true, ...rehearsalMeta, rehearsal: await rescoreRehearsal(c.env, c.get('store'), user.id, user.tz, await profileOf(c), body?.force === true) }); }
+    catch (e) { return rehearsalFail(c, e); }
+  });
+
+  /** Бросить начатую репетицию: следующий start напишет новый сценарий. */
+  app.post('/rehearsal/abandon', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    return c.json({ ok: true, abandoned: await abandonRehearsal(c.get('store'), user.id, user.tz) });
   });
 
   // --- достижения ---

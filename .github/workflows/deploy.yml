@@ -156,3 +156,11 @@ jobs:
           THEME=$(curl -fsS "$P/" | grep -c 'data-theme' || true)
           echo "::notice title=pwa::GET /sw.js → $SW; GET /manifest.webmanifest → $MF (ждём 200); скрипт темы в index.html: $THEME"
           [ "$SW" = "200" ] && [ "$MF" = "200" ] || { echo "::error title=pwa::service worker или манифест не отдаются"; exit 1; }
+          # репетиция интервью (4.1) — здесь, а не в Smoke test: там уже 10 аннотаций notice (предел GitHub на шаг)
+          RHG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/rehearsal")
+          RHS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/start")
+          RHA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"turnId":"x","answer":"A"}' "$P/api/rehearsal/answer")
+          RHR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/review")
+          RHB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/abandon")
+          echo "::notice title=rehearsal::GET /api/rehearsal без cookie → $RHG; POST /api/rehearsal/start → $RHS; POST /api/rehearsal/answer → $RHA; POST /api/rehearsal/review → $RHR; POST /api/rehearsal/abandon → $RHB (ждём 401 везде)"
+          [ "$RHG" = "401" ] && [ "$RHS" = "401" ] && [ "$RHA" = "401" ] && [ "$RHR" = "401" ] && [ "$RHB" = "401" ] || { echo "::error title=rehearsal::неожиданные коды ответа"; exit 1; }

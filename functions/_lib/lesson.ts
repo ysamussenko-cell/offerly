@@ -228,7 +228,7 @@ export interface BonusView {
   step: DoneStep | null;
 }
 
-/** Задание дня без занятия: что сегодня по программе и почему занятие недоступно (репетиция и срез — 4.1 и 4.3). */
+/** Задание дня без занятия: что сегодня по программе и почему занятие недоступно (репетиция — rehearsal.ts, срез — 4.3). */
 export interface DayInfo { day: PublicDay | null; available: boolean; reason: 'no_program' | 'no_day' | 'rehearsal' | 'checkpoint' | null }
 
 const topicLabelOf = (item: Item | null | undefined, card: ErrorCard | null | undefined) =>
@@ -415,7 +415,7 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
   const t = todayIn(tz, new Date(now()));
   const { day, week, info } = await dayOf(store, userId, t);
   if (!day) throw new LessonError('lesson_no_day', 'на сегодня нет дня программы — составьте программу', info.reason ?? undefined);
-  if (day.format !== 'lesson') throw new LessonError('lesson_unavailable', day.format === 'rehearsal' ? 'сегодня репетиция интервью — она появится в 4.1' : 'сегодня контрольный срез — он появится в 4.3', day.format);
+  if (day.format !== 'lesson') throw new LessonError('lesson_unavailable', day.format === 'rehearsal' ? 'сегодня репетиция интервью — она идёт своим маршрутом /api/rehearsal' : 'сегодня контрольный срез — он появится в 4.3', day.format);
   let l = await store.lessonForDay(userId, t);
   if (!l) {
     const a = await store.latestFinishedAssessment(userId);

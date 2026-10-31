@@ -114,6 +114,24 @@ export type Dashboard = {
   week: WeekDay[];
   program: { exists: boolean; endDate: string | null; done: number; total: number };
 };
+export type RehearsalKind = 'experience' | 'mistake' | 'explain' | 'star' | 'role';
+export type RehearsalTurn = {
+  turnId: string; position: number; kind: RehearsalKind; kindLabel: string; question: string; rubric: string[];
+  answer: string | null; words: number | null; answered: boolean; score: number | null; feedback: string | null;
+};
+export type Replacement = { original: string; better: string; note: string; topic: string | null; topicLabel: string | null };
+export type RehearsalResult = {
+  overall: number; level: Level; axes: { id: AxisId; label: string; score: number | null }[];
+  summary: string; strengths: string[]; replacements: Replacement[]; newCards: number; reviewedAt: string;
+};
+export type Rehearsal = {
+  id: string; status: 'active' | 'finished' | 'abandoned'; date: string; day: ProgramDay | null;
+  targetRole: string | null; level: Level; scripted: boolean; total: number; answered: number;
+  current: { turnId: string; position: number; kind: RehearsalKind; kindLabel: string; question: string; words: { min: number; max: number } } | null;
+  turns: RehearsalTurn[]; result: RehearsalResult | null; reviewNote: string | null; startedAt: string; finishedAt: string | null;
+};
+export type RehearsalMeta = { questions: number; words: { min: number; target: readonly [number, number]; max: number }; replacements: number };
+export type RehearsalToday = RehearsalMeta & { ok: true; today: string; scheduled: boolean; day: ProgramDay | null; rehearsal: Rehearsal | null; last: Rehearsal | null };
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -173,6 +191,11 @@ export const api = {
   startLesson: () => post<{ ok: true; lesson: Lesson }>('/lesson/start', {}),
   answerLesson: (stepId: string, answer: string) => post<{ ok: true; lesson: Lesson; unlocked: Achievement[] }>('/lesson/answer', { stepId, answer }),
   bonusLesson: (accept: boolean) => post<{ ok: true; lesson: Lesson }>('/lesson/bonus', { accept }),
+  rehearsal: () => call<RehearsalToday>('/rehearsal'),
+  startRehearsal: () => post<{ ok: true; rehearsal: Rehearsal }>('/rehearsal/start', {}),
+  answerRehearsal: (turnId: string, answer: string) => post<{ ok: true; rehearsal: Rehearsal; unlocked: Achievement[] }>('/rehearsal/answer', { turnId, answer }),
+  reviewRehearsal: (force = false) => post<{ ok: true; rehearsal: Rehearsal }>('/rehearsal/review', { force }),
+  abandonRehearsal: () => post<{ ok: true; abandoned: boolean }>('/rehearsal/abandon', {}),
   achievements: () => call<Achievements>('/achievements'),
   achievementsSeen: () => post<{ ok: true }>('/achievements/seen', {}),
   dashboard: () => call<Dashboard>('/dashboard'),
@@ -209,11 +232,15 @@ export const ERRORS: Record<string, string> = {
   bank_empty: 'В банке нет подходящего задания, и модель не смогла написать новое. Пополните банк и попробуйте снова.',
   program_invalid: 'Переставить не получилось: менять местами можно только два ещё не пройденных занятия, не раньше сегодняшнего дня.',
   lesson_no_day: 'На сегодня нет дня программы. Составьте программу в карточке «Программа».',
-  lesson_unavailable: 'Сегодня по программе не занятие: репетиция интервью и контрольный срез появятся в следующих версиях.',
+  lesson_unavailable: 'Сегодня по программе не занятие: репетиция интервью — в карточке «Репетиция», контрольный срез появится в следующей версии.',
   lesson_none: 'Активного занятия на сегодня нет. Вернитесь на главную и начните занятие.',
   lesson_stale: 'Этот шаг уже закрыт — экран обновлён, ответьте на текущий.',
   lesson_eval_failed: 'Модель не оценила письмо. Текст на месте — отправьте ещё раз через минуту.',
   bonus_none: 'Бонусная задача сегодня не предлагалась или уже закрыта.',
+  rehearsal_none: 'Репетиции нет: ни начатой, ни завершённой. Нажмите «Начать репетицию».',
+  rehearsal_stale: 'Этот вопрос уже закрыт — экран обновлён, ответьте на текущий.',
+  rehearsal_finished: 'Репетиция уже завершена.',
+  rehearsal_eval_failed: 'Экзаменатор не разобрал разговор. Ответы сохранены — нажмите «Разобрать снова» через минуту.',
   goal_invalid: 'Недельная цель — целое число минут от 15 до 1260.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
@@ -238,6 +265,13 @@ export const ANSWER_REFUSALS: Record<string, string> = {
   too_long: 'Текст длиннее двухсот слов. Цель — 60–80 слов.',
 };
 
+/** Отказы при приёме ответа на вопрос репетиции — по причине. */
+export const REHEARSAL_REFUSALS: Record<string, string> = {
+  empty: 'Ответ пустой. Напишите, что сказали бы интервьюеру.',
+  too_short: 'Ответ короче пятнадцати слов. На интервью так не отвечают — разверните мысль, цель 40–150 слов.',
+  too_long: 'Ответ длиннее четырёхсот слов. Интервьюер столько не слушает — сократите до 40–150.',
+};
+
 export const errorText = (e: unknown) => {
   if (e instanceof ApiError && e.code === 'onboarding_invalid') {
     return ANSWER_ERRORS[`${e.body?.field}:${e.body?.reason}`] ?? ERRORS.onboarding_invalid;
@@ -246,4 +280,10 @@ export const errorText = (e: unknown) => {
   const base = (e instanceof ApiError && ERRORS[e.code]) || ERRORS.request_failed;
   const detail = e instanceof ApiError && typeof e.body?.detail === 'string' ? e.body.detail : '';
   return detail ? `${base} Ответ сервера: ${detail}` : base;
+};
+
+/** То же для репетиции: отказ по длине ответа объясняется её мерками. */
+export const rehearsalErrorText = (e: unknown) => {
+  if (e instanceof ApiError && e.code === 'answer_invalid') return REHEARSAL_REFUSALS[String(e.body?.reason)] ?? ERRORS.answer_invalid;
+  return errorText(e);
 };

@@ -42,7 +42,7 @@ export function LessonCard({ onOpen, refreshKey }: CardProps) {
           <p style={{ marginTop: 12 }}>
             <b>{cap(d.formatLabel)}</b>{d.minutes ? <span className="muted"> · {minutesText(d.minutes)}</span> : null}
           </p>
-          <p className="muted" style={{ marginBottom: 0 }}>{d.reason ? `${cap(d.reason)}. ` : ''}{t.reason === 'rehearsal' ? 'Репетиция интервью появится в следующей версии (задача 4.1); сегодня можно повторить карточки журнала или пройти тест уровня.' : 'Контрольный срез появится в следующей версии (задача 4.3).'}</p>
+          <p className="muted" style={{ marginBottom: 0 }}>{d.reason ? `${cap(d.reason)}. ` : ''}{t.reason === 'rehearsal' ? 'Репетиция идёт в карточке «Репетиция интервью» ниже: пять вопросов по целевой позиции и разбор по пяти осям.' : 'Контрольный срез появится в следующей версии (задача 4.3).'}</p>
         </>
       )}
       {t && d && t.available && (
@@ -264,7 +264,7 @@ function WordCount({ n, min, max }: { n: number; min: number; max: number }) {
 }
 
 /** Подсветка: side = 'written' — что убрать (зачёркнуто), 'correction' — что добавлено (выделено). */
-function Diff({ from, to, side }: { from: string; to: string; side: 'written' | 'correction' }) {
+export function Diff({ from, to, side }: { from: string; to: string; side: 'written' | 'correction' }) {
   const ops = wordDiff(from, to);
   return (
     <>

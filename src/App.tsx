@@ -11,6 +11,7 @@ import Assessment, { TestCard, type Mode } from './screens/Assessment';
 import { JournalCard } from './screens/Journal';
 import { ProgramCard } from './screens/Program';
 import Lesson, { LessonCard } from './screens/Lesson';
+import Rehearsal, { RehearsalCard } from './screens/Rehearsal';
 import { HomeCard } from './screens/Home';
 import { AchievementsCard } from './screens/Achievements';
 
@@ -29,6 +30,8 @@ export default function App() {
   const [testRuns, setTestRuns] = useState(0);
   /** Экран дневного занятия открыт. */
   const [lesson, setLesson] = useState(false);
+  /** Экран репетиции интервью открыт. */
+  const [rehearsal, setRehearsal] = useState(false);
   const online = useOnline();
 
   useEffect(() => {
@@ -37,7 +40,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); setLesson(false); return; }
+    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); setLesson(false); setRehearsal(false); return; }
     api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
   }, [auth.state]);
 
@@ -96,7 +99,7 @@ export default function App() {
         <Questionnaire profile={ready} user={auth.user} onSaved={gotAnswers} onCancel={() => setSurvey('closed')} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && testing && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && !rehearsal && testing && (
         <Assessment mode={testing} onClose={() => { setTesting(null); setTestRuns(n => n + 1); }} />
       )}
 
@@ -104,10 +107,15 @@ export default function App() {
         <Lesson onClose={() => { setLesson(false); setTestRuns(n => n + 1); }} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && !lesson && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && rehearsal && (
+        <Rehearsal onClose={() => { setRehearsal(false); setTestRuns(n => n + 1); }} />
+      )}
+
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && !lesson && !rehearsal && (
         <div className="stack" style={{ marginTop: 0 }}>
           {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenLesson={() => setLesson(true)} />}
           {ready.analyzed && <LessonCard refreshKey={testRuns} onOpen={() => setLesson(true)} />}
+          {ready.analyzed && <RehearsalCard refreshKey={testRuns} onOpen={() => setRehearsal(true)} />}
           {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}
           {ready.analyzed && <TestCard onOpen={setTesting} refreshKey={testRuns} />}
           {ready.analyzed && <JournalCard refreshKey={testRuns} />}

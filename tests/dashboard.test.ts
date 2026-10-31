@@ -155,14 +155,15 @@ describe('готовность', () => {
 });
 
 describe('план недели', () => {
-  it('семь дней с понедельника: пройдено, идёт, сегодня, план, пропущено, заморожено, недоступно, свободно', () => {
+  it('семь дней с понедельника: пройдено, идёт, сегодня, план, заморожено, репетиция — план, срез — недоступно, свободно', () => {
     const days = [day('2026-11-09'), day('2026-11-10'), day('2026-11-11'), day('2026-11-12'), day('2026-11-13'), day('2026-11-14', { format: 'rehearsal', topic: 'task-response', writing: null }), day('2026-11-15', { format: 'checkpoint', topic: 'mixed', writing: null })];
     const lessons = [{ dayDate: '2026-11-09', status: 'finished' as const, score: 80, minutes: 22 }, { dayDate: '2026-11-11', status: 'active' as const, score: null, minutes: 7 }];
     const streak = computeStreak(new Set(['2026-11-09']), new Set(['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12']), TODAY);
     const w = weekPlan(days, lessons, streak, TODAY);
     expect(w.map(d => d.date)).toEqual(['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15']);
     expect(w.map(d => d.weekday)).toEqual(['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']);
-    expect(w.map(d => d.status)).toEqual(['done', 'frozen', 'active', 'today', 'planned', 'unavailable', 'unavailable']);
+    // репетиция (4.1) — обычный день плана; срез (4.3) пока недоступен
+    expect(w.map(d => d.status)).toEqual(['done', 'frozen', 'active', 'today', 'planned', 'planned', 'unavailable']);
     expect(w[0]).toMatchObject({ minutes: 22, score: 80, past: true, today: false });
     expect(w[2]).toMatchObject({ minutes: 7, score: null });
     expect(w[3]).toMatchObject({ today: true, past: false });

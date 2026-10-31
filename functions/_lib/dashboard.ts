@@ -9,10 +9,14 @@
  *  пропуском). Темп — прирост за последние FORECAST_DAYS дней; по нему прогноз: через сколько дней следующая
  *  ступень CEFR и какой будет готовность к дате собеседования.
  *
- *  Серия: дни подряд с пройденным занятием. День программы с занятием, оставшийся без занятия, рвёт серию,
- *  если в его календарной неделе (пн–вс) заморозка ещё не потрачена; первая такая дыра в неделе закрывается
- *  заморозкой сама. Дни без программы, репетиции и срезы (до 4.1 и 4.3 недоступны) серию не рвут и не растят;
- *  сегодня ещё открыт. Минуты недели — по шагам занятий: от выдачи шага до ответа, но не больше STEP_CAP_MINUTES
+ *  Пройденная репетиция интервью (rehearsal.ts) считается как занятие: её сводный балл даёт тот же вклад
+ *  в готовность, день идёт в серию, минуты — в недельную цель.
+ *
+ *  Серия: дни подряд с пройденным занятием или репетицией. День программы с занятием, оставшийся без занятия,
+ *  рвёт серию, если в его календарной неделе (пн–вс) заморозка ещё не потрачена; первая такая дыра в неделе
+ *  закрывается заморозкой сама. Дни без программы и срезы (до 4.3 недоступны) серию не рвут и не растят;
+ *  пропущенная репетиция серию тоже не рвёт — это недельный формат, а не ежедневная привычка; сегодня ещё открыт.
+ *  Минуты недели — по шагам занятий и вопросам репетиции: от выдачи до ответа, но не больше STEP_CAP_MINUTES
  *  за шаг, чтобы пауза между подходами не засчитывалась. Недельная цель — своя (PUT /api/dashboard/goal),
  *  по умолчанию минуты в день из анкеты × GOAL_DAYS_DEFAULT. */
 import type { Assessment, AssessmentStore } from './assessment';
@@ -22,6 +26,7 @@ import { DEFAULT_MINUTES, todayIn, daysBetween } from './onboarding';
 import type { Profile } from './profile';
 import { addDays, publicDay, weekdayOf, WEEKDAYS_RU, type ProgramDay, type ProgramStore, type PublicDay } from './program';
 import { bandStart, LEVEL_THRESHOLD, nextStep, scoreToLevel } from './scoring';
+import type { Rehearsal, RehearsalStore } from './rehearsal';
 
 /** Максимальный вклад одного занятия в готовность (при балле 100). */
 export const GAIN_PER_LESSON = 2;
@@ -88,8 +93,8 @@ export function computeStreak(done: Set<string>, required: Set<string>, today: s
 
 // ---------- минуты ----------
 
-/** Минуты занятия по его шагам: от выдачи до ответа, не больше STEP_CAP_MINUTES за шаг; шаг без ответа не считается. */
-export function lessonMinutes(steps: LessonStep[]): number {
+/** Минуты занятия по его шагам (или репетиции по вопросам): от выдачи до ответа, не больше STEP_CAP_MINUTES за шаг; шаг без ответа не считается. */
+export function lessonMinutes(steps: Pick<LessonStep, 'createdAt' | 'answeredAt'>[]): number {
   let ms = 0;
   for (const s of steps) {
     if (!s.answeredAt) continue;
@@ -205,7 +210,7 @@ export function weekPlan(days: ProgramDay[], lessons: { dayDate: string; status:
     if (fin || d?.status === 'done') status = 'done';
     else if (ls.some(l => l.status === 'active')) status = 'active';
     else if (!d) status = 'free';
-    else if (d.format !== 'lesson') status = 'unavailable';
+    else if (d.format === 'checkpoint') status = 'unavailable';
     else if (date === today) status = 'today';
     else if (date > today) status = 'planned';
     else if (streak.frozen.includes(date)) status = 'frozen';
@@ -222,7 +227,11 @@ export interface DashboardStore {
   saveWeeklyGoal(userId: string, minutes: number | null, nowIso: string): Promise<void>;
 }
 
-export type Store = Pick<AssessmentStore, 'latestFinishedAssessment'> & Pick<LessonStore, 'listLessons' | 'listSteps'> & Pick<ProgramStore, 'listProgramDays'>;
+export type Store = Pick<AssessmentStore, 'latestFinishedAssessment'> & Pick<LessonStore, 'listLessons' | 'listSteps'> & Pick<ProgramStore, 'listProgramDays'> & Pick<RehearsalStore, 'listRehearsals' | 'listTurns'>;
+
+/** Репетиция в виде занятия для готовности и плана недели: балл — сводный, бонуса нет. */
+export const rehearsalAsLesson = (r: Rehearsal): Pick<Lesson, 'dayDate' | 'score' | 'status' | 'finishedAt' | 'bonus'> =>
+  ({ dayDate: r.dayDate, score: r.overall, status: r.status === 'finished' ? 'finished' : 'active', finishedAt: r.finishedAt, bonus: null });
 
 export interface View {
   today: string;
@@ -239,8 +248,9 @@ export interface RunOpts { now?: () => string }
 export async function dashboard(store: Store, userId: string, tz: string, profile: Profile | null, opts: RunOpts = {}): Promise<View> {
   const now = opts.now ?? (() => new Date().toISOString());
   const today = todayIn(tz, new Date(now()));
-  const [assessment, allLessons, days] = await Promise.all([store.latestFinishedAssessment(userId), store.listLessons(userId), store.listProgramDays(userId)]);
-  const lessons = allLessons.filter(l => l.dayDate <= today);
+  const [assessment, allLessons, days, allRehearsals] = await Promise.all([store.latestFinishedAssessment(userId), store.listLessons(userId), store.listProgramDays(userId), store.listRehearsals(userId)]);
+  const rehearsals = allRehearsals.filter(r => r.status !== 'abandoned' && r.dayDate <= today);
+  const lessons = [...allLessons.filter(l => l.dayDate <= today), ...rehearsals.map(rehearsalAsLesson)];
 
   const done = new Set(lessons.filter(l => l.status === 'finished').map(l => l.dayDate));
   for (const d of days) if (d.status === 'done' && d.dayDate <= today) done.add(d.dayDate);
@@ -256,8 +266,11 @@ export async function dashboard(store: Store, userId: string, tz: string, profil
 
   const start = weekStart(today), end = addDays(start, 6);
   const weekLessons = [] as { dayDate: string; status: Lesson['status']; score: number | null; minutes: number }[];
-  for (const l of lessons.filter(l => l.dayDate >= start && l.dayDate <= end)) {
+  for (const l of allLessons.filter(l => l.dayDate >= start && l.dayDate <= end && l.dayDate <= today)) {
     weekLessons.push({ dayDate: l.dayDate, status: l.status, score: l.score, minutes: lessonMinutes(await store.listSteps(l.id)) });
+  }
+  for (const r of rehearsals.filter(r => r.dayDate >= start && r.dayDate <= end)) {
+    weekLessons.push({ ...rehearsalAsLesson(r), minutes: lessonMinutes(await store.listTurns(r.id)) });
   }
   const goal = weeklyGoal(profile);
   const doneMinutes = weekLessons.reduce((s, l) => s + l.minutes, 0);
