@@ -104,8 +104,9 @@ jobs:
             exit 0
           fi
           URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' digest-deploy.log | tail -1)
+          SCHED=$(grep -iE 'schedule|cron' digest-deploy.log | tr "\n\r" "  ")
           echo "::notice title=digest deploy::${OUT:0:600}"
-          echo "::notice title=digest url::${URL:-адрес workers.dev не напечатан — поддомен workers.dev не зарегистрирован; cron работает и без него}"
+          echo "::notice title=digest url::${URL:-адрес workers.dev не напечатан — поддомен workers.dev не зарегистрирован; cron работает и без него}; расписание: ${SCHED:-строка schedule в выводе wrangler не найдена}"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           if [ -n "$RESEND_API_KEY" ]; then
             SEC=$(printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --config workers/digest/wrangler.toml 2>&1 | tr "\n\r" "  ") || echo "::warning title=digest secret::RESEND_API_KEY не передан Worker: ${SEC:0:400}"
