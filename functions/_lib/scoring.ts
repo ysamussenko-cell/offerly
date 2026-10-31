@@ -10,9 +10,9 @@
 import { chat, type ChatMessage, type Env as ProviderEnv, PROVIDERS } from './providers';
 import { extractJsonObject } from './profile';
 import { LEVELS, WRITING_WORDS, topicById, type Item, type Level, type ReadingQuestion } from './items';
-import type { Attempt } from './assessment';
 import type { GenerateOpts } from './items';
 import { CARD_TOPICS } from './cards';
+import type { Attempt, WritingError } from './types';
 
 export const AXES = ['grammar', 'vocabulary', 'coherence', 'taskResponse', 'fluency'] as const;
 export type Axis = typeof AXES[number];
@@ -68,12 +68,6 @@ export function blend(parts: [number | null, number][]): number | null {
 const mean = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
 
 // ---------- оценка письма моделью ----------
-
-export interface WritingError {
-  original: string; corrected: string; note: string;
-  /** Тема ошибки из справочника карточек (cards.ts); null, если экзаменатор её не назвал. */
-  topic?: string | null;
-}
 
 export interface WritingEval {
   /** Четыре оси письма в шкале 0–100 (беглость речи письмо не измеряет). */

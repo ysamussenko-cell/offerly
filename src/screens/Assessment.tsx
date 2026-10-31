@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText, type Assessment as View, type Checkpoint } from '../api';
+import { api, errorText, type Assessment as View, type AssessmentMode as Mode, type Checkpoint } from '../api';
 import { ComparisonView } from './Checkpoint';
 import { KeyHints, useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
@@ -15,7 +15,6 @@ const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', '
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
 type CardProps = { onOpen: (mode: Mode) => void; refreshKey?: number };
-export type Mode = 'test' | 'result';
 
 /** Карточка на главном экране: начать, продолжить или открыть разбор завершённого теста. */
 export function TestCard({ onOpen, refreshKey }: CardProps) {

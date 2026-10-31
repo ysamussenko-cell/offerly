@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Health, type Profile, type User } from './api';
+import { api, type AssessmentMode as Mode, type Health, type Profile, type User } from './api';
 import Login from './screens/Login';
 import { InstallButton } from './install';
 import { ThemeSwitch } from './ThemeSwitch';
@@ -7,7 +7,7 @@ import { OFFLINE_NOTICE, useOnline } from './offline';
 import Resume, { ProfileCard } from './screens/Resume';
 import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 import { BankCard } from './screens/Bank';
-import Assessment, { TestCard, type Mode } from './screens/Assessment';
+import Assessment, { TestCard } from './screens/Assessment';
 import { CheckpointCard } from './screens/Checkpoint';
 import { JournalCard } from './screens/Journal';
 import { ProgramCard } from './screens/Program';

@@ -25,6 +25,8 @@ export type GenerateResult = { ok: true; requested: number; verified: number; re
 export type AssessmentStatus = 'active' | 'finished' | 'abandoned';
 /** placement — тест уровня; checkpoint — контрольный срез; baseline — исходный срез вне приложения. */
 export type AssessmentKind = 'placement' | 'checkpoint' | 'baseline';
+/** Режим экрана теста и среза: пройти задания или открыть разбор завершённого. */
+export type AssessmentMode = 'test' | 'result';
 export type TestItem = {
   attemptId: string; itemId: string; position: number; kind: ItemKind; kindLabel: string; prompt: string;
   options?: string[]; questions?: { question: string; options: string[] }[]; words?: { min: number; max: number };

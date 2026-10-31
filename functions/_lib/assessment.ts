@@ -20,6 +20,7 @@ import {
 } from './scoring';
 import { createCards, draftFromItem, draftsFromWriting, type CardStore } from './cards';
 import { DomainError } from './errors';
+import type { Attempt } from './types';
 
 export const ADAPTIVE_COUNT = 12;
 export const TOTAL = ADAPTIVE_COUNT + 2; // + чтение + письмо
@@ -72,26 +73,6 @@ export interface Assessment {
 /** Длина адаптивной части и всего теста по виду. */
 export const planFor = (kind: AssessmentKind) => kind === 'checkpoint' ? { adaptive: CHECKPOINT_ADAPTIVE, total: CHECKPOINT_TOTAL } : { adaptive: ADAPTIVE_COUNT, total: TOTAL };
 export const totalOf = (a: Pick<Assessment, 'adaptiveCount'>) => a.adaptiveCount + 2;
-
-export interface Attempt {
-  id: string;
-  userId: string;
-  assessmentId: string;
-  itemId: string;
-  position: number;
-  /** Фактический уровень выданного задания. */
-  level: Level;
-  answer: string | null;
-  /** 1 — верно, 0 — неверно, null — ещё не отвечено или не проверяется сравнением (письмо). */
-  correct: number | null;
-  /** Проценты: mcq и исправление — 0/100, чтение — 0/50/100, письмо — null до оценки в 2.6. */
-  score: number | null;
-  feedback: string | null;
-  /** JSON оценки письма моделью (WritingEval); у остальных заданий null. */
-  detail: string | null;
-  createdAt: string;
-  answeredAt: string | null;
-}
 
 export type AssessmentPatch = Partial<Pick<Assessment, 'status' | 'currentLevel' | 'level' | 'finishedAt' | 'updatedAt' | 'axes' | 'overall' | 'scoredAt' | 'scoringNote'>>;
 export type AttemptPatch = Partial<Pick<Attempt, 'answer' | 'correct' | 'score' | 'feedback' | 'detail' | 'answeredAt'>>;

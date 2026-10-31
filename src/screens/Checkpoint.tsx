@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, errorText, type Checkpoint as View, type CheckpointToday, type Comparison } from '../api';
+import { api, errorText, type AssessmentMode as Mode, type Checkpoint as View, type CheckpointToday, type Comparison } from '../api';
 import { longDate, minutesText, plural } from '../text';
-import type { Mode } from './Assessment';
 
 const cap = (s: string) => s ? s[0].toUpperCase() + s.slice(1) : s;
 const signed = (n: number) => n > 0 ? `+${n}` : `${n}`;

@@ -11,7 +11,8 @@
 import { TOPICS, type Item, type Topic } from './items';
 import { CARD_TOPICS, type ErrorCard } from './cards';
 import { AXES, AXIS_LABELS, BAND, LEVEL_THRESHOLD, LEXICAL_TOPICS, type Axes, type Axis } from './scoring';
-import type { Assessment, Attempt } from './assessment';
+import type { Assessment } from './assessment';
+import type { Attempt } from './types';
 import type { Profile } from './profile';
 import { daysBetween, todayIn } from './onboarding';
 import { DomainError } from './errors';

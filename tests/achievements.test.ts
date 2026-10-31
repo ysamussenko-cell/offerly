@@ -6,7 +6,7 @@ import {
 import { TOPICS } from '../functions/_lib/items';
 import type { Item, Kind, Level } from '../functions/_lib/items';
 import type { Lesson, LessonStep } from '../functions/_lib/lesson';
-import type { Attempt } from '../functions/_lib/assessment';
+import type { Attempt } from '../functions/_lib/types';
 import type { ErrorCard } from '../functions/_lib/cards';
 import { d1LessonStore } from '../functions/_lib/lesson';
 import { d1CardStore } from '../functions/_lib/cards';

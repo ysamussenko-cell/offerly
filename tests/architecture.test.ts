@@ -54,20 +54,22 @@ describe('циклы импортов', () => {
     expect(cycles(graph).map(c => c.join(' → '))).toEqual([]);
   });
 
-  it('циклы только через типы — известные и не растут', () => {
-    // scoring ↔ cards (WritingError / CARD_TOPICS), scoring ↔ assessment (Attempt), Checkpoint ↔ Assessment (Mode) — см. обзор, п. «Долг».
-    const involved = [...new Set(cycles(graph, () => true).flat())].sort();
-    expect(involved).toEqual([
-      'functions/_lib/assessment.ts',
-      'functions/_lib/cards.ts',
-      'functions/_lib/scoring.ts',
-      'src/screens/Assessment.tsx',
-      'src/screens/Checkpoint.tsx',
-    ]);
+  it('циклов нет и через типы: общие типы оценивания живут в functions/_lib/types.ts, режим экрана теста — в src/api.ts', () => {
+    // Три цикла из обзора (scoring ↔ cards, scoring ↔ assessment, Checkpoint ↔ Assessment) сняты в 0.25.3 — новые не заводить.
+    expect(cycles(graph, () => true).map(c => c.join(' → '))).toEqual([]);
+    const types = readFileSync('functions/_lib/types.ts', 'utf-8');
+    expect(types).toMatch(/export interface Attempt\b/);
+    expect(types).toMatch(/export interface WritingError\b/);
+    expect(graph.edges.filter(e => e.from === 'functions/_lib/types.ts').map(e => `${e.to}${e.typeOnly ? ' (тип)' : ''}`)).toEqual(['functions/_lib/items.ts (тип)']);
+    for (const f of ['functions/_lib/assessment.ts', 'functions/_lib/scoring.ts']) {
+      expect(readFileSync(f, 'utf-8'), `${f}: типы Attempt и WritingError объявлены один раз — в types.ts`).not.toMatch(/export (interface|type) (Attempt|WritingError)\b/);
+    }
+    expect(readFileSync('src/api.ts', 'utf-8')).toMatch(/export type AssessmentMode\b/);
+    expect(readFileSync('src/screens/Assessment.tsx', 'utf-8')).not.toMatch(/export type Mode\b/);
   });
 
-  it('основа API без зависимостей: errors, auth, providers, onboarding, fsrs, mail, release; extract — только errors', () => {
-    const leaves = ['errors', 'auth', 'providers', 'onboarding', 'fsrs', 'mail', 'release'].map(n => `functions/_lib/${n}.ts`);
+  it('основа API без зависимостей: errors, auth, providers, onboarding, fsrs, mail, release, types; extract — только errors', () => {
+    const leaves = ['errors', 'auth', 'providers', 'onboarding', 'fsrs', 'mail', 'release', 'types'].map(n => `functions/_lib/${n}.ts`);
     for (const leaf of leaves) {
       expect(graph.edges.filter(e => e.from === leaf && !e.typeOnly).map(e => e.to), leaf).toEqual([]);
     }

@@ -3,7 +3,8 @@ import {
   AXES, AXIS_WEIGHTS, bandStart, pointsFor, readingPoints, scoreToLevel, nextStep, blend, computeAxes, errorExamples,
   normalizeWritingEval, writingPrompt, evaluateWriting, WRITING_EVAL_SCHEMA, type WritingEval,
 } from '../functions/_lib/scoring';
-import { score, rescore, startOrResume, answer, ADAPTIVE_COUNT, type Attempt, type Assessment } from '../functions/_lib/assessment';
+import { score, rescore, startOrResume, answer, ADAPTIVE_COUNT, type Assessment } from '../functions/_lib/assessment';
+import type { Attempt } from '../functions/_lib/types';
 import { createApp, type Env } from '../functions/_lib/app';
 import { memoryStore } from './helpers/memoryStore';
 import { makeItem } from './assessment.test';

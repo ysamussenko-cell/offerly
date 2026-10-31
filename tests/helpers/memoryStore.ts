@@ -2,7 +2,8 @@ import type { AuthStore, LoginCode, Session, User } from '../../functions/_lib/a
 import type { Profile, ProfileStore } from '../../functions/_lib/profile';
 import type { OnboardingStore } from '../../functions/_lib/onboarding';
 import type { Item, ItemStore } from '../../functions/_lib/items';
-import type { Assessment, AssessmentStore, Attempt } from '../../functions/_lib/assessment';
+import type { Assessment, AssessmentStore } from '../../functions/_lib/assessment';
+import type { Attempt } from '../../functions/_lib/types';
 import type { CardStore, ErrorCard } from '../../functions/_lib/cards';
 import type { ProgramDay, ProgramStore } from '../../functions/_lib/program';
 import type { Lesson, LessonStep, LessonStore } from '../../functions/_lib/lesson';

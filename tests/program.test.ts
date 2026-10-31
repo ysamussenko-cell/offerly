@@ -4,7 +4,8 @@ import {
   d1ProgramStore, ProgramError, PROGRAM_DAYS, WEAK_AXIS, BASE_WEIGHT, CARD_WEIGHT, LESSON_TOPICS, MIXED_TOPIC, WRITING_FORMATS, type ProgramDay,
 } from '../functions/_lib/program';
 import type { ErrorCard } from '../functions/_lib/cards';
-import type { Assessment, Attempt } from '../functions/_lib/assessment';
+import type { Assessment } from '../functions/_lib/assessment';
+import type { Attempt } from '../functions/_lib/types';
 import type { Item } from '../functions/_lib/items';
 import type { Profile } from '../functions/_lib/profile';
 import { createApp, type Env } from '../functions/_lib/app';

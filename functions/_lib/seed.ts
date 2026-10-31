@@ -6,7 +6,7 @@
  *  Оси среза считаются теми же правилами, что и тест уровня (scoring.ts): результаты уроков переводятся
  *  в синтетические попытки, письмо B1–B2 — в оценку на границе ступеней, затем computeAxes. */
 import { computeAxes, type Scored, type WritingEval } from './scoring';
-import type { Attempt } from './assessment';
+import type { Attempt } from './types';
 import type { Item, Kind, Level } from './items';
 import { cardTopicById } from './cards';
 

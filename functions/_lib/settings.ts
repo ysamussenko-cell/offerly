@@ -10,7 +10,8 @@
  *  берёт его, когда вызывающий не задал провайдера явно. Наружу (GET /api/settings, экспорт) уходят провайдер, модель и
  *  последние четыре знака ключа — сам ключ не возвращается никогда. */
 import { PROVIDERS, chat, type Env as ProviderEnv, type ProviderId, type UserProvider } from './providers';
-import type { Assessment, Attempt } from './assessment';
+import type { Assessment } from './assessment';
+import type { Attempt } from './types';
 import type { SpeechTake } from './voice';
 import { DomainError } from './errors';
 

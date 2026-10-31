@@ -6,7 +6,7 @@
  *  в origin, поэтому пересчёт теста карточки не дублирует. */
 import { TOPICS, fingerprintOf, topicById, type Item, type Topic } from './items';
 import { review, RETIRE_AFTER, MIN_INTERVAL, type Grade } from './fsrs';
-import type { WritingError } from './scoring';
+import type { WritingError } from './types';
 
 /** Темы карточек: темы банка заданий плюс «ответ на вопрос задания» — ось оценки, которой в банке нет. */
 export const CARD_TOPICS: Topic[] = [
