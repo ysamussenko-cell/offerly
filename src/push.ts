@@ -2,8 +2,9 @@
  *  Чистые функции вынесены отдельно, чтобы их проверяли тесты; с DOM и браузерными API работают только subscribe/unsubscribe. */
 import type { Push } from './api';
 import { longDate } from './text';
+import { isDesktop, DESKTOP_PUSH_TEXT } from './desktop';
 
-export type PushSupport = 'ok' | 'no_sw' | 'no_push' | 'no_notification' | 'ios_install' | 'insecure';
+export type PushSupport = 'ok' | 'no_sw' | 'no_push' | 'no_notification' | 'ios_install' | 'insecure' | 'desktop';
 
 /** Пояснения, почему напоминания здесь недоступны — одной строкой, с тем, что сделать. */
 export const SUPPORT_TEXT: Record<Exclude<PushSupport, 'ok'>, string> = {
@@ -12,10 +13,13 @@ export const SUPPORT_TEXT: Record<Exclude<PushSupport, 'ok'>, string> = {
   no_push: 'Этот браузер не поддерживает Web Push. На компьютере подойдут Chrome, Edge или Firefox.',
   no_notification: 'Этот браузер не показывает уведомления сайтов.',
   ios_install: 'На iPhone и iPad напоминания приходят только установленному приложению: «Поделиться» → «На экран „Домой“», затем откройте Offerly с экрана «Домой» и включите здесь.',
+  desktop: DESKTOP_PUSH_TEXT,
 };
 
 export interface SupportEnv {
   ua: string; secure: boolean; serviceWorker: boolean; pushManager: boolean; notification: boolean; standalone: boolean;
+  /** Страница открыта в приложении для Windows (Tauri) — напоминания показывает оно само. */
+  desktop?: boolean;
 }
 
 export function supportEnv(): SupportEnv {
@@ -28,11 +32,13 @@ export function supportEnv(): SupportEnv {
     pushManager: Boolean(w && 'PushManager' in w),
     notification: Boolean(w && 'Notification' in w),
     standalone: Boolean(w?.matchMedia?.('(display-mode: standalone)').matches || (n as any)?.standalone === true),
+    desktop: isDesktop(w),
   };
 }
 
 /** Можно ли подписаться здесь. iOS без установки на экран «Домой» — отдельный ответ с инструкцией. */
 export function pushSupport(e: SupportEnv): PushSupport {
+  if (e.desktop) return 'desktop';
   if (!e.secure) return 'insecure';
   if (!e.serviceWorker) return 'no_sw';
   const ios = /iPhone|iPad|iPod/.test(e.ua);

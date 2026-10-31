@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, errorText, type Push } from '../api';
 import { longDate, tzLabel } from '../text';
 import { currentSubscription, permissionText, pushStatusText, pushSupport, subscribe, supportEnv, unsubscribe, PushClientError, SUPPORT_TEXT } from '../push';
+import { desktopNotify } from '../desktop';
 
 type Props = { refreshKey?: number };
 
@@ -16,6 +17,8 @@ export function PushCard({ refreshKey }: Props) {
   const [busy, setBusy] = useState<'save' | 'subscribe' | 'unsubscribe' | 'send' | null>(null);
   const [note, setNote] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
   const support = pushSupport(supportEnv());
+  /** В приложении для Windows напоминание показывает само приложение: подписка браузера не нужна, время задаётся здесь же. */
+  const desktop = support === 'desktop';
   const permission: NotificationPermission | 'unsupported' = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
 
   const load = () => api.push().then(d => { setState({ loaded: true, d, error: null }); setTime(d.pushAt ?? d.defaultAt); })
@@ -64,6 +67,12 @@ export function PushCard({ refreshKey }: Props) {
   async function sendNow() {
     setBusy('send'); setNote(null);
     try {
+      if (desktop) {
+        const r = await api.pushReminder();
+        await desktopNotify(r.reminder.title, r.reminder.body);
+        setNote({ kind: 'ok', text: `Показано уведомление Windows: «${r.reminder.title} — ${r.reminder.body}». Утром оно придёт в ${r.at}${r.todayDone ? '; сегодня занятие уже пройдено, напоминание не понадобилось бы' : ''}.` });
+        return;
+      }
       const r = await api.sendPush();
       setNote({ kind: 'ok', text: `Отправлено на ${r.delivered} из ${r.devices.length}: «${r.reminder.title} — ${r.reminder.body}». Уведомление появится в течение нескольких секунд.` });
       load();
@@ -77,13 +86,13 @@ export function PushCard({ refreshKey }: Props) {
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h2 style={{ margin: 0 }}>Напоминание</h2>
-        {d && <span className="muted" style={{ fontSize: 14 }}>{d.enabled ? `в ${d.pushAt}` : 'выключено'}</span>}
+        {d && <span className="muted" style={{ fontSize: 14 }}>{d.enabled ? `в ${d.pushAt}` : desktop ? 'время письма' : 'выключено'}</span>}
       </div>
       {!state.loaded && <p className="muted" style={{ marginTop: 12 }}>Смотрю…</p>}
       {state.error && <p className="error" role="alert" style={{ marginTop: 12 }}>{state.error}</p>}
       {d && (
         <>
-          <p style={{ margin: '12px 0 0' }}>{pushStatusText(d)}</p>
+          <p style={{ margin: '12px 0 0' }}>{desktop ? (d.enabled ? `Приложение напомнит в ${d.pushAt} (${tzLabel(d.tz)}), если занятие дня ещё не пройдено.` : `Время не задано — приложение напомнит во время письма или в ${d.defaultAt}; своё время можно задать ниже.`) : pushStatusText(d)}</p>
           <p className="muted" style={{ fontSize: 14, margin: '4px 0 0' }}>
             Одно уведомление в день: задание дня, карточки к повтору, серия и минуты недели. Если занятие к этому времени уже пройдено, напоминание не приходит. Пояс — {tzLabel(d.tz)}, сейчас там {d.localTime}.
           </p>
@@ -98,9 +107,9 @@ export function PushCard({ refreshKey }: Props) {
                 <button className="link" type="button" disabled={busy != null} onClick={disableHere}>{busy === 'unsubscribe' ? 'отписываю…' : 'отписать это устройство'}</button>
               </>
             )}
-            {denied && <span className="bad" style={{ fontSize: 14 }}>{denied}</span>}
+            {denied && !desktop && <span className="bad" style={{ fontSize: 14 }}>{denied}</span>}
           </div>
-          {d.subscriptions.length > 0 && (
+          {(d.subscriptions.length > 0 || desktop) && (
             <form className="row goal-form" onSubmit={e => { e.preventDefault(); save(time); }}>
               <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <span>Время</span>
@@ -108,7 +117,7 @@ export function PushCard({ refreshKey }: Props) {
               </label>
               <button className="btn" type="submit" disabled={busy != null || !time || (d.enabled && time === d.pushAt)}>{busy === 'save' ? 'Сохраняю…' : d.enabled && time === d.pushAt ? 'Сохранено' : d.enabled ? 'Переставить' : 'Включить'}</button>
               {d.enabled && <button className="link" type="button" disabled={busy != null} onClick={() => save(null)}>выключить</button>}
-              <button className="link" type="button" disabled={busy != null} onClick={sendNow}>{busy === 'send' ? 'отправляю…' : 'прислать сейчас'}</button>
+              <button className="link" type="button" disabled={busy != null} onClick={sendNow}>{busy === 'send' ? (desktop ? 'показываю…' : 'отправляю…') : desktop ? 'показать сейчас' : 'прислать сейчас'}</button>
             </form>
           )}
           {note && <p className={note.kind === 'ok' ? 'hint ok' : 'error'} role="status">{note.text}</p>}

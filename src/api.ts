@@ -168,6 +168,8 @@ export type Push = {
   next: { date: string; time: string } | null; subscriptions: PushDevice[];
 };
 export type PushDelivery = { id: string; ok: boolean; status: number; gone: boolean; detail: string | null };
+/** Напоминание дня для приложения Windows: срок и текст без отправки (GET /push/reminder). */
+export type PushReminder = { ok: true; at: string; tz: string; localTime: string; today: string; windowMinutes: number; todayDone: boolean; reminder: { title: string; body: string } };
 export type PushSendResult = { ok: true; delivered: number; devices: PushDelivery[]; reminder: { title: string; body: string; url: string; tag: string } };
 export type ProviderOption = { id: string; name: string; short: string; keyUrl: string | null; defaultModel: string; prefix: string | null; free: boolean };
 /** Сохранённый ключ провайдера — без самого ключа: провайдер, модель, последние четыре знака, читается ли текущим мастер-ключом, итог проверки. */
@@ -294,6 +296,7 @@ export const api = {
     post<Push>('/push/subscribe', { endpoint: sub.endpoint, keys: sub.keys, userAgent, ...(pushAt ? { pushAt } : {}) }),
   unsubscribePush: (endpoint: string) => del<Push & { removed: boolean }>('/push/subscribe', { endpoint }),
   sendPush: () => post<PushSendResult>('/push/send', {}),
+  pushReminder: () => call<PushReminder>('/push/reminder'),
   settings: () => call<Settings>('/settings'),
   saveKey: (provider: string, apiKey: string, model: string) => put<Settings>('/settings/key', { provider, apiKey, model }),
   checkKey: () => post<Settings>('/settings/key/check', {}),

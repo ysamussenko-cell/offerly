@@ -18,8 +18,8 @@ import { d1DashboardStore, dashboard, parseGoal, GAIN_PER_LESSON, MISS_PENALTY, 
 import { d1AchievementStore, syncAchievements, ACHIEVEMENTS, type AchievementStore } from './achievements';
 import { d1RehearsalStore, today as rehearsalToday, startOrResume as startRehearsal, answer as answerRehearsal, rescore as rescoreRehearsal, abandon as abandonRehearsal, RehearsalError, QUESTION_COUNT, ANSWER_WORDS, REPLACEMENTS, type RehearsalStore } from './rehearsal';
 import { d1SpeechStore, recordSpeech, speak, publicSpeech, validateTtsText, selfTestVoice, VoiceError, MAX_AUDIO_BYTES, MAX_SECONDS, MAX_TTS_CHARS, STT_MODEL, TTS_MODEL, type SpeechStore } from './voice';
-import { d1DigestStore, parseNotifyAt, digestState, nextDigest, buildDigest, sendDigestNow, localClock, minutesOf, DEFAULT_NOTIFY_AT, SEND_WINDOW_MINUTES, CRON_STEP_MINUTES, type DigestStore } from './digest';
-import { d1PushStore, vapidKeys, parseSubscribeBody, publicSubscription, sendPushNow, sentOnIfPassed, PushError, VAPID_SETTING_KEY, type PushEnv, type PushStore } from './push';
+import { d1DigestStore, parseNotifyAt, digestState, nextDigest, buildDigest, collectDigest, sendDigestNow, localClock, minutesOf, DEFAULT_NOTIFY_AT, SEND_WINDOW_MINUTES, CRON_STEP_MINUTES, type DigestStore } from './digest';
+import { d1PushStore, vapidKeys, parseSubscribeBody, publicSubscription, sendPushNow, buildReminder, sentOnIfPassed, PushError, VAPID_SETTING_KEY, type PushEnv, type PushStore } from './push';
 import { d1SettingsStore, masterKey, parseKeyBody, saveKey, checkKey, userProvider, publicKey, providerOptions, decryptSecret, exportData, exportCounts, exportFileName, SettingsError, type SettingsEnv, type SettingsStore } from './settings';
 import { fetchRelease, CACHE_SECONDS as RELEASE_CACHE_SECONDS, type ReleaseEnv } from './release';
 
@@ -690,6 +690,25 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       if (r.delivered === 0) { console.error(JSON.stringify(r.devices)); return c.json({ ok: false, error: 'push_failed', devices: r.devices, reminder: r.reminder }, 502); }
       return c.json({ ok: true, delivered: r.delivered, devices: r.devices, reminder: r.reminder });
     } catch (e) { return pushFail(c, e); }
+  });
+
+  /** Напоминание дня для приложения Windows (5.2): текст и срок без отправки — приложение показывает его нативным уведомлением само,
+   *  когда окно свёрнуто в трей. at — время напоминания, если оно включено, иначе время письма, иначе по умолчанию;
+   *  todayDone — день уже пройден (занятие, репетиция или срез), напоминать не о чем. */
+  app.get('/push/reminder', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    const now = new Date();
+    const setting = await store.getPushSetting(user.id);
+    const p = await store.getProfile(user.id);
+    const at = setting?.pushAt ?? p?.notifyAt ?? DEFAULT_NOTIFY_AT;
+    const clock = localClock(user.tz, now);
+    const data = await collectDigest(store, user, p);
+    const reminder = buildReminder(data, c.env);
+    return c.json({
+      ok: true, at, tz: user.tz, localTime: clock.time, today: clock.date, windowMinutes: SEND_WINDOW_MINUTES, todayDone: data.todayDone,
+      reminder: { title: reminder.title, body: reminder.body },
+    });
   });
 
   // --- настройки (4.6): свой ключ провайдера, время уведомлений, экспорт данных ---

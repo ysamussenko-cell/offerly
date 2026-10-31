@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Страница Offerly в окне приложения: версия приложения и нативные уведомления (напоминание дня).",
+  "windows": ["main"],
+  "remote": { "urls": ["https://offerly-c8b.pages.dev/*"] },
+  "permissions": [
+    "core:default",
+    "notification:default"
+  ]
+}

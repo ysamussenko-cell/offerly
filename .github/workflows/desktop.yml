@@ -1,0 +1,99 @@
+name: Desktop
+
+# Сборка приложения для Windows (Tauri 2, задача 5.2) и релиз GitHub с установщиком и latest.json.
+# latest.json читают страница установки (/api/release) и автообновление внутри приложения.
+# Запускается при изменениях в desktop/ (после push в main) и вручную. Релиз называется v<версия из tauri.conf.json>;
+# если релиз с таким тегом уже есть, файлы в нём заменяются.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - run: npm ci
+
+      - name: Version check
+        id: v
+        run: |
+          V=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")
+          P=$(node -p "require('./package.json').version")
+          C=$(grep -m1 '^version' desktop/src-tauri/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          echo "::notice title=desktop version::tauri.conf.json $V, package.json $P, Cargo.toml $C"
+          if [ "$V" != "$P" ] || [ "$V" != "$C" ]; then echo "::error title=desktop version::версии расходятся — выровнять package.json, tauri.conf.json и Cargo.toml"; exit 1; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+
+      # Подпись обновлений: секрет TAURI_SIGNING_PRIVATE_KEY (закрытый ключ minisign, открытый зашит в tauri.conf.json).
+      # Без секрета сборка идёт без .sig — страница установки её покажет, но автообновление внутри приложения такой релиз не примет.
+      - name: Build (Tauri)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::notice title=desktop sign::ключ подписи задан — установщик выйдет с .sig"
+            npm run tauri -- build
+          else
+            echo "::warning title=desktop sign::секрет TAURI_SIGNING_PRIVATE_KEY не задан — сборка без подписи (автообновление этот релиз не примет)"
+            npm run tauri -- build --config src-tauri/tauri.unsigned.conf.json
+          fi
+
+      - name: latest.json
+        id: latest
+        run: |
+          OUT=desktop/src-tauri/target/release/bundle/nsis
+          echo "::notice title=desktop bundle::$(ls -la "$OUT" | awk 'NR>1 {printf "%s %s; ", $NF, $5}')"
+          node desktop/scripts/latest.mjs "$OUT" "$OUT/latest.json" "${{ steps.v.outputs.tag }}" | tee latest.out
+          echo "setup=$(grep '^setup=' latest.out | cut -d= -f2-)" >> "$GITHUB_OUTPUT"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Release
+        run: |
+          TAG="${{ steps.v.outputs.tag }}"; V="${{ steps.v.outputs.version }}"; OUT="${{ steps.latest.outputs.out }}"; SETUP="${{ steps.latest.outputs.setup }}"
+          node -e "const l=require('./$OUT/latest.json'); console.log('Offerly '+l.version+' для Windows.\n\n'+l.notes+'\n\nУстановщик: '+l.platforms['windows-x86_64'].url+(l.platforms['windows-x86_64'].signature?'':'\n\nСборка без подписи обновлений: автообновление внутри приложения примет только следующий подписанный релиз.'))" > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::notice title=desktop release::релиз $TAG уже есть — заменяю файлы"
+          else
+            gh release create "$TAG" --title "Offerly $V" --notes-file notes.md --target "$GITHUB_SHA" --latest
+          fi
+          FILES="$OUT/$SETUP $OUT/latest.json"
+          [ -f "$OUT/$SETUP.sig" ] && FILES="$FILES $OUT/$SETUP.sig"
+          gh release upload "$TAG" $FILES --clobber
+          URL=$(gh release view "$TAG" --json url -q .url)
+          ASSETS=$(gh release view "$TAG" --json assets -q '[.assets[] | .name + " (" + (.size|tostring) + " байт)"] | join(", ")')
+          echo "::notice title=desktop release::$URL — $ASSETS"
+
+      - name: Check latest.json from GitHub
+        run: |
+          sleep 10
+          CODE=$(curl -sL -o latest.check.json -w '%{http_code}' "https://github.com/${{ github.repository }}/releases/latest/download/latest.json")
+          SUMMARY=$(node -e "const l=require('./latest.check.json'); console.log(l.version+' '+Object.keys(l.platforms).join(',')+' signed='+Boolean(l.platforms['windows-x86_64'].signature))" 2>/dev/null || echo "не JSON")
+          echo "::notice title=desktop latest::GET releases/latest/download/latest.json → $CODE, $SUMMARY"
+          [ "$CODE" = "200" ] || { echo "::error title=desktop latest::latest.json последнего релиза недоступен"; exit 1; }

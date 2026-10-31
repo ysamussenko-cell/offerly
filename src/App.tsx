@@ -20,6 +20,7 @@ import { PushCard } from './screens/Push';
 import Settings from './screens/Settings';
 import Install from './screens/Install';
 import { INSTALL_PATH, screenFor } from './installPage';
+import { isDesktop, startDesktopReminder } from './desktop';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -57,6 +58,12 @@ function Shell() {
   useEffect(() => {
     if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); setLesson(false); setRehearsal(false); setSettings(false); return; }
     api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
+  }, [auth.state]);
+
+  // Приложение для Windows (5.2): пока пользователь вошёл, страница сама показывает напоминание дня уведомлением Windows.
+  useEffect(() => {
+    if (auth.state !== 'in' || !isDesktop()) return;
+    return startDesktopReminder(api.pushReminder);
   }, [auth.state]);
 
   async function signOut() {
