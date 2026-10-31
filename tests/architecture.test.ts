@@ -10,7 +10,9 @@ import { importGraph, cycles, lineCount, listSources } from './helpers/imports';
 
 const graph = importGraph(['functions', 'src', 'workers']);
 const libFiles = graph.files.filter(f => f.startsWith('functions/_lib/'));
+const routeFiles = libFiles.filter(f => f.startsWith('functions/_lib/routes/'));
 const srcFiles = graph.files.filter(f => f.startsWith('src/'));
+const routeCount = (f: string) => readFileSync(f, 'utf-8').match(/\b(app|r)\.(get|post|put|delete)\(/g)?.length ?? 0;
 
 describe('границы слоёв', () => {
   it('фронт и API не импортируют друг друга — общаются только по HTTP', () => {
@@ -25,9 +27,9 @@ describe('границы слоёв', () => {
     expect(bad.map(e => `${e.from} → ${e.to}`)).toEqual([]);
   });
 
-  it('Hono знает только app.ts; точка входа Pages импортирует только app.ts', () => {
+  it('Hono знают только app.ts и routes/context.ts (area); точка входа Pages импортирует только app.ts', () => {
     const hono = [...graph.external.entries()].filter(([, pkgs]) => [...pkgs].some(p => p === 'hono' || p.startsWith('hono/'))).map(([f]) => f);
-    expect(hono).toEqual(['functions/_lib/app.ts']);
+    expect(hono).toEqual(['functions/_lib/app.ts', 'functions/_lib/routes/context.ts']);
     const entry = graph.edges.filter(e => e.from === 'functions/api/[[route]].ts').map(e => e.to);
     expect(entry).toEqual(['functions/_lib/app.ts']);
   });
@@ -64,11 +66,29 @@ describe('циклы импортов', () => {
     ]);
   });
 
-  it('основа API без зависимостей: auth, providers, onboarding, fsrs, mail, extract, release', () => {
-    const leaves = ['auth', 'providers', 'onboarding', 'fsrs', 'mail', 'extract', 'release'].map(n => `functions/_lib/${n}.ts`);
+  it('основа API без зависимостей: errors, auth, providers, onboarding, fsrs, mail, release; extract — только errors', () => {
+    const leaves = ['errors', 'auth', 'providers', 'onboarding', 'fsrs', 'mail', 'release'].map(n => `functions/_lib/${n}.ts`);
     for (const leaf of leaves) {
       expect(graph.edges.filter(e => e.from === leaf && !e.typeOnly).map(e => e.to), leaf).toEqual([]);
     }
+    expect(graph.edges.filter(e => e.from === 'functions/_lib/extract.ts' && !e.typeOnly).map(e => e.to)).toEqual(['functions/_lib/errors.ts']);
+  });
+
+  it('ошибки областей наследуют DomainError, а маршруты не ловят их сами — это делает app.onError', () => {
+    const areaErrors = libFiles.filter(f => f !== 'functions/_lib/errors.ts' && /export class \w+Error extends /.test(readFileSync(f, 'utf-8')));
+    for (const f of areaErrors) {
+      const text = readFileSync(f, 'utf-8');
+      expect(text, f).toMatch(/export class \w+Error extends DomainError\b/);
+      expect(graph.edges.some(e => e.from === f && e.to === 'functions/_lib/errors.ts' && !e.typeOnly), `${f} импортирует DomainError`).toBe(true);
+    }
+    expect(areaErrors.length).toBeGreaterThanOrEqual(8);
+    for (const f of [...routeFiles, 'functions/_lib/app.ts']) {
+      const text = readFileSync(f, 'utf-8');
+      const checks = [...text.matchAll(/instanceof (\w+Error)\b/g)].map(m => m[1]).filter(n => n !== 'Error' && n !== 'DomainError');
+      expect(checks, `${f}: нет своих xFail и instanceof XError`).toEqual([]);
+      expect(text, `${f}: статусы ошибок живут в модулях областей`).not.toMatch(/_STATUS\b/);
+    }
+    expect(readFileSync('functions/_lib/app.ts', 'utf-8')).toContain('app.onError(');
   });
 });
 
@@ -82,12 +102,19 @@ describe('бюджеты размера', () => {
     expect(over.map(f => `${f}: ${lineCount(f)}`)).toEqual([]);
   });
 
-  it('app.ts — маршруты и склейка, не больше 70 маршрутов и 900 строк', () => {
-    const text = readFileSync('functions/_lib/app.ts', 'utf-8');
-    const routes = text.match(/\bapp\.(get|post|put|delete)\(/g)?.length ?? 0;
-    expect(routes).toBeGreaterThan(50);
-    expect(routes).toBeLessThanOrEqual(70);
-    expect(lineCount('functions/_lib/app.ts')).toBeLessThanOrEqual(900);
+  it('app.ts — только склейка (≤ 120 строк, без своих маршрутов); маршруты — в routes/*, модуль области ≤ 350 строк, всего 50–90', () => {
+    expect(routeCount('functions/_lib/app.ts')).toBe(0);
+    expect(lineCount('functions/_lib/app.ts')).toBeLessThanOrEqual(120);
+    expect(routeFiles.length).toBeGreaterThanOrEqual(8);
+    const total = routeFiles.reduce((n, f) => n + routeCount(f), 0);
+    expect(total).toBeGreaterThanOrEqual(50);
+    expect(total).toBeLessThanOrEqual(90);
+    expect(routeFiles.filter(f => lineCount(f) > 350).map(f => `${f}: ${lineCount(f)}`)).toEqual([]);
+    // каждая область подключена в app.ts; маршруты не импортируют друг друга (общее — только routes/context.ts)
+    const app = readFileSync('functions/_lib/app.ts', 'utf-8');
+    for (const f of routeFiles.filter(f => !f.endsWith('/context.ts'))) expect(app, f).toContain(`from './routes/${f.split('/').pop()!.replace(/\.ts$/, '')}'`);
+    const cross = graph.edges.filter(e => e.from.startsWith('functions/_lib/routes/') && e.to.startsWith('functions/_lib/routes/') && !e.to.endsWith('/context.ts'));
+    expect(cross.map(e => `${e.from} → ${e.to}`)).toEqual([]);
   });
 });
 
@@ -98,12 +125,13 @@ describe('тесты и версии', () => {
     for (const t of tests) {
       for (const m of readFileSync(t, 'utf-8').matchAll(/from\s*['"](\.\.?\/[^'"]+)['"]/g)) imported.add(m[1].replace(/^\.\.\//, '').replace(/\.tsx?$/, ''));
     }
-    const reachable = (f: string) => {
-      const name = f.replace(/\.tsx?$/, '');
-      if (imported.has(name)) return true;
-      // Модуль, который тянут покрытые тестами модули (app.ts через createApp в tests/helpers), тоже считается проверенным.
-      return graph.edges.some(e => e.to === f && !e.typeOnly && imported.has(e.from.replace(/\.tsx?$/, '')));
-    };
+    // Модуль, который во время выполнения тянут покрытые тестами модули (app.ts → routes/* → routes/context.ts), тоже считается проверенным.
+    const covered = new Set(graph.files.filter(f => imported.has(f.replace(/\.tsx?$/, ''))));
+    for (let grown = true; grown;) {
+      grown = false;
+      for (const e of graph.edges) if (!e.typeOnly && covered.has(e.from) && !covered.has(e.to)) { covered.add(e.to); grown = true; }
+    }
+    const reachable = (f: string) => covered.has(f);
     const untested = [...libFiles, ...srcFiles.filter(f => !f.startsWith('src/screens/') && f.endsWith('.ts'))].filter(f => !reachable(f));
     // Известные исключения: main.tsx — точка входа; nav.ts, wakeLock.ts, manifest.ts проверяются сценариями Playwright (e2e/), а не Vitest.
     expect(untested.filter(f => !['src/nav.ts', 'src/wakeLock.ts', 'src/manifest.ts'].includes(f))).toEqual([]);
@@ -148,6 +176,6 @@ describe('миграции', () => {
 
   it('seed-миграция первого пользователя есть, а служебный засев стенда в прод не попадает', () => {
     expect(existsSync('migrations/0008_first_user.sql')).toBe(true);
-    expect(readFileSync('functions/_lib/app.ts', 'utf-8')).not.toContain('__e2e');
+    for (const f of ['functions/_lib/app.ts', ...routeFiles]) expect(readFileSync(f, 'utf-8'), f).not.toContain('__e2e');
   });
 });

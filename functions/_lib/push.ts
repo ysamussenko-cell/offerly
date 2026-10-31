@@ -15,6 +15,7 @@
 import type { User } from './auth';
 import type { Profile } from './profile';
 import { collectDigest, digestState, headlineOf, daysText, localClock, SEND_WINDOW_MINUTES, DEFAULT_APP_URL, type ContentStore, type DigestData, type DigestState, type RunOpts } from './digest';
+import { DomainError } from './errors';
 
 /** Сколько живёт напоминание в push-службе, если устройство офлайн: столько же, сколько окно отправки. */
 export const PUSH_TTL_SECONDS = SEND_WINDOW_MINUTES * 60;
@@ -56,8 +57,12 @@ export interface PushStore {
 
 export type Store = PushStore & ContentStore;
 
-export class PushError extends Error {
-  constructor(public code: 'subscription_invalid' | 'vapid_invalid' | 'payload_too_large', message?: string) { super(message ?? code); }
+export type PushErrorCode = 'subscription_invalid' | 'vapid_invalid' | 'payload_too_large';
+/** vapid_invalid — ключи сервера испорчены (503, подробность в detail); остальные — ошибка данных подписки или текста. */
+const PUSH_STATUS: Record<PushErrorCode, number> = { subscription_invalid: 400, vapid_invalid: 503, payload_too_large: 413 };
+export class PushError extends DomainError {
+  declare code: PushErrorCode;
+  constructor(code: PushErrorCode, message?: string) { super(code, PUSH_STATUS[code], message); }
 }
 
 // ---------- байты ----------

@@ -8,6 +8,7 @@
  *  переводится в балл по опорным точкам TEMPO_POINTS (A2 ≈ 60 слов/мин, B1 ≈ 85, B2 ≈ 110–135, C1 ≈ 160),
  *  паузы и заполнители снимают баллы. Это не оценка содержания — её даёт экзаменатор по расшифровке. */
 import type { Env as ProviderEnv } from './providers';
+import { DomainError } from './errors';
 
 /** Модель распознавания: турбо принимает base64 и отдаёт длительность и метки слов; запасная — массив байтов. */
 export const STT_MODEL = '@cf/openai/whisper-large-v3-turbo';
@@ -54,8 +55,11 @@ export interface SpeechStore {
   getSpeech(id: string, userId: string): Promise<SpeechTake | null>;
 }
 
-export class VoiceError extends Error {
-  constructor(public code: 'audio_missing' | 'audio_unsupported' | 'audio_too_large' | 'audio_empty' | 'stt_failed' | 'tts_failed' | 'tts_text_invalid', message?: string) { super(message ?? code); }
+export type VoiceErrorCode = 'audio_missing' | 'audio_unsupported' | 'audio_too_large' | 'audio_empty' | 'stt_failed' | 'tts_failed' | 'tts_text_invalid';
+const VOICE_STATUS: Record<VoiceErrorCode, number> = { audio_missing: 400, audio_unsupported: 415, audio_too_large: 413, audio_empty: 422, stt_failed: 502, tts_failed: 502, tts_text_invalid: 400 };
+export class VoiceError extends DomainError {
+  declare code: VoiceErrorCode;
+  constructor(code: VoiceErrorCode, message?: string) { super(code, VOICE_STATUS[code], message); }
 }
 
 const round = (x: number) => Math.round(Math.max(0, Math.min(100, x)));

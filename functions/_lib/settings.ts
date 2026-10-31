@@ -12,6 +12,7 @@
 import { PROVIDERS, chat, type Env as ProviderEnv, type ProviderId, type UserProvider } from './providers';
 import type { Assessment, Attempt } from './assessment';
 import type { SpeechTake } from './voice';
+import { DomainError } from './errors';
 
 export const KEYRING_SETTING_KEY = 'keyring';
 export const KEY_MIN_CHARS = 8;
@@ -41,8 +42,11 @@ export interface SettingsStore {
   initSetting(key: string, value: string, nowIso: string): Promise<string>;
 }
 
-export class SettingsError extends Error {
-  constructor(public code: 'key_invalid' | 'key_unreadable' | 'key_none' | 'key_check_failed', public reason?: string, message?: string) { super(message ?? code); }
+export type SettingsErrorCode = 'key_invalid' | 'key_unreadable' | 'key_none' | 'key_check_failed';
+const SETTINGS_STATUS: Record<SettingsErrorCode, number> = { key_invalid: 400, key_unreadable: 409, key_none: 404, key_check_failed: 502 };
+export class SettingsError extends DomainError {
+  declare code: SettingsErrorCode;
+  constructor(code: SettingsErrorCode, reason?: string, message?: string) { super(code, SETTINGS_STATUS[code], message, reason); }
 }
 
 // ---------- base64url и шифрование ----------

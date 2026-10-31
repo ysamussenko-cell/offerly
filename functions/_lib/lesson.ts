@@ -22,6 +22,7 @@ import { dueForReview, cardTopicById, reviewPatch, draftFromItem, draftsFromWrit
 import { RETIRE_AFTER } from './fsrs';
 import { programTopicById, publicDay, MIXED_TOPIC, WRITING_LABELS, type ProgramDay, type ProgramStore, type PublicDay, type WritingFormat } from './program';
 import { todayIn } from './onboarding';
+import { DomainError } from './errors';
 
 export const WARMUP_COUNT = 5;
 /** Позиции разминки с исправлением ошибки; остальные — выбор варианта. */
@@ -107,8 +108,11 @@ export interface LessonStore {
 
 export type Store = LessonStore & ItemStore & CardStore & ProgramStore & Pick<AssessmentStore, 'latestFinishedAssessment' | 'usedItemIds'>;
 
-export class LessonError extends Error {
-  constructor(public code: 'lesson_no_day' | 'lesson_unavailable' | 'lesson_none' | 'lesson_stale' | 'answer_invalid' | 'bank_empty' | 'lesson_eval_failed' | 'bonus_none', message?: string, public reason?: string) { super(message ?? code); }
+export type LessonErrorCode = 'lesson_no_day' | 'lesson_unavailable' | 'lesson_none' | 'lesson_stale' | 'answer_invalid' | 'bank_empty' | 'lesson_eval_failed' | 'bonus_none';
+const LESSON_STATUS: Record<LessonErrorCode, number> = { lesson_no_day: 404, lesson_unavailable: 409, lesson_none: 404, lesson_stale: 409, answer_invalid: 400, bank_empty: 502, lesson_eval_failed: 502, bonus_none: 409 };
+export class LessonError extends DomainError {
+  declare code: LessonErrorCode;
+  constructor(code: LessonErrorCode, message?: string, reason?: string) { super(code, LESSON_STATUS[code], message, reason); }
 }
 
 export interface RunOpts extends GenerateOpts { rng?: () => number; now?: () => string; id?: () => string; generate?: boolean }

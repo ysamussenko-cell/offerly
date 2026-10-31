@@ -24,6 +24,7 @@ import { publicDay, type ProgramDay, type ProgramStore, type PublicDay } from '.
 import type { Profile } from './profile';
 import { todayIn } from './onboarding';
 import { speechSummary, type SpeechMetrics, type SpeechStore } from './voice';
+import { DomainError } from './errors';
 
 export const QUESTION_KINDS = ['experience', 'mistake', 'explain', 'star', 'role'] as const;
 export type QuestionKind = typeof QUESTION_KINDS[number];
@@ -108,8 +109,11 @@ export interface RehearsalStore {
 
 export type Store = RehearsalStore & CardStore & ProgramStore & Pick<AssessmentStore, 'latestFinishedAssessment'> & Partial<SpeechStore>;
 
-export class RehearsalError extends Error {
-  constructor(public code: 'rehearsal_none' | 'rehearsal_stale' | 'rehearsal_finished' | 'answer_invalid' | 'rehearsal_eval_failed', message?: string, public reason?: string) { super(message ?? code); }
+export type RehearsalErrorCode = 'rehearsal_none' | 'rehearsal_stale' | 'rehearsal_finished' | 'answer_invalid' | 'rehearsal_eval_failed';
+const REHEARSAL_STATUS: Record<RehearsalErrorCode, number> = { rehearsal_none: 404, rehearsal_stale: 409, rehearsal_finished: 409, answer_invalid: 400, rehearsal_eval_failed: 502 };
+export class RehearsalError extends DomainError {
+  declare code: RehearsalErrorCode;
+  constructor(code: RehearsalErrorCode, message?: string, reason?: string) { super(code, REHEARSAL_STATUS[code], message, reason); }
 }
 
 export interface RunOpts extends GenerateOpts { now?: () => string; id?: () => string }

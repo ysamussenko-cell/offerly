@@ -19,6 +19,7 @@ import {
   type Axes, type Axis, type ErrorExample, type WritingEval,
 } from './scoring';
 import { createCards, draftFromItem, draftsFromWriting, type CardStore } from './cards';
+import { DomainError } from './errors';
 
 export const ADAPTIVE_COUNT = 12;
 export const TOTAL = ADAPTIVE_COUNT + 2; // + чтение + письмо
@@ -366,8 +367,11 @@ export async function view(store: Store, a: Assessment, attempts?: Attempt[]): P
 
 // ---------- оркестрация ----------
 
-export class AssessmentError extends Error {
-  constructor(public code: 'assessment_none' | 'assessment_stale' | 'assessment_finished' | 'assessment_busy' | 'answer_invalid' | 'bank_empty', message?: string, public reason?: string) { super(message ?? code); }
+export type AssessmentErrorCode = 'assessment_none' | 'assessment_stale' | 'assessment_finished' | 'assessment_busy' | 'answer_invalid' | 'bank_empty';
+const ASSESSMENT_STATUS: Record<AssessmentErrorCode, number> = { assessment_none: 404, assessment_stale: 409, assessment_finished: 409, assessment_busy: 409, answer_invalid: 400, bank_empty: 502 };
+export class AssessmentError extends DomainError {
+  declare code: AssessmentErrorCode;
+  constructor(code: AssessmentErrorCode, message?: string, reason?: string) { super(code, ASSESSMENT_STATUS[code], message, reason); }
 }
 
 export interface RunOpts extends GenerateOpts {

@@ -14,6 +14,7 @@ import { AXES, AXIS_LABELS, BAND, LEVEL_THRESHOLD, LEXICAL_TOPICS, type Axes, ty
 import type { Assessment, Attempt } from './assessment';
 import type { Profile } from './profile';
 import { daysBetween, todayIn } from './onboarding';
+import { DomainError } from './errors';
 
 export const PROGRAM_DAYS = 28;
 /** Контрольный срез — в конце каждой второй недели. */
@@ -269,8 +270,10 @@ export interface ProgramDeps {
 
 export type Store = ProgramStore & ProgramDeps;
 
-export class ProgramError extends Error {
-  constructor(public code: 'program_none' | 'program_invalid', public reason?: string) { super(code); }
+export type ProgramErrorCode = 'program_none' | 'program_invalid';
+export class ProgramError extends DomainError {
+  declare code: ProgramErrorCode;
+  constructor(code: ProgramErrorCode, reason?: string) { super(code, code === 'program_none' ? 404 : 400, undefined, reason); }
 }
 
 export interface RunOpts { now?: () => string; id?: () => string }

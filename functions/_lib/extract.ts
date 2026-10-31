@@ -1,5 +1,6 @@
 /** Извлечение текста резюме на Worker: PDF (pdf.js через unpdf), DOCX (zip + word/document.xml), обычный текст.
  *  Никаких внешних сервисов — файл не покидает Worker и не сохраняется в исходном виде. */
+import { DomainError } from './errors';
 
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_TEXT_CHARS = 60_000;
@@ -7,8 +8,11 @@ export const MIN_TEXT_CHARS = 200;
 
 export type ResumeKind = 'pdf' | 'docx' | 'text';
 
-export class ExtractError extends Error {
-  constructor(public code: 'resume_unsupported' | 'resume_too_large' | 'resume_unreadable' | 'resume_no_text' | 'resume_too_short') { super(code); }
+export type ExtractErrorCode = 'resume_unsupported' | 'resume_too_large' | 'resume_unreadable' | 'resume_no_text' | 'resume_too_short';
+const EXTRACT_STATUS: Record<ExtractErrorCode, number> = { resume_unsupported: 415, resume_too_large: 413, resume_unreadable: 422, resume_no_text: 422, resume_too_short: 400 };
+export class ExtractError extends DomainError {
+  declare code: ExtractErrorCode;
+  constructor(code: ExtractErrorCode) { super(code, EXTRACT_STATUS[code]); }
 }
 
 /** Определяет тип по имени, MIME и сигнатуре. Сигнатура важнее заголовков браузера. */
