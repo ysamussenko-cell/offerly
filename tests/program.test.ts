@@ -35,7 +35,7 @@ const attempt = (itemId: string, correct: number | null): Attempt => ({
 });
 const profile = (over: Partial<Profile> = {}): Profile => ({
   userId: USER, specialty: 'инженер', industry: 'энергетика', years: 15, targetRole: 'Отбор на OpenTrain AI', keywords: [], summary: null,
-  resumeText: null, resumeName: null, resumeAt: null, interviewDate: null, interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, updatedAt: NOW, ...over,
+  resumeText: null, resumeName: null, resumeAt: null, interviewDate: null, interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: NOW, ...over,
 });
 
 /** Журнал как у первого пользователя: союзы и регистр по две карточки, остальное по одной. */

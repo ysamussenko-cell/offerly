@@ -87,6 +87,33 @@ jobs:
           echo "::notice title=url::production=$PROD preview=$PREVIEW"
           echo "prod=$PROD" >> "$GITHUB_OUTPUT"
 
+      # 4.4: cron-Worker ежедневного письма — отдельный от Pages деплой-объект (Pages Functions не умеют расписание).
+      # Та же база D1 и тот же RESEND_API_KEY. Сбой здесь не валит деплой приложения: предупреждение в аннотациях,
+      # причина (чаще всего — токену не хватает права Workers Scripts: Edit) видна в digest deploy.
+      - name: Deploy digest Worker (cron)
+        id: digest
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          sed -i "s/__D1_ID__/${{ steps.d1.outputs.id }}/" workers/digest/wrangler.toml
+          npx wrangler deploy --config workers/digest/wrangler.toml > digest-deploy.log 2>&1; CODE=$?
+          OUT=$(tr "\n\r" "  " < digest-deploy.log)
+          if [ "$CODE" != "0" ]; then
+            echo "::warning title=digest deploy::Worker offerly-digest не задеплоен (код $CODE): ${OUT:0:700}"
+            echo "url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' digest-deploy.log | tail -1)
+          echo "::notice title=digest deploy::${OUT:0:600}"
+          echo "::notice title=digest url::${URL:-адрес workers.dev не напечатан — поддомен workers.dev не зарегистрирован; cron работает и без него}"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          if [ -n "$RESEND_API_KEY" ]; then
+            SEC=$(printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --config workers/digest/wrangler.toml 2>&1 | tr "\n\r" "  ") || echo "::warning title=digest secret::RESEND_API_KEY не передан Worker: ${SEC:0:400}"
+            echo "::notice title=digest secret::${SEC:0:300}"
+          else
+            echo "::notice title=digest secret::RESEND_API_KEY не задан — Worker отметит дни skipped:mail_not_configured"
+          fi
+
       # GitHub показывает не больше 10 аннотаций notice на шаг — проверки разнесены по трём шагам.
       - name: Health check
         run: |
@@ -180,3 +207,12 @@ jobs:
           CPB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/abandon")
           echo "::notice title=checkpoint::GET /api/checkpoint без cookie → $CPG; POST /api/checkpoint/start → $CPS; POST /api/checkpoint/answer → $CPA; POST /api/checkpoint/score → $CPR; POST /api/checkpoint/abandon → $CPB (ждём 401 везде)"
           [ "$CPG" = "401" ] && [ "$CPS" = "401" ] && [ "$CPA" = "401" ] && [ "$CPR" = "401" ] && [ "$CPB" = "401" ] || { echo "::error title=checkpoint::неожиданные коды ответа"; exit 1; }
+          # ежедневное письмо (4.4): маршруты без cookie → 401; состояние cron-Worker (без адресов: сколько ждут письма и в каком состоянии)
+          DGG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/digest")
+          DGP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"notifyAt":"07:00"}' "$P/api/digest")
+          DGS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/digest/send")
+          W="${{ steps.digest.outputs.url }}"
+          if [ -n "$W" ]; then WS=$(curl -s --max-time 20 "$W/" | tr -d '\n' | head -c 400); else WS="worker без адреса workers.dev или не задеплоен — см. digest deploy"; fi
+          echo "::notice title=digest::GET /api/digest без cookie → $DGG; PUT /api/digest → $DGP; POST /api/digest/send → $DGS (ждём 401 везде); worker: $WS"
+          [ "$DGG" = "401" ] && [ "$DGP" = "401" ] && [ "$DGS" = "401" ] || { echo "::error title=digest::неожиданные коды ответа"; exit 1; }
+          case "$WS" in *'"ok":true'*) ;; *) echo "::warning title=digest::состояние Worker не подтверждено: $WS";; esac

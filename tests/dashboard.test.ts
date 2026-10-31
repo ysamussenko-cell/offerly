@@ -34,7 +34,7 @@ const step = (createdAt: string, answeredAt: string | null, lessonId = 'l'): Les
 });
 const profile = (over: Partial<Profile> = {}): Profile => ({
   userId: USER, specialty: 'инженер', industry: 'энергетика', years: 15, targetRole: 'OpenTrain AI', keywords: [], summary: null, resumeText: null, resumeName: null, resumeAt: null,
-  interviewDate: null, interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, updatedAt: NOW, ...over,
+  interviewDate: null, interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: NOW, ...over,
 });
 const input = (over: Partial<ReadinessInput> = {}): ReadinessInput => ({ assessment: assessment(), lessons: [], missed: [], today: TODAY, tz: TZ, ...over });
 

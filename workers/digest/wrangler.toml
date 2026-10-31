@@ -1,0 +1,21 @@
+# Offerly: cron-Worker ежедневного письма (4.4). Отдельный от Pages деплой-объект: Pages Functions не умеют расписание.
+# Деплой — шаг «Deploy digest Worker» в .github/workflows/deploy.yml: подставляет id базы D1 и кладёт секрет RESEND_API_KEY.
+name = "offerly-digest"
+main = "index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Та же база, что у приложения (wrangler.toml в корне): письмо читает профиль, программу, занятия и карточки.
+[[d1_databases]]
+binding = "DB"
+database_name = "offerly"
+database_id = "__D1_ID__"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+APP_NAME = "Offerly"
+MAIL_FROM = "Offerly <onboarding@resend.dev>"
+APP_URL = "https://offerly-c8b.pages.dev"

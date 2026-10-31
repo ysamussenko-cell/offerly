@@ -44,7 +44,7 @@ function fillBank(items: Item[]) {
 
 const profile = (over: Partial<Profile> = {}): Profile => ({
   userId: USER, specialty: null, industry: null, years: null, targetRole: 'OpenTrain AI', keywords: [], summary: null, resumeText: null, resumeName: null, resumeAt: null,
-  interviewDate: null, interviewFormat: null, minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, updatedAt: NOW, ...over,
+  interviewDate: null, interviewFormat: null, minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: NOW, ...over,
 });
 const baseline = (over: Partial<Assessment> = {}): Assessment => ({
   id: 'a-base', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B1', currentLevel: 'B1',

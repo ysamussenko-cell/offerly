@@ -18,13 +18,16 @@ import { d1DashboardStore, dashboard, parseGoal, GAIN_PER_LESSON, MISS_PENALTY, 
 import { d1AchievementStore, syncAchievements, ACHIEVEMENTS, type AchievementStore } from './achievements';
 import { d1RehearsalStore, today as rehearsalToday, startOrResume as startRehearsal, answer as answerRehearsal, rescore as rescoreRehearsal, abandon as abandonRehearsal, RehearsalError, QUESTION_COUNT, ANSWER_WORDS, REPLACEMENTS, type RehearsalStore } from './rehearsal';
 import { d1SpeechStore, recordSpeech, speak, publicSpeech, validateTtsText, selfTestVoice, VoiceError, MAX_AUDIO_BYTES, MAX_SECONDS, MAX_TTS_CHARS, STT_MODEL, TTS_MODEL, type SpeechStore } from './voice';
+import { d1DigestStore, parseNotifyAt, digestState, nextDigest, buildDigest, sendDigestNow, localClock, minutesOf, DEFAULT_NOTIFY_AT, SEND_WINDOW_MINUTES, CRON_STEP_MINUTES, type DigestStore } from './digest';
 
 export interface Env extends ProviderEnv, MailEnv {
+  /** Адрес приложения для ссылок в письмах; без него — адрес по умолчанию из digest.ts. */
+  APP_URL?: string;
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -35,7 +38,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -538,6 +541,55 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     await c.get('store').saveWeeklyGoal(user.id, v.minutes, new Date().toISOString());
     const p = await c.get('store').getProfile(user.id);
     return c.json({ ok: true, ...dashboardMeta, ...(await dashboard(c.get('store'), user.id, user.tz, p)) });
+  });
+
+  // --- ежедневное письмо ---
+
+  const digestMeta = { defaultAt: DEFAULT_NOTIFY_AT, windowMinutes: SEND_WINDOW_MINUTES, stepMinutes: CRON_STEP_MINUTES };
+  /** Состояние письма: время, включено ли, что было сегодня, когда следующее, настроена ли почта — и предпросмотр (тема и текст). */
+  const digestView = async (c: any, preview: boolean) => {
+    const user = c.get('auth')!.user;
+    const p = await c.get('store').getProfile(user.id);
+    const now = new Date();
+    const s = digestState({ notifyAt: p?.notifyAt ?? null, digestSentOn: p?.digestSentOn ?? null }, user.tz, now);
+    const out: Record<string, unknown> = {
+      ok: true, ...digestMeta, notifyAt: p?.notifyAt ?? null, enabled: s.state !== 'off', tz: user.tz, localTime: s.time, today: s.date, state: s.state,
+      sentOn: p?.digestSentOn ?? null, next: nextDigest({ notifyAt: p?.notifyAt ?? null, digestSentOn: p?.digestSentOn ?? null }, user.tz, now),
+      mail: c.env.RESEND_API_KEY ? 'ok' : 'missing',
+    };
+    if (preview) {
+      const { mail, data } = await buildDigest(c.env, c.get('store'), user, p);
+      out.preview = { subject: mail.subject, text: mail.text, headline: mail.headline, dueCards: data.dueCards };
+    }
+    return out;
+  };
+
+  app.get('/digest', requireAuth, async (c) => c.json(await digestView(c, c.req.query('preview') !== '0')));
+
+  /** Время письма: {notifyAt: "HH:MM"} — включить или переставить; {notifyAt: null} — выключить.
+   *  Если назначенное время сегодня уже прошло, первое письмо придёт завтра (день отмечается сразу). */
+  app.put('/digest', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    const v = parseNotifyAt(body?.notifyAt);
+    if (!v.ok) return c.json({ ok: false, error: 'notify_invalid', reason: v.reason }, 400);
+    const now = new Date();
+    const clock = localClock(user.tz, now);
+    const sentOn = v.value && clock.minutes >= minutesOf(v.value) ? clock.date : null;
+    await c.get('store').saveNotifyAt(user.id, v.value, sentOn, now.toISOString());
+    return c.json(await digestView(c, false));
+  });
+
+  /** Прислать письмо сейчас, вне расписания. Почта не настроена — 503, Resend отказал — 502. */
+  app.post('/digest/send', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const p = await c.get('store').getProfile(user.id);
+    const r = await sendDigestNow(c.env, c.get('store'), user, p);
+    if (!r.result.sent) {
+      if (r.result.reason === 'provider_error') { console.error(r.result.detail); return c.json({ ok: false, error: 'mail_failed', detail: r.result.detail }, 502); }
+      return c.json({ ok: false, error: 'mail_not_configured' }, 503);
+    }
+    return c.json({ ok: true, subject: r.subject, sentOn: r.sentOn, id: r.result.id ?? null });
   });
 
   return app;

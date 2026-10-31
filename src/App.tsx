@@ -15,6 +15,7 @@ import Lesson, { LessonCard } from './screens/Lesson';
 import Rehearsal, { RehearsalCard } from './screens/Rehearsal';
 import { HomeCard } from './screens/Home';
 import { AchievementsCard } from './screens/Achievements';
+import { DigestCard } from './screens/Digest';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -122,6 +123,7 @@ export default function App() {
           {ready.analyzed && <TestCard onOpen={mode => setTesting({ kind: 'placement', mode })} refreshKey={testRuns} />}
           {ready.analyzed && <JournalCard refreshKey={testRuns} />}
           {ready.analyzed && <AchievementsCard refreshKey={testRuns} />}
+          {ready.analyzed && <DigestCard refreshKey={testRuns} />}
           {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
           <ProfileCard profile={ready} onReplace={() => setReplacing(true)}
             onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}

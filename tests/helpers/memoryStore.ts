@@ -10,6 +10,7 @@ import type { DashboardStore } from '../../functions/_lib/dashboard';
 import type { AchievementRow, AchievementStore, AnswerRecord } from '../../functions/_lib/achievements';
 import type { Rehearsal, RehearsalStore, Turn } from '../../functions/_lib/rehearsal';
 import type { SpeechStore, SpeechTake } from '../../functions/_lib/voice';
+import type { DigestStore } from '../../functions/_lib/digest';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -28,13 +29,14 @@ export function memoryStore() {
   const rehearsals: Rehearsal[] = [];
   const turns: Turn[] = [];
   const speeches: SpeechTake[] = [];
+  const digests: { userId: string; sentOn: string; sentAt: string | null; note: string }[] = [];
   const patchInto = (target: any, patch: object) => Object.assign(target, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
-    interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, targetLevel: null, weeklyGoalMinutes: null, updatedAt: now,
+    interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, targetLevel: null, weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -177,6 +179,24 @@ export function memoryStore() {
 
     async insertSpeech(s) { speeches.push({ ...s }); },
     async getSpeech(id, userId) { const s = speeches.find(x => x.id === id && x.userId === userId); return s ? { ...s } : null; },
+
+    async listDigestUsers() {
+      const out: { user: User; profile: Profile }[] = [];
+      for (const u of [...users].sort((a, b) => a.id.localeCompare(b.id))) {
+        const p = profiles.get(u.id);
+        if (p?.notifyAt) out.push({ user: { ...u }, profile: { ...p, keywords: [...p.keywords] } });
+      }
+      return out;
+    },
+    async saveNotifyAt(userId, notifyAt, sentOn, now) {
+      const p = profiles.get(userId) ?? blank(userId, now);
+      profiles.set(userId, { ...p, notifyAt, digestSentOn: sentOn ?? p.digestSentOn, updatedAt: now });
+    },
+    async markDigest(userId, sentOn, sentAt, note, now) {
+      const p = profiles.get(userId) ?? blank(userId, now);
+      profiles.set(userId, { ...p, digestSentOn: sentOn, updatedAt: now });
+      digests.push({ userId, sentOn, sentAt, note });
+    },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches, digests };
 }

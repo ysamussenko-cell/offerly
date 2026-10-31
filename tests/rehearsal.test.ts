@@ -25,7 +25,7 @@ const nextId = () => `id${++seq}`;
 
 const profile = (over: Partial<Profile> = {}): Profile => ({
   userId: USER, specialty: DOMAIN.specialty, industry: DOMAIN.industry, years: 15, targetRole: 'OpenTrain AI', keywords: DOMAIN.keywords, summary: null, resumeText: null, resumeName: null, resumeAt: null,
-  interviewDate: null, interviewFormat: null, minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, updatedAt: NOW, ...over,
+  interviewDate: null, interviewFormat: null, minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: NOW, targetLevel: 'C1', weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: NOW, ...over,
 });
 const assessment = (): Assessment => ({
   id: 'a1', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B2', currentLevel: 'B2',

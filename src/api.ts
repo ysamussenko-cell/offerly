@@ -4,7 +4,7 @@ export type Profile = {
   specialty: string | null; industry: string | null; years: number | null; targetRole: string | null; keywords: string[];
   summary: string | null; resumeName: string | null; resumeAt: string | null; resumeChars: number; analyzed: boolean;
   interviewDate: string | null; interviewFormat: InterviewFormat | null; minutesPerDay: number | null; nativeLanguage: string | null;
-  onboardedAt: string | null; onboarded: boolean; targetLevel: string | null; weeklyGoalMinutes: number | null; updatedAt: string;
+  onboardedAt: string | null; onboarded: boolean; targetLevel: string | null; weeklyGoalMinutes: number | null; notifyAt: string | null; digestSentOn: string | null; updatedAt: string;
 };
 export type Answers = {
   targetRole: string; interviewDate: string | null; interviewFormat: InterviewFormat; minutesPerDay: number; tz: string; nativeLanguage: string;
@@ -154,6 +154,13 @@ export type Rehearsal = {
 };
 export type RehearsalMeta = { questions: number; words: { min: number; target: readonly [number, number]; max: number }; replacements: number };
 export type RehearsalToday = RehearsalMeta & { ok: true; today: string; scheduled: boolean; day: ProgramDay | null; rehearsal: Rehearsal | null; last: Rehearsal | null };
+export type DigestState = 'off' | 'sent' | 'early' | 'due' | 'late';
+export type Digest = {
+  ok: true; defaultAt: string; windowMinutes: number; stepMinutes: number;
+  notifyAt: string | null; enabled: boolean; tz: string; localTime: string; today: string; state: DigestState; sentOn: string | null;
+  next: { date: string; time: string } | null; mail: 'ok' | 'missing';
+  preview?: { subject: string; text: string; headline: string; dueCards: number };
+};
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
 
 export class ApiError extends Error {
@@ -244,6 +251,9 @@ export const api = {
   /** Озвучка реплики тренера → MP3 (MeloTTS). */
   speak: (text: string) => callBlob('/voice/speak', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) }),
   saveGoal: (minutes: number | null) => put<Dashboard>('/dashboard/goal', { minutes }),
+  digest: () => call<Digest>('/digest'),
+  saveDigest: (notifyAt: string | null) => put<Digest>('/digest', { notifyAt }),
+  sendDigest: () => post<{ ok: true; subject: string; sentOn: string; id: string | null }>('/digest/send', {}),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -287,6 +297,7 @@ export const ERRORS: Record<string, string> = {
   rehearsal_finished: 'Репетиция уже завершена.',
   rehearsal_eval_failed: 'Экзаменатор не разобрал разговор. Ответы сохранены — нажмите «Разобрать снова» через минуту.',
   goal_invalid: 'Недельная цель — целое число минут от 15 до 1260.',
+  notify_invalid: 'Время письма — часы и минуты, например 07:30.',
   audio_missing: 'Запись не ушла на сервер. Попробуйте ещё раз.',
   audio_unsupported: 'Сервер не принял формат записи. Попробуйте другой браузер.',
   audio_too_large: 'Запись длиннее предела. Говорите короче — до двух минут.',
