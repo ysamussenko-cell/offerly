@@ -36,6 +36,25 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # Сценарии Playwright (e2e/*.e2e.ts) на собранном dist: вход по коду, главный экран, занятие, тест, настройки, телефон, /install.
+      # Браузер кэшируется по версии playwright из lock-файла; падение сценариев останавливает деплой.
+      - name: Cache Playwright Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: E2E scenarios (Playwright)
+        run: |
+          npm run lint:e2e
+          CODE=0; npm run e2e 2>&1 | tee e2e.log || CODE=$?
+          SUMMARY=$(grep -E 'Test Files|Tests ' e2e.log | sed 's/^ *//' | tr "\n" " ")
+          FAILED=$(grep -E '^\s*(×|FAIL)' e2e.log | sed 's/^ *//' | head -5 | tr "\n" " ")
+          echo "::notice title=e2e::${SUMMARY:-вывод vitest не найден}${FAILED:+; упали: ${FAILED:0:600}}"
+          exit $CODE
+
       - name: Ensure Pages project exists
         run: npx wrangler pages project create offerly --production-branch main || true
 

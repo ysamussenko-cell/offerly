@@ -5,3 +5,4 @@ dist
 *.log
 health.json
 deep.json
+e2e/screenshots/

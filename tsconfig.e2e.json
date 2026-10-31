@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.functions.json",
+  "compilerOptions": { "types": ["@cloudflare/workers-types", "node"], "noEmit": true },
+  "include": ["e2e", "tests/helpers"]
+}
