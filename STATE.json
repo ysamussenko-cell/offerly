@@ -2,13 +2,16 @@
   "current_task": null,
   "last_completed": "6.1 Доводка PWA под телефон: src/nav.ts (экраны lesson/rehearsal/test/checkpoint/settings — запись истории {offerly:screen} с адресом /?screen=…, createScreenHistory: open/close/onPop/leave, parseScreen/hrefFor), App.tsx на одном состоянии screen (openScreen → nav.open + setScreen, closeScreen → nav.close → history.back → popstate → onClose; ссылка ?screen= открывается после загрузки профиля с fresh — верхняя запись заменяется главным); src/wakeLock.ts (createWakeLock + useWakeLock в Lesson/Assessment/Rehearsal); src/mobile.ts (isCoarsePointer, isStandalone, autoFocusFields — autoFocus={focusOnOpen} в полях ответа, autocorrect/autocapitalize off у исправлений); src/manifest.ts (MANIFEST с shortcuts — vite.config импортирует); push.ts reminderScreen/reminderUrl — клик по уведомлению открывает экран дня; styles.css safe-area по четырём сторонам, цели 44/48 px для пальца, overscroll-behavior в standalone; tests/mobile.test.ts (27); версия 0.24.0 в package.json, [[route]].ts, workers/digest/index.ts, tauri.conf.json, Cargo.toml (+Cargo.lock). APK через Capacitor не делался — ждёт отзыва Юрия с телефона.",
   "last_deploy": {
-    "status": "pending",
+    "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": null,
-    "run": null,
+    "commit": "81fa301",
+    "run": 41201297730,
     "version": "0.24.0",
-    "health": null,
-    "note": "деплой 0.24.0 ещё не проверен"
+    "health": "ok:true db:ok ai:ok mail:ok push:pending extract:ok ai_chat:ok analysis:ok voice:ok (tts 208230 bytes, whisper 7 words 2.36s) — аннотация extract; WebFetch /api/health?v=0240 → 0.24.0 (без параметра WebFetch отдал устаревший кэш 0.1.0 — живой ответ проверять с уникальным query)",
+    "seed": "применён, миграций в этом релизе нет",
+    "worker": "offerly-digest 0.24.0 задеплоен, расписание */15 * * * *, states sent:1",
+    "desktop": "workflow Desktop run 41201297809 — success, релиз v0.24.0: Offerly_0.24.0_x64-setup.exe (2 266 243 байт) и latest.json без подписи (секрет TAURI_SIGNING_PRIVATE_KEY не задан)",
+    "smoke": "pwa: /sw.js 200, /manifest.webmanifest 200; живой манифест (WebFetch): три ярлыка /?screen=lesson|rehearsal|settings, display_override [standalone, minimal-ui]. Навигация проверена Playwright на dist (Pixel 7, iPhone 13, 1000px) — см. notes 6.1."
   },
   "defects": [],
   "pending_from_yuriy": [
