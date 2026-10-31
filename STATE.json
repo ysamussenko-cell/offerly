@@ -4,12 +4,12 @@
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "9b5597d",
-    "run": 41180392224,
+    "commit": "5e75baf",
+    "run": 41180878497,
     "version": "0.19.0",
     "health": "ok:true db:ok ai:ok mail:ok extract:ok ai_chat:ok analysis:ok voice:ok (tts 209254 bytes, whisper 7 words 2.37s) — из аннотации extract шага Deep check",
     "seed": "first_user=1, baseline=1, seed_cards=14, all_cards=14, retired=0, fsrs_touched=0",
-    "worker": "offerly-digest задеплоен: https://offerly-digest.ysamussenko.workers.dev — GET / в 07:24 UTC: ok:true version 0.19.0 db:ok mail:ok cron */15 users 1 states {late:1} (12:24 Алматы — окно 07:41+3 ч прошло, сегодня письмо не уйдёт, первое — 1.11 в 07:41–07:56); секрет RESEND_API_KEY передан Worker",
+    "worker": "offerly-digest задеплоен: https://offerly-digest.ysamussenko.workers.dev — GET / в 07:24 UTC: ok:true version 0.19.0 db:ok mail:ok cron */15 users 1 states {late:1} (12:24 Алматы — окно 07:41+3 ч прошло, сегодня письмо не уйдёт, первое — 1.11 в 07:41–07:56); секрет RESEND_API_KEY передан Worker; run 41180878497 (07:31 UTC): wrangler напечатал «schedule: */15 * * * *», cron уже сработал в 07:30 UTC — состояние Юрия late → sent (день 31.10 помечен skipped:late, письма не было: окно прошло), значит расписание в проде работает",
     "smoke": "digest: GET/PUT /api/digest, POST /api/digest/send без cookie → 401 (аннотация digest в Deep check); остальные маршруты как ждём. WebFetch к pages.dev и workers.dev из плановой сессии по-прежнему требует подтверждения (PROVENANCE_REQUIRED). UI проверен локально Playwright на dist с route-моком: карточка «Ежедневное письмо» с предпросмотром, перестановка времени, «прислать сейчас», выключение; HTML письма отрисован из seed (vite-node + makeStore на node:sqlite)"
   },
   "defects": [],
