@@ -16,6 +16,7 @@ import Rehearsal, { RehearsalCard } from './screens/Rehearsal';
 import { HomeCard } from './screens/Home';
 import { AchievementsCard } from './screens/Achievements';
 import { DigestCard } from './screens/Digest';
+import { PushCard } from './screens/Push';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -124,6 +125,7 @@ export default function App() {
           {ready.analyzed && <JournalCard refreshKey={testRuns} />}
           {ready.analyzed && <AchievementsCard refreshKey={testRuns} />}
           {ready.analyzed && <DigestCard refreshKey={testRuns} />}
+          {ready.analyzed && <PushCard refreshKey={testRuns} />}
           {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
           <ProfileCard profile={ready} onReplace={() => setReplacing(true)}
             onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}
@@ -148,6 +150,7 @@ export default function App() {
             <li>База данных: <span className={health.db === 'ok' ? 'ok' : 'bad'}>{health.db}</span></li>
             <li>Workers AI: <span className={health.ai === 'ok' ? 'ok' : 'bad'}>{health.ai}</span></li>
             <li>Почта: <span className={health.mail === 'ok' ? 'ok' : 'bad'}>{health.mail ?? 'missing'}</span></li>
+            <li>Push (ключи VAPID): <span className={health.push === 'env' || health.push === 'db' ? 'ok' : 'bad'}>{health.push ?? 'pending'}</span></li>
           </ul>
         ) : <p className="muted">Проверяю…</p>}
       </section>

@@ -41,7 +41,9 @@ export interface DigestStore {
   markDigest(userId: string, sentOn: string, sentAt: string | null, note: string, nowIso: string): Promise<void>;
 }
 
-export type Store = DigestStore & DashboardDeps & Pick<CardStore, 'listCards'> & Pick<ProgramStore, 'listProgramDays'> & Pick<ProfileStore, 'getProfile'>;
+/** Что нужно, чтобы собрать содержимое письма (его же использует напоминание push.ts). */
+export type ContentStore = DashboardDeps & Pick<CardStore, 'listCards'> & Pick<ProgramStore, 'listProgramDays'> & Pick<ProfileStore, 'getProfile'>;
+export type Store = DigestStore & ContentStore;
 
 // ---------- время ----------
 
@@ -217,7 +219,7 @@ export function renderDigest(d: DigestData, user: User, profile: Profile, env: P
 export interface RunOpts { now?: () => string; fetchFn?: typeof fetch }
 
 /** Данные письма на сегодня — из тех же модулей, что и экраны. */
-export async function collectDigest(store: Store, user: User, profile: Profile | null, opts: RunOpts = {}): Promise<DigestData> {
+export async function collectDigest(store: ContentStore, user: User, profile: Profile | null, opts: RunOpts = {}): Promise<DigestData> {
   const now = opts.now ?? (() => new Date().toISOString());
   const view = await dashboard(store, user.id, user.tz, profile, { now });
   const today = view.today;
@@ -237,7 +239,7 @@ const blankProfile = (userId: string, now: string): Profile => ({
 });
 
 /** Собрать письмо для пользователя (предпросмотр и отправка). */
-export async function buildDigest(env: Pick<DigestEnv, 'APP_NAME' | 'APP_URL'>, store: Store, user: User, profile: Profile | null, opts: RunOpts = {}): Promise<{ mail: DigestMail; data: DigestData }> {
+export async function buildDigest(env: Pick<DigestEnv, 'APP_NAME' | 'APP_URL'>, store: ContentStore, user: User, profile: Profile | null, opts: RunOpts = {}): Promise<{ mail: DigestMail; data: DigestData }> {
   const now = opts.now ?? (() => new Date().toISOString());
   const p = profile ?? blankProfile(user.id, now());
   const data = await collectDigest(store, user, p, opts);

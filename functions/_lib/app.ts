@@ -19,15 +19,16 @@ import { d1AchievementStore, syncAchievements, ACHIEVEMENTS, type AchievementSto
 import { d1RehearsalStore, today as rehearsalToday, startOrResume as startRehearsal, answer as answerRehearsal, rescore as rescoreRehearsal, abandon as abandonRehearsal, RehearsalError, QUESTION_COUNT, ANSWER_WORDS, REPLACEMENTS, type RehearsalStore } from './rehearsal';
 import { d1SpeechStore, recordSpeech, speak, publicSpeech, validateTtsText, selfTestVoice, VoiceError, MAX_AUDIO_BYTES, MAX_SECONDS, MAX_TTS_CHARS, STT_MODEL, TTS_MODEL, type SpeechStore } from './voice';
 import { d1DigestStore, parseNotifyAt, digestState, nextDigest, buildDigest, sendDigestNow, localClock, minutesOf, DEFAULT_NOTIFY_AT, SEND_WINDOW_MINUTES, CRON_STEP_MINUTES, type DigestStore } from './digest';
+import { d1PushStore, vapidKeys, parseSubscribeBody, publicSubscription, sendPushNow, sentOnIfPassed, PushError, VAPID_SETTING_KEY, type PushEnv, type PushStore } from './push';
 
-export interface Env extends ProviderEnv, MailEnv {
+export interface Env extends ProviderEnv, MailEnv, PushEnv {
   /** Адрес приложения для ссылок в письмах; без него — адрес по умолчанию из digest.ts. */
   APP_URL?: string;
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -38,7 +39,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB), ...d1PushStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -64,7 +65,10 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       try { await c.env.DB.prepare('select 1').first(); db = 'ok'; } catch { db = 'error'; }
     }
     if (c.env.AI) ai = 'ok';
-    const out: Record<string, unknown> = { ok: db === 'ok' && ai === 'ok', version, db, ai, mail: c.env.RESEND_API_KEY ? 'ok' : 'missing' };
+    // push: откуда ключи VAPID — секреты окружения, запись в app_settings или ещё не создавались (создаются при первом GET /api/push)
+    let push: 'env' | 'db' | 'pending' | 'error' = c.env.VAPID_PRIVATE_KEY ? 'env' : 'pending';
+    if (push === 'pending' && db === 'ok') { try { push = (await c.get('store').getSetting(VAPID_SETTING_KEY)) ? 'db' : 'pending'; } catch { push = 'error'; } }
+    const out: Record<string, unknown> = { ok: db === 'ok' && ai === 'ok', version, db, ai, mail: c.env.RESEND_API_KEY ? 'ok' : 'missing', push };
     // ?deep=1 — прогон извлечения текста на крошечных встроенных PDF и DOCX: проверяет, что pdf.js и zip работают в этой среде.
     if (c.req.query('deep') === '1' || c.req.query('deep') === '2') {
       out.extract = await selfTestExtract();
@@ -590,6 +594,88 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       return c.json({ ok: false, error: 'mail_not_configured' }, 503);
     }
     return c.json({ ok: true, subject: r.subject, sentOn: r.sentOn, id: r.result.id ?? null });
+  });
+
+  // --- Web Push: одно напоминание в день ---
+
+  const pushMeta = { defaultAt: DEFAULT_NOTIFY_AT, windowMinutes: SEND_WINDOW_MINUTES, stepMinutes: CRON_STEP_MINUTES };
+  /** Состояние напоминания: открытый ключ VAPID для PushManager, время, состояние дня, следующий срок, устройства (без endpoint и ключей). */
+  const pushView = async (c: any) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    const now = new Date();
+    const { keys, source } = await vapidKeys(c.env, store, now.toISOString());
+    const setting = await store.getPushSetting(user.id);
+    const p = { notifyAt: setting?.pushAt ?? null, digestSentOn: setting?.sentOn ?? null };
+    const s = digestState(p, user.tz, now);
+    const subs = await store.listPushSubscriptions(user.id);
+    return {
+      ok: true, ...pushMeta, publicKey: keys.publicKey, keySource: source, pushAt: setting?.pushAt ?? null, enabled: s.state !== 'off', tz: user.tz, localTime: s.time, today: s.date,
+      state: s.state, sentOn: setting?.sentOn ?? null, note: setting?.note ?? null, next: nextDigest(p, user.tz, now), subscriptions: subs.map(publicSubscription),
+    };
+  };
+  const pushFail = (c: any, e: unknown) => {
+    if (e instanceof PushError && e.code === 'vapid_invalid') { console.error(e.message); return c.json({ ok: false, error: 'vapid_invalid', detail: e.message }, 503); }
+    throw e;
+  };
+
+  app.get('/push', requireAuth, async (c) => { try { return c.json(await pushView(c)); } catch (e) { return pushFail(c, e); } });
+
+  /** Время напоминания: {pushAt: "HH:MM"} — включить или переставить; {pushAt: null} — выключить (подписки устройств остаются). */
+  app.put('/push', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    const v = parseNotifyAt(body?.pushAt);
+    if (!v.ok) return c.json({ ok: false, error: 'notify_invalid', reason: v.reason }, 400);
+    const now = new Date();
+    await c.get('store').savePushAt(user.id, v.value, sentOnIfPassed(v.value, user.tz, now), now.toISOString());
+    try { return c.json(await pushView(c)); } catch (e) { return pushFail(c, e); }
+  });
+
+  /** Подписка браузера: {endpoint, keys:{p256dh, auth}, userAgent?, pushAt?}. Если напоминание ещё не включено — включается
+   *  на pushAt, иначе на время письма, иначе на время по умолчанию. */
+  app.post('/push/subscribe', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    const body = await c.req.json().catch(() => ({}));
+    const v = parseSubscribeBody(body);
+    if (!v.ok) return c.json({ ok: false, error: 'push_invalid', reason: v.reason }, 400);
+    const at = body?.pushAt === undefined ? { ok: true as const, value: null } : parseNotifyAt(body.pushAt);
+    if (!at.ok) return c.json({ ok: false, error: 'notify_invalid', reason: at.reason }, 400);
+    const now = new Date();
+    const existing = (await store.listPushSubscriptions(user.id)).find((s: { endpoint: string }) => s.endpoint === v.value.endpoint);
+    await store.upsertPushSubscription({ id: existing?.id ?? crypto.randomUUID(), userId: user.id, ...v.value, createdAt: existing?.createdAt ?? now.toISOString(), lastSentAt: existing?.lastSentAt ?? null, lastError: null });
+    const setting = await store.getPushSetting(user.id);
+    if (!setting?.pushAt || at.value) {
+      const pushAt = at.value ?? (await store.getProfile(user.id))?.notifyAt ?? DEFAULT_NOTIFY_AT;
+      await store.savePushAt(user.id, pushAt, sentOnIfPassed(pushAt, user.tz, now), now.toISOString());
+    }
+    try { return c.json(await pushView(c)); } catch (e) { return pushFail(c, e); }
+  });
+
+  /** Отписать это устройство: {endpoint}. Последнее устройство выключает и напоминание — слать больше некуда. */
+  app.delete('/push/subscribe', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    const body = await c.req.json().catch(() => ({}));
+    const endpoint = typeof body?.endpoint === 'string' ? body.endpoint.trim() : '';
+    if (!endpoint) return c.json({ ok: false, error: 'push_invalid', reason: 'endpoint' }, 400);
+    const removed = await store.deletePushSubscription(endpoint, user.id);
+    const now = new Date();
+    if ((await store.listPushSubscriptions(user.id)).length === 0 && (await store.getPushSetting(user.id))?.pushAt) await store.savePushAt(user.id, null, null, now.toISOString());
+    try { return c.json({ ...(await pushView(c)), removed }); } catch (e) { return pushFail(c, e); }
+  });
+
+  /** Прислать напоминание сейчас на все устройства; день не отмечается. Устройств нет — 404, ни одно не приняло — 502. */
+  app.post('/push/send', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    if ((await store.listPushSubscriptions(user.id)).length === 0) return c.json({ ok: false, error: 'push_no_subscriptions' }, 404);
+    try {
+      const r = await sendPushNow(c.env, store, user, await store.getProfile(user.id));
+      if (r.delivered === 0) { console.error(JSON.stringify(r.devices)); return c.json({ ok: false, error: 'push_failed', devices: r.devices, reminder: r.reminder }, 502); }
+      return c.json({ ok: true, delivered: r.delivered, devices: r.devices, reminder: r.reminder });
+    } catch (e) { return pushFail(c, e); }
   });
 
   return app;

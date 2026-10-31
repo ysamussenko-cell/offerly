@@ -11,6 +11,7 @@ import type { AchievementRow, AchievementStore, AnswerRecord } from '../../funct
 import type { Rehearsal, RehearsalStore, Turn } from '../../functions/_lib/rehearsal';
 import type { SpeechStore, SpeechTake } from '../../functions/_lib/voice';
 import type { DigestStore } from '../../functions/_lib/digest';
+import type { PushStore, PushSubscription, PushSetting } from '../../functions/_lib/push';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -30,13 +31,17 @@ export function memoryStore() {
   const turns: Turn[] = [];
   const speeches: SpeechTake[] = [];
   const digests: { userId: string; sentOn: string; sentAt: string | null; note: string }[] = [];
+  const pushSubs: PushSubscription[] = [];
+  const pushSettings = new Map<string, PushSetting>();
+  const pushes: { userId: string; sentOn: string; sentAt: string | null; note: string }[] = [];
+  const settings = new Map<string, string>();
   const patchInto = (target: any, patch: object) => Object.assign(target, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
     interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, targetLevel: null, weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -197,6 +202,39 @@ export function memoryStore() {
       profiles.set(userId, { ...p, digestSentOn: sentOn, updatedAt: now });
       digests.push({ userId, sentOn, sentAt, note });
     },
+
+    async listPushSubscriptions(userId) { return pushSubs.filter(s => s.userId === userId).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map(s => ({ ...s })); },
+    async upsertPushSubscription(s) {
+      const e = pushSubs.find(x => x.endpoint === s.endpoint);
+      if (e) Object.assign(e, { userId: s.userId, p256dh: s.p256dh, auth: s.auth, userAgent: s.userAgent ?? e.userAgent, lastError: null });
+      else pushSubs.push({ ...s });
+    },
+    async deletePushSubscription(endpoint, userId) {
+      const i = pushSubs.findIndex(x => x.endpoint === endpoint && (!userId || x.userId === userId));
+      if (i < 0) return false;
+      pushSubs.splice(i, 1); return true;
+    },
+    async markPushSubscription(id, patch) { const s = pushSubs.find(x => x.id === id); if (s) patchInto(s, patch); },
+    async getPushSetting(userId) { const s = pushSettings.get(userId); return s ? { ...s } : null; },
+    async listPushUsers() {
+      const out: { user: User; setting: PushSetting }[] = [];
+      for (const u of [...users].sort((a, b) => a.id.localeCompare(b.id))) {
+        const s = pushSettings.get(u.id);
+        if (s?.pushAt) out.push({ user: { ...u }, setting: { ...s } });
+      }
+      return out;
+    },
+    async savePushAt(userId, pushAt, sentOn, now) {
+      const s = pushSettings.get(userId) ?? { userId, pushAt: null, sentOn: null, sentAt: null, note: null, updatedAt: now };
+      pushSettings.set(userId, { ...s, pushAt, sentOn: sentOn ?? s.sentOn, updatedAt: now });
+    },
+    async markPush(userId, sentOn, sentAt, note, now) {
+      const s = pushSettings.get(userId) ?? { userId, pushAt: null, sentOn: null, sentAt: null, note: null, updatedAt: now };
+      pushSettings.set(userId, { ...s, sentOn, sentAt: sentAt ?? s.sentAt, note, updatedAt: now });
+      pushes.push({ userId, sentOn, sentAt, note });
+    },
+    async getSetting(key) { return settings.get(key) ?? null; },
+    async initSetting(key, value) { if (!settings.has(key)) settings.set(key, value); return settings.get(key)!; },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches, digests };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches, digests, pushSubs, pushSettings, pushes, settings };
 }

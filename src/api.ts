@@ -161,7 +161,15 @@ export type Digest = {
   next: { date: string; time: string } | null; mail: 'ok' | 'missing';
   preview?: { subject: string; text: string; headline: string; dueCards: number };
 };
-export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing' };
+export type PushDevice = { id: string; device: string; createdAt: string; lastSentAt: string | null; lastError: string | null };
+export type Push = {
+  ok: true; defaultAt: string; windowMinutes: number; stepMinutes: number; publicKey: string; keySource: 'env' | 'db';
+  pushAt: string | null; enabled: boolean; tz: string; localTime: string; today: string; state: DigestState; sentOn: string | null; note: string | null;
+  next: { date: string; time: string } | null; subscriptions: PushDevice[];
+};
+export type PushDelivery = { id: string; ok: boolean; status: number; gone: boolean; detail: string | null };
+export type PushSendResult = { ok: true; delivered: number; devices: PushDelivery[]; reminder: { title: string; body: string; url: string; tag: string } };
+export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing'; push?: 'env' | 'db' | 'pending' | 'error' };
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, public body: any = {}) { super(code); }
@@ -195,6 +203,8 @@ const post = <T,>(path: string, body: unknown) =>
   call<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const put = <T,>(path: string, body: unknown) =>
   call<T>(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const del = <T,>(path: string, body: unknown) =>
+  call<T>(path, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 export const api = {
   health: () => call<Health>('/health'),
@@ -254,6 +264,12 @@ export const api = {
   digest: () => call<Digest>('/digest'),
   saveDigest: (notifyAt: string | null) => put<Digest>('/digest', { notifyAt }),
   sendDigest: () => post<{ ok: true; subject: string; sentOn: string; id: string | null }>('/digest/send', {}),
+  push: () => call<Push>('/push'),
+  savePush: (pushAt: string | null) => put<Push>('/push', { pushAt }),
+  subscribePush: (sub: { endpoint: string; keys: { p256dh: string; auth: string } }, userAgent: string | null, pushAt?: string) =>
+    post<Push>('/push/subscribe', { endpoint: sub.endpoint, keys: sub.keys, userAgent, ...(pushAt ? { pushAt } : {}) }),
+  unsubscribePush: (endpoint: string) => del<Push & { removed: boolean }>('/push/subscribe', { endpoint }),
+  sendPush: () => post<PushSendResult>('/push/send', {}),
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -297,7 +313,11 @@ export const ERRORS: Record<string, string> = {
   rehearsal_finished: 'Репетиция уже завершена.',
   rehearsal_eval_failed: 'Экзаменатор не разобрал разговор. Ответы сохранены — нажмите «Разобрать снова» через минуту.',
   goal_invalid: 'Недельная цель — целое число минут от 15 до 1260.',
-  notify_invalid: 'Время письма — часы и минуты, например 07:30.',
+  notify_invalid: 'Время — часы и минуты, например 07:30.',
+  push_invalid: 'Браузер отдал подписку в неожиданном виде. Обновите страницу и включите напоминания снова.',
+  push_no_subscriptions: 'Ни одно устройство не подписано. Нажмите «Включить на этом устройстве».',
+  push_failed: 'Push-служба не приняла напоминание ни на одном устройстве. Проверьте, что уведомления сайта разрешены, и повторите.',
+  vapid_invalid: 'Ключи VAPID на сервере заданы неверно — напоминания не уйдут, пока их не поправят в секретах проекта.',
   audio_missing: 'Запись не ушла на сервер. Попробуйте ещё раз.',
   audio_unsupported: 'Сервер не принял формат записи. Попробуйте другой браузер.',
   audio_too_large: 'Запись длиннее предела. Говорите короче — до двух минут.',

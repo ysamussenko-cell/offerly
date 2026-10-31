@@ -355,7 +355,7 @@ describe('D1 и Worker', () => {
     vi.stubGlobal('fetch', okFetch());
     const run = await worker.fetch(new Request('https://digest.test/run', { method: 'POST', headers: { 'x-digest-key': 'secret' } }), { ...wenv, DIGEST_KEY: 'secret' } as any);
     expect(run.status).toBe(200);
-    expect(((await run.json()) as any).report).toMatchObject({ checked: 1 });
+    expect(((await run.json()) as any).report.digest).toMatchObject({ checked: 1 }); // с 4.5 /run отдаёт оба отчёта: письмо и напоминание
     expect((await worker.fetch(new Request('https://digest.test/nope'), wenv as any)).status).toBe(404);
   });
   it('wrangler.toml Worker: тот же cron, та же база, адрес приложения', () => {

@@ -213,7 +213,17 @@ jobs:
           DGP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"notifyAt":"07:00"}' "$P/api/digest")
           DGS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/digest/send")
           W="${{ steps.digest.outputs.url }}"
-          if [ -n "$W" ]; then WS=$(curl -s --max-time 20 "$W/" | tr -d '\n' | head -c 400); else WS="worker без адреса workers.dev или не задеплоен — см. digest deploy"; fi
+          if [ -n "$W" ]; then WS=$(curl -s --max-time 20 "$W/" | tr -d '\n' | head -c 600); else WS="worker без адреса workers.dev или не задеплоен — см. digest deploy"; fi
           echo "::notice title=digest::GET /api/digest без cookie → $DGG; PUT /api/digest → $DGP; POST /api/digest/send → $DGS (ждём 401 везде); worker: $WS"
           [ "$DGG" = "401" ] && [ "$DGP" = "401" ] && [ "$DGS" = "401" ] || { echo "::error title=digest::неожиданные коды ответа"; exit 1; }
           case "$WS" in *'"ok":true'*) ;; *) echo "::warning title=digest::состояние Worker не подтверждено: $WS";; esac
+          # Web Push (4.5): маршруты без cookie → 401; скрипт обработчиков подключён в sw.js; откуда ключи VAPID (health.push: env | db | pending)
+          PSG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/push")
+          PSP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"pushAt":"07:00"}' "$P/api/push")
+          PSS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"endpoint":"https://x","keys":{}}' "$P/api/push/subscribe")
+          PSD=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H 'content-type: application/json' -d '{"endpoint":"https://x"}' "$P/api/push/subscribe")
+          PSN=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/push/send")
+          PSW=$(curl -s -o /dev/null -w '%{http_code}' "$P/push-sw.js"); PSI=$(curl -fsS "$P/sw.js" | grep -c 'push-sw.js' || true)
+          PSH=$(node -e 'const h=require("./deep.json"); console.log(String(h.push))')
+          echo "::notice title=push::GET /api/push без cookie → $PSG; PUT /api/push → $PSP; POST /api/push/subscribe → $PSS; DELETE → $PSD; POST /api/push/send → $PSN (ждём 401 везде); GET /push-sw.js → $PSW, подключён в sw.js: $PSI; ключи VAPID: $PSH"
+          [ "$PSG" = "401" ] && [ "$PSP" = "401" ] && [ "$PSS" = "401" ] && [ "$PSD" = "401" ] && [ "$PSN" = "401" ] && [ "$PSW" = "200" ] && [ "$PSI" != "0" ] || { echo "::error title=push::неожиданные коды ответа или скрипт push не подключён"; exit 1; }
