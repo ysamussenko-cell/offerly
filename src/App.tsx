@@ -7,7 +7,8 @@ import { OFFLINE_NOTICE, useOnline } from './offline';
 import Resume, { ProfileCard } from './screens/Resume';
 import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 import { BankCard } from './screens/Bank';
-import Assessment, { TestCard, type Mode } from './screens/Assessment';
+import Assessment, { TestCard, type Mode, type TestKind } from './screens/Assessment';
+import { CheckpointCard } from './screens/Checkpoint';
 import { JournalCard } from './screens/Journal';
 import { ProgramCard } from './screens/Program';
 import Lesson, { LessonCard } from './screens/Lesson';
@@ -25,8 +26,8 @@ export default function App() {
   const [replacing, setReplacing] = useState(false);
   /** Анкета: 'auto' — открыть сразу после разбора резюме, 'open' — по кнопке, 'closed' — отложена или сохранена. */
   const [survey, setSurvey] = useState<'auto' | 'open' | 'closed'>('auto');
-  /** Экран теста уровня открыт; счётчик — чтобы карточка перечитала состояние после закрытия. */
-  const [testing, setTesting] = useState<Mode | null>(null);
+  /** Экран теста уровня или контрольного среза открыт; счётчик — чтобы карточки перечитали состояние после закрытия. */
+  const [testing, setTesting] = useState<{ kind: TestKind; mode: Mode } | null>(null);
   const [testRuns, setTestRuns] = useState(0);
   /** Экран дневного занятия открыт. */
   const [lesson, setLesson] = useState(false);
@@ -100,7 +101,7 @@ export default function App() {
       )}
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && !rehearsal && testing && (
-        <Assessment mode={testing} onClose={() => { setTesting(null); setTestRuns(n => n + 1); }} />
+        <Assessment kind={testing.kind} mode={testing.mode} onClose={() => { setTesting(null); setTestRuns(n => n + 1); }} />
       )}
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && lesson && (
@@ -113,11 +114,12 @@ export default function App() {
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && !lesson && !rehearsal && (
         <div className="stack" style={{ marginTop: 0 }}>
-          {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenLesson={() => setLesson(true)} />}
+          {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenDay={f => f === 'rehearsal' ? setRehearsal(true) : f === 'checkpoint' ? setTesting({ kind: 'checkpoint', mode: 'test' }) : setLesson(true)} />}
           {ready.analyzed && <LessonCard refreshKey={testRuns} onOpen={() => setLesson(true)} />}
           {ready.analyzed && <RehearsalCard refreshKey={testRuns} onOpen={() => setRehearsal(true)} />}
+          {ready.analyzed && <CheckpointCard refreshKey={testRuns} onOpen={mode => setTesting({ kind: 'checkpoint', mode })} />}
           {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}
-          {ready.analyzed && <TestCard onOpen={setTesting} refreshKey={testRuns} />}
+          {ready.analyzed && <TestCard onOpen={mode => setTesting({ kind: 'placement', mode })} refreshKey={testRuns} />}
           {ready.analyzed && <JournalCard refreshKey={testRuns} />}
           {ready.analyzed && <AchievementsCard refreshKey={testRuns} />}
           {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}

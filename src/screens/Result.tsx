@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { AssessmentResult, ErrorExample, Level } from '../api';
 import { plural } from '../text';
 
@@ -87,10 +87,14 @@ export function Examples({ examples }: { examples: ErrorExample[] }) {
   );
 }
 
-type Props = { result: AssessmentResult; levelLabel: string | null; finishedAt: string | null; onRescore?: () => void; rescoring?: boolean; /** Исходный срез вне приложения: вместо письма и примеров — как он получен. */ baseline?: boolean };
+type Props = {
+  result: AssessmentResult; levelLabel: string | null; finishedAt: string | null; onRescore?: () => void; rescoring?: boolean;
+  /** Исходный срез вне приложения: вместо письма и примеров — как он получен. */ baseline?: boolean;
+  /** Контрольный срез: подпись уровня и блок сравнения с прошлым тестом сразу после уровня. */ checkpoint?: boolean; comparison?: ReactNode;
+};
 
-/** Экран результата: уровень, лестница, радар, письмо и три примера ошибок. */
-export default function ResultView({ result, levelLabel, onRescore, rescoring, baseline }: Props) {
+/** Экран результата: уровень, лестница, радар, письмо и три примера ошибок; у среза — сравнение с прошлым тестом. */
+export default function ResultView({ result, levelLabel, onRescore, rescoring, baseline, checkpoint, comparison }: Props) {
   const [showRewrite, setShowRewrite] = useState(false);
   const w = result.writing;
   return (
@@ -98,10 +102,17 @@ export default function ResultView({ result, levelLabel, onRescore, rescoring, b
       <div className="level-row">
         <span className="level-badge">{result.level}</span>
         <div>
-          <p style={{ margin: 0, fontWeight: 600, fontSize: 18 }}>{levelLabel ? levelLabel[0].toUpperCase() + levelLabel.slice(1) : ''}{baseline ? ' — ваш уровень на старте' : ' — ваш уровень по тесту'}</p>
-          <p className="muted" style={{ margin: 0, fontSize: 14 }}>Сводный балл {result.overall} из 100 по {result.axes.filter(a => a.score != null).length} осям. Беглость речи появится с голосовой репликой.</p>
+          <p style={{ margin: 0, fontWeight: 600, fontSize: 18 }}>{levelLabel ? levelLabel[0].toUpperCase() + levelLabel.slice(1) : ''}{baseline ? ' — ваш уровень на старте' : checkpoint ? ' — ваш уровень по срезу' : ' — ваш уровень по тесту'}</p>
+          <p className="muted" style={{ margin: 0, fontSize: 14 }}>Сводный балл {result.overall} из 100 по {result.axes.filter(a => a.score != null).length} осям. Беглость речи в тесте не измеряется — она считается по голосовым ответам репетиции.</p>
         </div>
       </div>
+
+      {checkpoint && (
+        <>
+          <h3 className="result-h">Сравнение с прошлым тестом</h3>
+          {comparison}
+        </>
+      )}
 
       <h3 className="result-h">Лестница уровней</h3>
       <Ladder result={result} />

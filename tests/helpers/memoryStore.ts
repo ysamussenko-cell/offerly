@@ -96,9 +96,10 @@ export function memoryStore() {
 
     async createAssessment(a) { assessments.push({ ...a }); },
     async updateAssessment(id, patch) { const a = assessments.find(x => x.id === id); if (a) Object.assign(a, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => [k, k === 'axes' && v ? { ...(v as object) } : v]))); },
-    async activeAssessment(userId) { const a = assessments.filter(x => x.userId === userId && x.status === 'active').sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
-    async latestAssessment(userId) { const a = assessments.filter(x => x.userId === userId).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
+    async activeAssessment(userId, kind) { const a = assessments.filter(x => x.userId === userId && x.status === 'active' && (!kind || x.kind === kind)).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
+    async latestAssessment(userId, kind) { const a = assessments.filter(x => x.userId === userId && (!kind || x.kind === kind)).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
     async latestFinishedAssessment(userId) { const a = assessments.filter(x => x.userId === userId && x.status === 'finished').sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
+    async previousFinishedAssessment(userId, before) { const a = assessments.filter(x => x.userId === userId && x.status === 'finished' && x.startedAt < before).sort((p, q) => q.startedAt.localeCompare(p.startedAt))[0]; return a ? { ...a } : null; },
     async insertAttempt(t) { attempts.push({ ...t }); },
     async updateAttempt(id, patch) { const t = attempts.find(x => x.id === id); if (t) Object.assign(t, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))); },
     async listAttempts(assessmentId) { return attempts.filter(x => x.assessmentId === assessmentId).sort((p, q) => p.position - q.position).map(x => ({ ...x })); },

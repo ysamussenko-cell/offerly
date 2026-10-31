@@ -29,7 +29,7 @@ const profile = (over: Partial<Profile> = {}): Profile => ({
 });
 const assessment = (): Assessment => ({
   id: 'a1', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B2', currentLevel: 'B2',
-  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null,
+  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null, adaptiveCount: 12, programDayId: null,
 });
 const day = (over: Partial<ProgramDay> = {}): ProgramDay => ({
   id: `d${++seq}`, userId: USER, dayDate: TODAY, position: 7, week: 1, format: 'rehearsal', topic: 'task-response', writing: null, reason: 'сценарий по целевой позиции: OpenTrain AI', status: 'planned', minutes: 25, score: null, completedAt: null, generatedAt: NOW, updatedAt: null, ...over,

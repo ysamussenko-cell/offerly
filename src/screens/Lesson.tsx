@@ -44,7 +44,7 @@ export function LessonCard({ onOpen, refreshKey }: CardProps) {
           <p style={{ marginTop: 12 }}>
             <b>{cap(d.formatLabel)}</b>{d.minutes ? <span className="muted"> · {minutesText(d.minutes)}</span> : null}
           </p>
-          <p className="muted" style={{ marginBottom: 0 }}>{d.reason ? `${cap(d.reason)}. ` : ''}{t.reason === 'rehearsal' ? 'Репетиция идёт в карточке «Репетиция интервью» ниже: пять вопросов по целевой позиции и разбор по пяти осям.' : 'Контрольный срез появится в следующей версии (задача 4.3).'}</p>
+          <p className="muted" style={{ marginBottom: 0 }}>{d.reason ? `${cap(d.reason)}. ` : ''}{t.reason === 'rehearsal' ? 'Репетиция идёт в карточке «Репетиция интервью» ниже: пять вопросов по целевой позиции и разбор по пяти осям.' : 'Срез идёт в карточке «Контрольный срез» ниже: укороченный тест и сравнение с прошлым результатом.'}</p>
         </>
       )}
       {t && d && t.available && (

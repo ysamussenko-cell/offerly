@@ -10,7 +10,8 @@ import { analyzeResume, d1ProfileStore, publicProfile, SELF_TEST_RESUME, type Pr
 import { d1OnboardingStore, validateAnswers, type OnboardingStore } from './onboarding';
 import { d1ItemStore, generateItems, parseGenerateBody, publicItem, KINDS, KIND_LABELS, LEVELS, TOPICS, DEFAULT_COUNT, MAX_COUNT, type ItemStore, type Kind, type Level, type Status, STATUSES } from './items';
 import { d1CardStore, publicCard, CARD_TOPICS, type CardStore } from './cards';
-import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, type AssessmentStore } from './assessment';
+import { d1AssessmentStore, startOrResume, answer as answerAssessment, abandon, current as currentAssessment, rescore, AssessmentError, TOTAL, ADAPTIVE_COUNT, CHECKPOINT_TOTAL, CHECKPOINT_ADAPTIVE, SIGNIFICANT_DELTA, type AssessmentStore } from './assessment';
+import { today as checkpointToday, startOrResume as startCheckpoint, answer as answerCheckpoint, rescore as rescoreCheckpoint, abandon as abandonCheckpoint } from './checkpoint';
 import { d1ProgramStore, generateProgram, swapDays, current as currentProgram, ProgramError, PROGRAM_TOPICS, PROGRAM_DAYS, type ProgramStore } from './program';
 import { d1LessonStore, today as lessonToday, startOrResume as startLesson, answer as answerLesson, bonus as bonusLesson, LessonError, WARMUP_COUNT, REVIEW_MAX, BONUS_MULTIPLIER, BONUS_CHANCE, type LessonStore } from './lesson';
 import { d1DashboardStore, dashboard, parseGoal, GAIN_PER_LESSON, MISS_PENALTY, MISS_CAP, FREEZES_PER_WEEK, GOAL_MIN, GOAL_MAX, GOAL_DAYS_DEFAULT, type DashboardStore } from './dashboard';
@@ -249,7 +250,7 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const p = await c.get('store').getProfile(c.get('auth')!.user.id);
     return { specialty: p?.specialty ?? null, industry: p?.industry ?? null, targetRole: p?.targetRole ?? null, keywords: p?.keywords ?? [] };
   };
-  const ASSESSMENT_STATUS: Record<AssessmentError['code'], number> = { assessment_none: 404, assessment_stale: 409, assessment_finished: 409, answer_invalid: 400, bank_empty: 502 };
+  const ASSESSMENT_STATUS: Record<AssessmentError['code'], number> = { assessment_none: 404, assessment_stale: 409, assessment_finished: 409, assessment_busy: 409, answer_invalid: 400, bank_empty: 502 };
   const assessmentFail = (c: any, e: unknown) => {
     if (e instanceof AssessmentError) return c.json({ ok: false, error: e.code, reason: e.reason, detail: e.message !== e.code ? e.message : undefined }, ASSESSMENT_STATUS[e.code]);
     throw e;
@@ -282,6 +283,44 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
 
   /** Бросить начатый тест: следующий start начнёт новый, виденные задания не повторятся. */
   app.post('/assessment/abandon', requireAuth, async (c) => c.json({ ok: true, abandoned: await abandon(c.get('store'), c.get('auth')!.user.id) }));
+
+  // --- контрольный срез ---
+
+  const checkpointMeta = { total: CHECKPOINT_TOTAL, adaptive: CHECKPOINT_ADAPTIVE, significant: SIGNIFICANT_DELTA };
+  const profileOf = async (c: any) => c.get('store').getProfile(c.get('auth')!.user.id);
+
+  /** Сегодня: срез ли по программе, следующий запланированный, активный или последний пройденный срез (со сравнением). */
+  app.get('/checkpoint', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    return c.json({ ok: true, ...checkpointMeta, ...(await checkpointToday(c.get('store'), user.id, user.tz)) });
+  });
+
+  /** Начать срез (восемь заданий со старта с текущего уровня, чтение, письмо) или продолжить начатый. Идёт тест уровня — assessment_busy 409. */
+  app.post('/checkpoint/start', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    try { return c.json({ ok: true, ...checkpointMeta, checkpoint: await startCheckpoint(c.env, c.get('store'), user.id, user.tz, await profileOf(c)) }); }
+    catch (e) { return assessmentFail(c, e); }
+  });
+
+  /** Ответ на текущее задание среза: {attemptId, answer}. После последнего — оценка, сравнение с прошлым тестом,
+   *  день программы отмечается пройденным, оставшиеся дни программы пересобираются по новому профилю ошибок. */
+  app.post('/checkpoint/answer', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json({ ok: true, ...checkpointMeta, checkpoint: await answerCheckpoint(c.env, c.get('store'), user.id, body.attemptId, body.answer, user.tz, await profileOf(c)) }); }
+    catch (e) { return assessmentFail(c, e); }
+  });
+
+  /** Пересчитать последний завершённый срез (письмо не оценено или {force: true}). */
+  app.post('/checkpoint/score', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    try { return c.json({ ok: true, ...checkpointMeta, checkpoint: await rescoreCheckpoint(c.env, c.get('store'), user.id, user.tz, await profileOf(c), body?.force === true) }); }
+    catch (e) { return assessmentFail(c, e); }
+  });
+
+  /** Бросить начатый срез: следующий start начнёт новый. */
+  app.post('/checkpoint/abandon', requireAuth, async (c) => c.json({ ok: true, abandoned: await abandonCheckpoint(c.get('store'), c.get('auth')!.user.id) }));
 
   // --- журнал ошибок ---
 
@@ -377,7 +416,6 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     throw e;
   };
   const rehearsalMeta = { questions: QUESTION_COUNT, words: ANSWER_WORDS, replacements: REPLACEMENTS };
-  const profileOf = async (c: any) => c.get('store').getProfile(c.get('auth')!.user.id);
 
   /** Сегодня: репетиция ли по программе, сегодняшняя репетиция (идёт — с текущим вопросом, прошла — с разбором) и последняя прежняя. */
   app.get('/rehearsal', requireAuth, async (c) => {

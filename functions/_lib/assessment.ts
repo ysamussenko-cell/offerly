@@ -6,7 +6,10 @@
  *  Проверка ответов — сравнением с эталоном из банка: буква варианта, буквы двух вопросов, исправленное предложение.
  *  После последнего ответа письмо оценивает модель по рубрике и образцу, считаются пять осей и уровень (scoring.ts);
  *  неверные исправления и выборы варианта и ошибки письма становятся карточками журнала (cards.ts), если хранилище
- *  карточек подключено — повторный пересчёт карточки не дублирует (ключ источника — попытка). */
+ *  карточек подключено — повторный пересчёт карточки не дублирует (ключ источника — попытка).
+ *  Контрольный срез (4.3) — тот же тест короче: восемь адаптивных заданий вместо двенадцати, старт с уровня последнего
+ *  завершённого теста, вид kind=checkpoint; после оценки результат сравнивается с предыдущим завершённым тестом или
+ *  срезом по сводному баллу, уровню и осям (comparison). Привязку к дню программы делает checkpoint.ts. */
 import type { Env as ProviderEnv } from './providers';
 import {
   LEVELS, TOPICS, KIND_LABELS, WRITING_WORDS, generateItems, type Domain, type Item, type ItemStore, type Kind, type Level, type ReadingQuestion, type GenerateOpts,
@@ -19,7 +22,12 @@ import { createCards, draftFromItem, draftsFromWriting, type CardStore } from '.
 
 export const ADAPTIVE_COUNT = 12;
 export const TOTAL = ADAPTIVE_COUNT + 2; // + чтение + письмо
+/** Контрольный срез короче: восемь адаптивных заданий (исправление на 3 и 6), затем чтение и письмо — десять шагов. */
+export const CHECKPOINT_ADAPTIVE = 8;
+export const CHECKPOINT_TOTAL = CHECKPOINT_ADAPTIVE + 2;
 export const START_LEVEL: Level = 'B1';
+/** Разница в баллах, которую короткий тест различает; меньше — «в пределах погрешности». */
+export const SIGNIFICANT_DELTA = 5;
 /** Сколько последних тем не повторять подряд. */
 export const TOPIC_MEMORY = 3;
 /** Границы письма при приёме ответа: короче — отказ, длиннее — отказ; цель 60–80 остаётся в задании. */
@@ -54,7 +62,15 @@ export interface Assessment {
   scoredAt: string | null;
   /** Почему письмо не оценено (ошибка модели); null — оценка полная. */
   scoringNote: string | null;
+  /** Сколько первых позиций адаптивные: 12 у теста уровня, 8 у среза. */
+  adaptiveCount: number;
+  /** День программы (format=checkpoint), по которому пройден срез; null — тест уровня или срез вне плана. */
+  programDayId: string | null;
 }
+
+/** Длина адаптивной части и всего теста по виду. */
+export const planFor = (kind: AssessmentKind) => kind === 'checkpoint' ? { adaptive: CHECKPOINT_ADAPTIVE, total: CHECKPOINT_TOTAL } : { adaptive: ADAPTIVE_COUNT, total: TOTAL };
+export const totalOf = (a: Pick<Assessment, 'adaptiveCount'>) => a.adaptiveCount + 2;
 
 export interface Attempt {
   id: string;
@@ -82,10 +98,13 @@ export type AttemptPatch = Partial<Pick<Attempt, 'answer' | 'correct' | 'score' 
 export interface AssessmentStore {
   createAssessment(a: Assessment): Promise<void>;
   updateAssessment(id: string, patch: AssessmentPatch): Promise<void>;
-  activeAssessment(userId: string): Promise<Assessment | null>;
-  latestAssessment(userId: string): Promise<Assessment | null>;
+  /** Активный тест; с kind — только этого вида (тест уровня и срез не мешают друг другу). */
+  activeAssessment(userId: string, kind?: AssessmentKind): Promise<Assessment | null>;
+  latestAssessment(userId: string, kind?: AssessmentKind): Promise<Assessment | null>;
   /** Последний завершённый тест или срез — точка отсчёта для программы (3.1) и контрольного среза (4.3). */
   latestFinishedAssessment(userId: string): Promise<Assessment | null>;
+  /** Завершённый тест или срез, начатый раньше указанного момента, — с ним сравнивается результат. */
+  previousFinishedAssessment(userId: string, beforeStartedAt: string): Promise<Assessment | null>;
   insertAttempt(a: Attempt): Promise<void>;
   updateAttempt(id: string, patch: AttemptPatch): Promise<void>;
   /** Попытки теста по порядку позиций. */
@@ -104,9 +123,9 @@ export const attemptOrigin = (attemptId: string) => `attempt:${attemptId}`;
 // ---------- план и ход теста ----------
 
 /** Вид задания по позиции: исправление ошибки на каждой третьей, иначе выбор варианта; затем чтение и письмо. */
-export function kindAt(position: number): Kind {
-  if (position <= ADAPTIVE_COUNT) return position % 3 === 0 ? 'correction' : 'mcq';
-  return position === ADAPTIVE_COUNT + 1 ? 'reading' : 'writing';
+export function kindAt(position: number, adaptive = ADAPTIVE_COUNT): Kind {
+  if (position <= adaptive) return position % 3 === 0 ? 'correction' : 'mcq';
+  return position === adaptive + 1 ? 'reading' : 'writing';
 }
 
 const idx = (l: Level) => LEVELS.indexOf(l);
@@ -127,10 +146,10 @@ export function levelFallbacks(level: Level): Level[] {
 
 /** Предварительный уровень по адаптивной части: самый высокий уровень, где ученик ответил не меньше чем
  *  на MIN_AT_LEVEL заданий и верно не меньше половины из них. Ниже A2 не бывает. Пять осей считает 2.6. */
-export function estimateLevel(attempts: Pick<Attempt, 'position' | 'level' | 'correct'>[]): Level {
+export function estimateLevel(attempts: Pick<Attempt, 'position' | 'level' | 'correct'>[], adaptive = ADAPTIVE_COUNT): Level {
   const perLevel = new Map<Level, { n: number; ok: number }>();
   for (const a of attempts) {
-    if (a.position > ADAPTIVE_COUNT || a.correct == null) continue;
+    if (a.position > adaptive || a.correct == null) continue;
     const s = perLevel.get(a.level) ?? { n: 0, ok: 0 };
     s.n++; s.ok += a.correct ? 1 : 0;
     perLevel.set(a.level, s);
@@ -218,7 +237,29 @@ export interface View {
   summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
   /** После завершения: пять осей, лестница и примеры ошибок; null — оценка ещё не считалась (тест 0.6.0). */
   result: Result | null;
+  /** Сравнение с предыдущим завершённым тестом или срезом; null — сравнивать не с чем или оценки ещё нет. */
+  comparison: Comparison | null;
+  /** Срез по дню программы: id дня; null — тест уровня или срез вне плана. */
+  programDayId: string | null;
 }
+
+export type LevelChange = 'up' | 'same' | 'down';
+
+/** Сравнение двух оценок: сводный балл, уровень и оси; вывод — честной строкой. */
+export interface Comparison {
+  previous: { id: string; kind: AssessmentKind; kindLabel: string; finishedAt: string | null; level: Level; overall: number };
+  overall: { before: number; after: number; delta: number };
+  level: { before: Level; after: Level; change: LevelChange };
+  axes: { id: Axis; label: string; before: number | null; after: number | null; delta: number | null }[];
+  /** Оси, выросшие или просевшие не меньше чем на SIGNIFICANT_DELTA. */
+  improved: Axis[];
+  declined: Axis[];
+  verdict: string;
+}
+
+export const KIND_LABELS_RU: Record<AssessmentKind, string> = { placement: 'тест уровня', checkpoint: 'контрольный срез', baseline: 'исходный срез' };
+/** Те же подписи в дательном падеже: «к тесту уровня». */
+export const KIND_LABELS_DAT: Record<AssessmentKind, string> = { placement: 'тесту уровня', checkpoint: 'контрольному срезу', baseline: 'исходному срезу' };
 
 export interface Result {
   axes: { id: Axis; label: string; score: number | null }[];
@@ -243,9 +284,42 @@ async function itemsOf(store: Store, attempts: Attempt[]): Promise<Map<string, I
 
 export const ladderSteps = () => LEVELS.map((level, i) => ({ level, label: LEVEL_LABELS[level], from: i === 0 ? 0 : i * BAND + LEVEL_THRESHOLD }));
 
+const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+const idxOf = (l: Level) => LEVELS.indexOf(l);
+
+/** Сравнение завершённой оценки с предыдущей: уровень вырос / не изменился / снизился, сводный балл и оси.
+ *  Разница меньше SIGNIFICANT_DELTA называется погрешностью — короткий тест точнее не различает. */
+export function compare(a: Pick<Assessment, 'axes' | 'overall' | 'level'>, prev: Pick<Assessment, 'id' | 'kind' | 'finishedAt' | 'axes' | 'overall' | 'level'>): Comparison | null {
+  if (!a.axes || a.overall == null || !a.level || !prev.axes || prev.overall == null || !prev.level) return null;
+  const delta = a.overall - prev.overall;
+  const change: LevelChange = idxOf(a.level) > idxOf(prev.level) ? 'up' : idxOf(a.level) < idxOf(prev.level) ? 'down' : 'same';
+  const axes = AXES.map(id => {
+    const before = prev.axes![id], after = a.axes![id];
+    return { id, label: AXIS_LABELS[id], before, after, delta: before != null && after != null ? after - before : null };
+  });
+  const improved = axes.filter(x => x.delta != null && x.delta >= SIGNIFICANT_DELTA).map(x => x.id);
+  const declined = axes.filter(x => x.delta != null && x.delta <= -SIGNIFICANT_DELTA).map(x => x.id);
+  const since = prev.finishedAt ? ` от ${prev.finishedAt.slice(0, 10)}` : '';
+  const vs = `${KIND_LABELS_DAT[prev.kind]}${since}`;
+  let verdict: string;
+  if (change === 'up') verdict = `Уровень вырос: ${prev.level} → ${a.level}, сводный балл ${signed(delta)} к ${vs} (${prev.overall} → ${a.overall}).`;
+  else if (change === 'down') verdict = `Уровень снизился: ${prev.level} → ${a.level}, сводный балл ${signed(delta)} к ${vs} (${prev.overall} → ${a.overall}). Один короткий срез — не приговор, но тему просевших осей стоит повторить.`;
+  else if (Math.abs(delta) < SIGNIFICANT_DELTA) verdict = `Уровень не изменился — ${a.level}; сводный балл ${signed(delta)} к ${vs} — в пределах погрешности короткого теста.`;
+  else if (delta > 0) {
+    const n = nextStep(a.overall);
+    verdict = `Уровень тот же — ${a.level}, но сводный балл вырос на ${delta} к ${vs} (${prev.overall} → ${a.overall})${n ? `; до ${n.level} осталось ${n.points}` : ''}.`;
+  } else verdict = `Уровень тот же — ${a.level}, но сводный балл снизился на ${-delta} к ${vs} (${prev.overall} → ${a.overall}).`;
+  return {
+    previous: { id: prev.id, kind: prev.kind, kindLabel: KIND_LABELS_RU[prev.kind], finishedAt: prev.finishedAt, level: prev.level, overall: prev.overall },
+    overall: { before: prev.overall, after: a.overall, delta },
+    level: { before: prev.level, after: a.level, change },
+    axes, improved, declined, verdict,
+  };
+}
+
 export function buildResult(a: Assessment, attempts: Attempt[], items: Map<string, Item>): Result | null {
   if (!a.axes || a.overall == null || !a.level) return null;
-  const writingAttempt = attempts.find(x => x.position === ADAPTIVE_COUNT + 2);
+  const writingAttempt = attempts.find(x => x.position === a.adaptiveCount + 2);
   const writing = parseWritingEval(writingAttempt?.detail);
   return {
     axes: AXES.map(id => ({ id, label: AXIS_LABELS[id], score: a.axes![id] })),
@@ -268,29 +342,43 @@ export async function view(store: Store, a: Assessment, attempts?: Attempt[]): P
   }
   let summary: View['summary'] = null;
   let result: Result | null = null;
+  let comparison: Comparison | null = null;
   if (a.status === 'finished' && a.kind === 'baseline') {
     // Исходный срез: попыток в приложении нет, оси записаны seed — лестница и радар по ним, примеров ошибок нет (они в журнале).
     result = buildResult(a, [], new Map());
   } else if (a.status === 'finished') {
-    const adaptive = list.filter(x => x.position <= ADAPTIVE_COUNT && x.correct != null);
-    const reading = list.find(x => x.position === ADAPTIVE_COUNT + 1);
-    const writing = list.find(x => x.position === ADAPTIVE_COUNT + 2);
+    const n = a.adaptiveCount;
+    const adaptive = list.filter(x => x.position <= n && x.correct != null);
+    const reading = list.find(x => x.position === n + 1);
+    const writing = list.find(x => x.position === n + 2);
     summary = { adaptiveTotal: adaptive.length, adaptiveCorrect: adaptive.filter(x => x.correct === 1).length, readingScore: reading?.score ?? null, writingWords: writing?.answer ? countWords(writing.answer) : null };
     result = buildResult(a, list, await itemsOf(store, list));
+    if (result) {
+      const prev = await store.previousFinishedAssessment(a.userId, a.startedAt);
+      if (prev) comparison = compare(a, prev);
+    }
   }
   return {
-    id: a.id, kind: a.kind, status: a.status, total: TOTAL, answered, current, startedAt: a.startedAt, finishedAt: a.finishedAt,
-    level: a.level, levelLabel: a.level ? LEVEL_LABELS[a.level] : null, summary, result,
+    id: a.id, kind: a.kind, status: a.status, total: totalOf(a), answered, current, startedAt: a.startedAt, finishedAt: a.finishedAt,
+    level: a.level, levelLabel: a.level ? LEVEL_LABELS[a.level] : null, summary, result, comparison, programDayId: a.programDayId,
   };
 }
 
 // ---------- оркестрация ----------
 
 export class AssessmentError extends Error {
-  constructor(public code: 'assessment_none' | 'assessment_stale' | 'assessment_finished' | 'answer_invalid' | 'bank_empty', message?: string, public reason?: string) { super(message ?? code); }
+  constructor(public code: 'assessment_none' | 'assessment_stale' | 'assessment_finished' | 'assessment_busy' | 'answer_invalid' | 'bank_empty', message?: string, public reason?: string) { super(message ?? code); }
 }
 
-export interface RunOpts extends GenerateOpts { rng?: () => number; now?: () => string; id?: () => string; /** Генерировать задание моделью, если в банке пусто (по умолчанию да). */ generate?: boolean }
+export interface RunOpts extends GenerateOpts {
+  rng?: () => number; now?: () => string; id?: () => string;
+  /** Генерировать задание моделью, если в банке пусто (по умолчанию да). */
+  generate?: boolean;
+  /** Вид теста: placement (по умолчанию) или checkpoint — короче и стартует с уровня последнего завершённого теста. */
+  kind?: Exclude<AssessmentKind, 'baseline'>;
+  /** День программы, к которому привязан срез (checkpoint.ts). */
+  programDayId?: string | null;
+}
 
 const pickRandom = <T,>(arr: T[], rng: () => number): T => arr[Math.min(arr.length - 1, Math.floor(rng() * arr.length))];
 
@@ -321,8 +409,8 @@ async function serveNext(env: ProviderEnv, store: Store, a: Assessment, attempts
   const id = opts.id ?? (() => crypto.randomUUID());
   const rng = opts.rng ?? Math.random;
   const position = attempts.length + 1;
-  const kind = kindAt(position);
-  const level = position <= ADAPTIVE_COUNT ? a.currentLevel : estimateLevel(attempts);
+  const kind = kindAt(position, a.adaptiveCount);
+  const level = position <= a.adaptiveCount ? a.currentLevel : estimateLevel(attempts, a.adaptiveCount);
   const used = await store.usedItemIds(a.userId);
   for (const x of attempts) used.add(x.itemId);
   const recent: string[] = [];
@@ -341,14 +429,28 @@ async function serveNext(env: ProviderEnv, store: Store, a: Assessment, attempts
   return attempt;
 }
 
-/** Начать тест или продолжить начатый: активный тест с заданием без ответа возвращается как есть. */
+/** Активный тест нужного вида; если идёт тест другого вида — assessment_busy: два теста сразу не ведутся. */
+async function activeOf(store: Store, userId: string, kind: AssessmentKind): Promise<Assessment | null> {
+  const a = await store.activeAssessment(userId);
+  if (a && a.kind !== kind) throw new AssessmentError('assessment_busy', `сейчас идёт ${KIND_LABELS_RU[a.kind]} — завершите или прервите его`, a.kind);
+  return a;
+}
+
+/** Начать тест или продолжить начатый: активный тест с заданием без ответа возвращается как есть.
+ *  Срез (opts.kind = checkpoint) стартует с уровня последнего завершённого теста или среза. */
 export async function startOrResume(env: ProviderEnv, store: Store, userId: string, domain: Domain, opts: RunOpts = {}): Promise<View> {
   const now = opts.now ?? (() => new Date().toISOString());
   const id = opts.id ?? (() => crypto.randomUUID());
-  let a = await store.activeAssessment(userId);
+  const kind = opts.kind ?? 'placement';
+  let a = await activeOf(store, userId, kind);
   if (!a) {
     const ts = now();
-    a = { id: id(), userId, kind: 'placement', status: 'active', startedAt: ts, finishedAt: null, level: null, currentLevel: START_LEVEL, updatedAt: ts, axes: null, overall: null, scoredAt: null, scoringNote: null };
+    const plan = planFor(kind);
+    const prev = kind === 'checkpoint' ? await store.latestFinishedAssessment(userId) : null;
+    a = {
+      id: id(), userId, kind, status: 'active', startedAt: ts, finishedAt: null, level: null, currentLevel: prev?.level ?? START_LEVEL, updatedAt: ts,
+      axes: null, overall: null, scoredAt: null, scoringNote: null, adaptiveCount: plan.adaptive, programDayId: kind === 'checkpoint' ? opts.programDayId ?? null : null,
+    };
     await store.createAssessment(a);
   }
   const attempts = await store.listAttempts(a.id);
@@ -362,7 +464,7 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
 /** Принять ответ на текущее задание, сдвинуть уровень и выдать следующее; после последнего — завершить тест. */
 export async function answer(env: ProviderEnv, store: Store, userId: string, attemptId: unknown, raw: unknown, domain: Domain, opts: RunOpts = {}): Promise<View> {
   const now = opts.now ?? (() => new Date().toISOString());
-  const a = await store.activeAssessment(userId);
+  const a = await activeOf(store, userId, opts.kind ?? 'placement');
   if (!a) throw new AssessmentError('assessment_none');
   const attempts = await store.listAttempts(a.id);
   const pending = attempts.find(x => x.answeredAt == null);
@@ -377,12 +479,12 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, att
   await store.updateAttempt(pending.id, patch);
   Object.assign(pending, patch);
 
-  if (pending.position <= ADAPTIVE_COUNT) {
+  if (pending.position <= a.adaptiveCount) {
     a.currentLevel = nextLevel(pending.level, g.correct === 1);
   }
-  if (pending.position >= TOTAL) {
+  if (pending.position >= totalOf(a)) {
     // Сначала тест закрывается с предварительным уровнем по адаптивной части — если оценка письма упадёт, тест всё равно завершён.
-    a.status = 'finished'; a.finishedAt = ts; a.level = estimateLevel(attempts); a.updatedAt = ts;
+    a.status = 'finished'; a.finishedAt = ts; a.level = estimateLevel(attempts, a.adaptiveCount); a.updatedAt = ts;
     await store.updateAssessment(a.id, { status: 'finished', finishedAt: ts, level: a.level, currentLevel: a.currentLevel, updatedAt: ts });
     await score(env, store, a, attempts, opts);
     return view(store, a, attempts);
@@ -398,7 +500,7 @@ export async function score(env: ProviderEnv, store: Store, a: Assessment, attem
   const now = opts.now ?? (() => new Date().toISOString());
   const items = new Map<string, Item>();
   for (const x of attempts) { if (!items.has(x.itemId)) { const it = await store.getItem(x.itemId); if (it) items.set(x.itemId, it); } }
-  const wa = attempts.find(x => x.position === ADAPTIVE_COUNT + 2 && x.answeredAt != null);
+  const wa = attempts.find(x => x.position === a.adaptiveCount + 2 && x.answeredAt != null);
   let writing: WritingEval | null = force ? null : parseWritingEval(wa?.detail);
   let note: string | null = null;
   if (wa && !writing) {
@@ -417,7 +519,7 @@ export async function score(env: ProviderEnv, store: Store, a: Assessment, attem
       }
     }
   } else if (!wa) note = 'письмо не сдано';
-  const s = computeAxes(attempts, items, writing, ADAPTIVE_COUNT);
+  const s = computeAxes(attempts, items, writing, a.adaptiveCount);
   const ts = now();
   const patch: AssessmentPatch = { axes: s.axes, overall: s.overall, level: s.level, scoredAt: ts, scoringNote: note, updatedAt: ts };
   await store.updateAssessment(a.id, patch);
@@ -440,8 +542,21 @@ export async function cardsFromAttempts(store: CardStore, userId: string, attemp
 }
 
 /** Пересчитать последний завершённый тест: письмо оценивается заново, если прошлая оценка не удалась (или force). */
+/** Виды, которые показывает карточка «Тест уровня»: тест в приложении и исходный срез; контрольные срезы — своя карточка. */
+const KINDS_OF = (kind: AssessmentKind): AssessmentKind[] => kind === 'placement' ? ['placement', 'baseline'] : [kind];
+
+/** Самый поздний тест одного из видов. */
+async function latestOf(store: Store, userId: string, kinds: AssessmentKind[]): Promise<Assessment | null> {
+  let best: Assessment | null = null;
+  for (const k of kinds) {
+    const a = await store.latestAssessment(userId, k);
+    if (a && (!best || a.startedAt > best.startedAt)) best = a;
+  }
+  return best;
+}
+
 export async function rescore(env: ProviderEnv, store: Store, userId: string, opts: RunOpts = {}, force = false): Promise<View> {
-  const a = await store.latestAssessment(userId);
+  const a = await latestOf(store, userId, KINDS_OF(opts.kind ?? 'placement'));
   if (!a || a.status !== 'finished') throw new AssessmentError('assessment_none', 'завершённого теста нет');
   if (a.kind === 'baseline') throw new AssessmentError('assessment_none', 'исходный срез получен вне приложения и не пересчитывается — пройдите тест уровня');
   const attempts = await store.listAttempts(a.id);
@@ -452,15 +567,16 @@ export async function rescore(env: ProviderEnv, store: Store, userId: string, op
 /** Прервать тест насовсем: он помечается abandoned, следующий start начнёт новый. Виденные задания не повторяются. */
 export async function abandon(store: Store, userId: string, opts: RunOpts = {}): Promise<boolean> {
   const now = opts.now ?? (() => new Date().toISOString());
-  const a = await store.activeAssessment(userId);
+  const a = await store.activeAssessment(userId, opts.kind ?? 'placement');
   if (!a) return false;
   await store.updateAssessment(a.id, { status: 'abandoned', updatedAt: now() });
   return true;
 }
 
-/** Текущее состояние без побочных действий: активный тест (с текущим заданием, если оно выдано) или последний завершённый. */
-export async function current(store: Store, userId: string): Promise<View | null> {
-  const a = (await store.activeAssessment(userId)) ?? (await store.latestAssessment(userId));
+/** Текущее состояние без побочных действий: активный тест этого вида (с текущим заданием, если оно выдано)
+ *  или последний завершённый; для теста уровня — и исходный срез, пока теста в приложении нет. */
+export async function current(store: Store, userId: string, kind: Exclude<AssessmentKind, 'baseline'> = 'placement'): Promise<View | null> {
+  const a = (await store.activeAssessment(userId, kind)) ?? (await latestOf(store, userId, KINDS_OF(kind)));
   if (!a || a.status === 'abandoned') return null;
   return view(store, a);
 }
@@ -474,6 +590,7 @@ export function d1AssessmentStore(db: D1Database): AssessmentStore {
     startedAt: r.started_at, finishedAt: r.finished_at ?? null, level: r.level ?? null, currentLevel: r.current_level ?? START_LEVEL, updatedAt: r.updated_at ?? r.started_at,
     axes: r.scored_at ? { grammar: n(r.grammar), vocabulary: n(r.vocabulary), coherence: n(r.coherence), taskResponse: n(r.task_response), fluency: n(r.fluency) } : null,
     overall: n(r.overall), scoredAt: r.scored_at ?? null, scoringNote: r.scoring_note ?? null,
+    adaptiveCount: r.adaptive_count == null ? ADAPTIVE_COUNT : Number(r.adaptive_count), programDayId: r.program_day_id ?? null,
   });
   const toT = (r: any): Attempt => ({
     id: r.id, userId: r.user_id, assessmentId: r.assessment_id, itemId: r.item_id, position: Number(r.position), level: r.level,
@@ -494,23 +611,31 @@ export function d1AssessmentStore(db: D1Database): AssessmentStore {
   };
   return {
     async createAssessment(a) {
-      await db.prepare('INSERT INTO assessments (id, user_id, kind, status, started_at, finished_at, level, current_level, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(a.id, a.userId, a.kind, a.status, a.startedAt, a.finishedAt, a.level, a.currentLevel, a.updatedAt).run();
+      await db.prepare('INSERT INTO assessments (id, user_id, kind, status, started_at, finished_at, level, current_level, updated_at, adaptive_count, program_day_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(a.id, a.userId, a.kind, a.status, a.startedAt, a.finishedAt, a.level, a.currentLevel, a.updatedAt, a.adaptiveCount, a.programDayId).run();
     },
     async updateAssessment(id, patch) {
       const s = setClause(patch); if (!s.sql) return;
       await db.prepare(`UPDATE assessments SET ${s.sql} WHERE id = ?`).bind(...s.args, id).run();
     },
-    async activeAssessment(userId) {
-      const r = await db.prepare("SELECT * FROM assessments WHERE user_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1").bind(userId).first();
+    async activeAssessment(userId, kind) {
+      const r = kind
+        ? await db.prepare("SELECT * FROM assessments WHERE user_id = ? AND kind = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1").bind(userId, kind).first()
+        : await db.prepare("SELECT * FROM assessments WHERE user_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1").bind(userId).first();
       return r ? toA(r) : null;
     },
-    async latestAssessment(userId) {
-      const r = await db.prepare('SELECT * FROM assessments WHERE user_id = ? ORDER BY started_at DESC LIMIT 1').bind(userId).first();
+    async latestAssessment(userId, kind) {
+      const r = kind
+        ? await db.prepare('SELECT * FROM assessments WHERE user_id = ? AND kind = ? ORDER BY started_at DESC LIMIT 1').bind(userId, kind).first()
+        : await db.prepare('SELECT * FROM assessments WHERE user_id = ? ORDER BY started_at DESC LIMIT 1').bind(userId).first();
       return r ? toA(r) : null;
     },
     async latestFinishedAssessment(userId) {
       const r = await db.prepare("SELECT * FROM assessments WHERE user_id = ? AND status = 'finished' ORDER BY started_at DESC LIMIT 1").bind(userId).first();
+      return r ? toA(r) : null;
+    },
+    async previousFinishedAssessment(userId, before) {
+      const r = await db.prepare("SELECT * FROM assessments WHERE user_id = ? AND status = 'finished' AND started_at < ? ORDER BY started_at DESC LIMIT 1").bind(userId, before).first();
       return r ? toA(r) : null;
     },
     async insertAttempt(t) {

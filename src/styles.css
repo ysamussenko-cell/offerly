@@ -291,3 +291,21 @@ kbd { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; l
 .task-row .task { flex: 1; }
 .task-row .speak { flex: none; margin-top: 4px; font-size: 13px; }
 @media (max-width: 600px) { .mic { width: 100%; justify-content: center; } .task-row { flex-direction: column; gap: 4px; } .task-row .speak { margin: 0 0 10px; } }
+
+/* Контрольный срез (4.3): сравнение с прошлым тестом — вывод строкой, балл до/после, оси с разницей.
+   Рост — мята, просадка — коралл, в пределах погрешности — приглушённо. */
+.compare { border: 1px solid var(--line); border-left: 3px solid var(--muted); border-radius: 12px; padding: 12px 14px; background: var(--paper); }
+.compare.up { border-left-color: var(--mint); } .compare.down { border-left-color: var(--coral); }
+.compare-verdict { margin: 0 0 10px; font-weight: 600; font-size: 15px; }
+.compare-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.compare-cell { display: flex; flex-direction: column; min-width: 120px; }
+.compare-cell small { font-size: 12px; }
+.compare-num { display: flex; align-items: baseline; gap: 6px; }
+.compare-num b { font-family: Manrope, Inter, sans-serif; font-size: 26px; letter-spacing: -0.02em; line-height: 1.1; }
+.compare-num span.muted { font-size: 15px; }
+.compare-arrow { font-size: 22px; color: var(--muted); }
+.compare-arrow.up { color: var(--mint-text); } .compare-arrow.down { color: var(--coral-text); }
+.delta { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600; margin-left: 8px; color: var(--muted); }
+.delta.up { color: var(--mint-text); } .delta.down { color: var(--coral-text); }
+.compare-axes { margin: 6px 0 10px; }
+.compare-axes li b { font-weight: 500; white-space: nowrap; }

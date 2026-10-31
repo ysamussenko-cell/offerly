@@ -151,7 +151,7 @@ describe('карточки из ошибок теста', () => {
   });
   it('score без хранилища карточек работает как раньше', async () => {
     const mem = memoryStore();
-    const a: Assessment = { id: 'a1', userId: USER, kind: 'placement', status: 'finished', startedAt: NOW, finishedAt: NOW, level: 'B1', currentLevel: 'B1', updatedAt: NOW, axes: null, overall: null, scoredAt: null, scoringNote: null };
+    const a: Assessment = { id: 'a1', userId: USER, kind: 'placement', status: 'finished', startedAt: NOW, finishedAt: NOW, level: 'B1', currentLevel: 'B1', updatedAt: NOW, axes: null, overall: null, scoredAt: null, scoringNote: null, adaptiveCount: 12, programDayId: null };
     mem.assessments.push(a);
     const { insertCards, ...rest } = mem.store;
     const r = await score(ENV, rest as any, a, [], { now: () => NOW });

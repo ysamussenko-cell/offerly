@@ -20,7 +20,7 @@ let seq = 0;
 
 const assessment = (over: Partial<Assessment> = {}): Assessment => ({
   id: 'a1', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B1', currentLevel: 'B1',
-  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null, ...over,
+  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null, adaptiveCount: 12, programDayId: null, ...over,
 });
 const lesson = (dayDate: string, score: number | null, status: Lesson['status'] = 'finished', bonus: Lesson['bonus'] = null): Lesson => ({
   id: `l${++seq}`, userId: USER, programDayId: null, dayDate, topic: 'articles', writing: 'review', level: 'B1', status, warmupCount: 5, reviewCount: 0, score,
@@ -155,15 +155,15 @@ describe('готовность', () => {
 });
 
 describe('план недели', () => {
-  it('семь дней с понедельника: пройдено, идёт, сегодня, план, заморожено, репетиция — план, срез — недоступно, свободно', () => {
+  it('семь дней с понедельника: пройдено, идёт, сегодня, план, заморожено, репетиция и срез — план, свободно', () => {
     const days = [day('2026-11-09'), day('2026-11-10'), day('2026-11-11'), day('2026-11-12'), day('2026-11-13'), day('2026-11-14', { format: 'rehearsal', topic: 'task-response', writing: null }), day('2026-11-15', { format: 'checkpoint', topic: 'mixed', writing: null })];
     const lessons = [{ dayDate: '2026-11-09', status: 'finished' as const, score: 80, minutes: 22 }, { dayDate: '2026-11-11', status: 'active' as const, score: null, minutes: 7 }];
     const streak = computeStreak(new Set(['2026-11-09']), new Set(['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12']), TODAY);
     const w = weekPlan(days, lessons, streak, TODAY);
     expect(w.map(d => d.date)).toEqual(['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-14', '2026-11-15']);
     expect(w.map(d => d.weekday)).toEqual(['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']);
-    // репетиция (4.1) — обычный день плана; срез (4.3) пока недоступен
-    expect(w.map(d => d.status)).toEqual(['done', 'frozen', 'active', 'today', 'planned', 'planned', 'unavailable']);
+    // репетиция (4.1) и срез (4.3) — обычные дни плана
+    expect(w.map(d => d.status)).toEqual(['done', 'frozen', 'active', 'today', 'planned', 'planned', 'planned']);
     expect(w[0]).toMatchObject({ minutes: 22, score: 80, past: true, today: false });
     expect(w[2]).toMatchObject({ minutes: 7, score: null });
     expect(w[3]).toMatchObject({ today: true, past: false });
@@ -206,7 +206,7 @@ describe('сборка главного экрана', () => {
     expect(v.countdown).toEqual({ interviewDate: '2026-12-02', daysLeft: 20 });
     expect(v.readiness.forecast.atInterview).toBe(Math.round(63 + v.readiness.forecast.perDay * 20));
     expect(v.goal).toEqual({ minutes: 125, custom: false, done: 42, left: 83, default: 125, percent: 34 });
-    expect(v.week.map(d => d.status)).toEqual(['done', 'done', 'done', 'today', 'planned', 'planned', 'unavailable']);
+    expect(v.week.map(d => d.status)).toEqual(['done', 'done', 'done', 'today', 'planned', 'planned', 'planned']);
     expect(v.week.map(d => d.minutes)).toEqual([14, 14, 14, 0, 0, 0, 0]);
     expect(v.program).toEqual({ exists: true, endDate: '2026-11-15', done: 0, total: 14 });
   });

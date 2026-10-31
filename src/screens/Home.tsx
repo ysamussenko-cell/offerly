@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, errorText, type Dashboard, type WeekDay } from '../api';
+import { api, errorText, type Dashboard, type DayFormat, type WeekDay } from '../api';
 import { daysText, longDate, minutesText, plural } from '../text';
 
-type Props = { refreshKey?: number; onOpenLesson?: () => void };
+type Props = { refreshKey?: number; /** Открыть сегодняшний день программы по его формату: занятие, репетиция или срез. */ onOpenDay?: (format: DayFormat) => void };
 
 const KIND_LABELS: Record<string, string> = { placement: 'тест уровня', checkpoint: 'контрольный срез', baseline: 'исходный срез' };
 const pointsText = (n: number) => `${n} ${plural(n, 'балл', 'балла', 'баллов')}`;
@@ -18,6 +18,13 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`).replace('.', ',');
 export const WEEK_STATUS_LABELS: Record<WeekDay['status'], string> = {
   done: 'пройдено', active: 'идёт', today: 'сегодня', planned: 'план', missed: 'пропущено', frozen: 'заморозка', unavailable: 'позже', free: 'свободно',
 };
+
+/** Кнопка сегодняшнего дня по формату. */
+export function todayButtonText(format: DayFormat, active: boolean): string {
+  if (format === 'rehearsal') return active ? 'Продолжить репетицию' : 'Начать репетицию';
+  if (format === 'checkpoint') return active ? 'Продолжить срез' : 'Начать срез';
+  return active ? 'Продолжить занятие' : 'Начать занятие';
+}
 
 /** «через 20 дней», «сегодня», «завтра», «дата прошла» по числу дней. */
 export function countdownByDays(d: number): string {
@@ -37,7 +44,7 @@ export function forecastText(f: Dashboard['readiness']['forecast']): string {
 
 /** Карточка главного экрана: готовность 0–100 с разбором и прогнозом, обратный отсчёт до собеседования,
  *  серия дней с заморозкой, недельная цель в минутах (своя или по анкете) и план текущей недели. */
-export function HomeCard({ refreshKey, onOpenLesson }: Props) {
+export function HomeCard({ refreshKey, onOpenDay }: Props) {
   const [state, setState] = useState<{ loaded: boolean; d: Dashboard | null; error: string | null }>({ loaded: false, d: null, error: null });
   const [edit, setEdit] = useState<{ on: boolean; value: string; busy: boolean; error: string | null }>({ on: false, value: '', busy: false, error: null });
 
@@ -156,12 +163,12 @@ export function HomeCard({ refreshKey, onOpenLesson }: Props) {
             ))}
           </ol>
           {!d.program.exists && <p className="muted" style={{ fontSize: 13, margin: '8px 0 0' }}>Программы ещё нет — план недели заполнится после «Составить программу» в карточке «Программа».</p>}
-          {d.program.exists && todayCell && (todayCell.status === 'today' || todayCell.status === 'active') && onOpenLesson && (
-            <p style={{ margin: '10px 0 0' }}><button className="btn" type="button" onClick={onOpenLesson}>{todayCell.status === 'active' ? 'Продолжить занятие' : 'Начать занятие'}</button></p>
+          {d.program.exists && todayCell?.day && (todayCell.status === 'today' || todayCell.status === 'active') && onOpenDay && (
+            <p style={{ margin: '10px 0 0' }}><button className="btn" type="button" onClick={() => onOpenDay(todayCell.day!.format)}>{todayButtonText(todayCell.day.format, todayCell.status === 'active')}</button></p>
           )}
           <p className="muted" style={{ fontSize: 13, margin: '10px 0 0' }}>
             Готовность растёт до {d.gainPerLesson} за занятие (по баллу; верно решённый бонус умножает вклад занятия на {d.bonusMultiplier}) и снижается на {d.missPenalty} за пропущенное занятие программы, не больше {d.missCap} в сумме.
-            Серия — дни подряд с занятием; одна дыра в неделю закрывается заморозкой сама. Репетиции и срезы до их появления серию не трогают.
+            Серия — дни подряд с занятием, репетицией или срезом; одна дыра в неделю закрывается заморозкой сама. Пропущенные репетиция и срез серию не рвут. Контрольный срез становится новой базой готовности.
           </p>
         </>
       )}

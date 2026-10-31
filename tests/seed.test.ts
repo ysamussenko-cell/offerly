@@ -147,7 +147,7 @@ describe('исходный срез и журнал в API', () => {
   it('GET /api/assessment отдаёт срез как завершённый с осями, без сводки попыток; пересчёт среза отклоняется', async () => {
     const { mem, user, get, post } = await loggedIn();
     const s = baselineScore();
-    mem.assessments.push({ id: BASELINE.id, userId: user.id, kind: 'baseline', status: 'finished', startedAt: BASELINE.startedAt, finishedAt: BASELINE.startedAt, level: s.level, currentLevel: s.level, updatedAt: BASELINE.startedAt, axes: s.axes, overall: s.overall, scoredAt: BASELINE.startedAt, scoringNote: BASELINE.note });
+    mem.assessments.push({ id: BASELINE.id, userId: user.id, kind: 'baseline', status: 'finished', startedAt: BASELINE.startedAt, finishedAt: BASELINE.startedAt, level: s.level, currentLevel: s.level, updatedAt: BASELINE.startedAt, axes: s.axes, overall: s.overall, scoredAt: BASELINE.startedAt, scoringNote: BASELINE.note, adaptiveCount: 12, programDayId: null });
     const j: any = await (await get('/assessment')).json();
     expect(j.assessment.kind).toBe('baseline');
     expect(j.assessment.status).toBe('finished');

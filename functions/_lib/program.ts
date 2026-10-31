@@ -243,7 +243,7 @@ export function buildProgram(inp: BuildInput): ProgramDay[] {
   return slots.map(s => {
     const base = { id: inp.id(), userId: inp.userId, dayDate: s.date, position: s.position, week: s.week, status: 'planned' as DayStatus, score: null, completedAt: null, generatedAt: inp.now, updatedAt: null };
     if (s.kind === 'checkpoint') {
-      const vs = baseline ? `сравнение с ${baseline.kind === 'baseline' ? 'исходным срезом' : 'тестом уровня'}${baseline.finishedAt ? ` от ${baseline.finishedAt.slice(0, 10)}` : ''}` : 'первая точка сравнения';
+      const vs = baseline ? `сравнение с ${baseline.kind === 'baseline' ? 'исходным срезом' : baseline.kind === 'checkpoint' ? 'контрольным срезом' : 'тестом уровня'}${baseline.finishedAt ? ` от ${baseline.finishedAt.slice(0, 10)}` : ''}` : 'первая точка сравнения';
       return { ...base, format: 'checkpoint' as DayFormat, topic: 'mixed', writing: null, reason: `укороченный тест, ${vs}`, minutes: CHECKPOINT_MINUTES };
     }
     if (s.kind === 'rehearsal') {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText, type Assessment as View } from '../api';
+import { api, errorText, type Assessment as View, type Checkpoint } from '../api';
+import { ComparisonView } from './Checkpoint';
 import { KeyHints, useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { MicButton, SpeakButton, useRecorder, type Recorder } from '../Recorder';
@@ -76,11 +77,42 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
   );
 }
 
-type Props = { onClose: () => void; mode?: Mode };
+export type TestKind = 'placement' | 'checkpoint';
+type Props = { onClose: () => void; mode?: Mode; /** Тест уровня (по умолчанию) или контрольный срез — те же экраны, свои маршруты API. */ kind?: TestKind };
+
+/** Порог «значимой» разницы в сравнении — как SIGNIFICANT_DELTA на сервере (GET /api/checkpoint отдаёт significant). */
+const SIGNIFICANT_DEFAULT = 5;
+
+/** Маршруты API по виду теста: тест уровня — /assessment, срез — /checkpoint. */
+function opsFor(kind: TestKind) {
+  if (kind === 'checkpoint') {
+    return {
+      get: () => api.checkpoint().then(r => r.checkpoint as View | null),
+      start: () => api.startCheckpoint().then(r => r.checkpoint as View),
+      answer: (id: string, v: string | string[]) => api.answerCheckpoint(id, v).then(r => r.checkpoint as View),
+      score: () => api.scoreCheckpoint().then(r => r.checkpoint as View),
+      staleCode: 'assessment_stale',
+    };
+  }
+  return {
+    get: () => api.assessment().then(r => r.assessment),
+    start: () => api.startAssessment().then(r => r.assessment),
+    answer: (id: string, v: string | string[]) => api.answerAssessment(id, v).then(r => r.assessment),
+    score: () => api.scoreAssessment().then(r => r.assessment),
+    staleCode: 'assessment_stale',
+  };
+}
+
+export const TITLES: Record<TestKind, { test: string; result: string; finished: string }> = {
+  placement: { test: 'Тест уровня', result: 'Разбор теста', finished: 'Результат теста' },
+  checkpoint: { test: 'Контрольный срез', result: 'Разбор среза', finished: 'Результат среза' },
+};
 
 /** Экран теста: одно задание на экране, прогресс сверху, ответ — кнопками или текстом.
  *  В режиме result показывает разбор последнего завершённого теста (считая оценку, если её ещё нет). */
-export default function Assessment({ onClose, mode = 'test' }: Props) {
+export default function Assessment({ onClose, mode = 'test', kind = 'placement' }: Props) {
+  const ops = opsFor(kind);
+  const titles = TITLES[kind];
   const [view, setView] = useState<View | null>(null);
   const [busy, setBusy] = useState<'start' | 'answer' | 'score' | null>('start');
   const [error, setError] = useState<string | null>(null);
@@ -95,23 +127,23 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
   useEffect(() => {
     if (mode === 'result') {
       // Разбор: если оси ещё не считались (тест пройден до 2.6), сервер считает их сейчас.
-      api.assessment().then(async r => {
-        if (r.assessment?.status === 'finished' && !r.assessment.result) { setBusy('score'); return (await api.scoreAssessment()).assessment; }
-        return r.assessment;
+      ops.get().then(async a => {
+        if (a?.status === 'finished' && !a.result) { setBusy('score'); return ops.score(); }
+        return a;
       }).then(setView).catch(e => setError(errorText(e))).finally(() => setBusy(null));
       return;
     }
-    api.startAssessment().then(r => setView(r.assessment)).catch(e => setError(errorText(e))).finally(() => setBusy(null));
-  }, [mode]);
+    ops.start().then(setView).catch(e => setError(errorText(e))).finally(() => setBusy(null));
+  }, [mode, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function rescore() {
     setBusy('score'); setError(null);
-    try { setView((await api.scoreAssessment()).assessment); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+    try { setView(await ops.score()); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   }
 
   async function restart() {
     setBusy('start'); setError(null); setView(null);
-    try { setView((await api.startAssessment()).assessment); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
+    try { setView(await ops.start()); } catch (e) { setError(errorText(e)); } finally { setBusy(null); }
   }
 
   const cur = view?.current ?? null;
@@ -136,12 +168,11 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
     if (!cur || v == null || busy) return;
     setBusy('answer'); setError(null);
     try {
-      const r = await api.answerAssessment(cur.attemptId, v);
-      setView(r.assessment);
+      setView(await ops.answer(cur.attemptId, v));
     } catch (e) {
       setError(errorText(e));
       // Задание закрылось в другой вкладке — подтянуть текущее состояние.
-      if ((e as any)?.code === 'assessment_stale') api.assessment().then(r => setView(r.assessment)).catch(() => {});
+      if ((e as any)?.code === ops.staleCode) ops.get().then(setView).catch(() => {});
     } finally { setBusy(null); }
   }
 
@@ -175,14 +206,14 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
     },
   });
 
-  if (view?.status === 'finished') return <Finished view={view} onClose={onClose} onRestart={restart} onRescore={rescore} busy={busy} error={error} />;
+  if (view?.status === 'finished') return <Finished view={view} kind={kind} onClose={onClose} onRestart={restart} onRescore={rescore} busy={busy} error={error} />;
   if (mode === 'result' && !view) {
     return (
       <section className="card">
-        <h2>Разбор теста</h2>
+        <h2>{titles.result}</h2>
         {busy === 'score' && <p className="muted">Считаю оси и оцениваю письмо по рубрике — до минуты.</p>}
         {busy === 'start' && <p className="muted">Открываю результат…</p>}
-        {!busy && !error && <p className="muted">Завершённого теста нет.</p>}
+        {!busy && !error && <p className="muted">{kind === 'checkpoint' ? 'Завершённого среза нет.' : 'Завершённого теста нет.'}</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="row" style={{ marginTop: 16 }}><button className="btn secondary" type="button" onClick={onClose}>На главную</button></div>
       </section>
@@ -193,12 +224,12 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Тест уровня</h2>
+        <h2 style={{ margin: 0 }}>{titles.test}</h2>
         {cur && <span className="muted" style={{ fontSize: 14 }}>Задание {cur.position} из {view!.total} · {cur.kindLabel}</span>}
       </div>
       <div className="progress" aria-label={view ? `Отвечено ${view.answered} из ${view.total}` : undefined}><span style={{ width: `${progress}%` }} /></div>
 
-      {busy === 'start' && <p className="muted">Подбираю первое задание… Если банк для вашего уровня пуст, модель напишет его сейчас — это до минуты.</p>}
+      {busy === 'start' && <p className="muted">Подбираю первое задание{kind === 'checkpoint' ? ' со старта с вашего текущего уровня' : ''}… Если банк для вашего уровня пуст, модель напишет его сейчас — это до минуты.</p>}
       {!cur && busy !== 'start' && !error && <p className="muted">Задание не выдано. Вернитесь на главную и начните снова.</p>}
 
       {cur && cur.kind === 'mcq' && (
@@ -249,7 +280,7 @@ export default function Assessment({ onClose, mode = 'test' }: Props) {
       </div>
       {cur && <KeyHints ctx={{ ...keyCtx, submit: testing, busy: false, recordable: testing && textEntry && rec.available }} textEntry={textEntry} />}
       {busy === 'answer' && cur?.position !== view?.total && <p className="muted hint">Следующее задание подбирается из банка; если там пусто, модель напишет его — до минуты.</p>}
-      {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">Письмо проверяется по рубрике и образцу, считаются пять осей — до минуты.</p>}
+      {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">{kind === 'checkpoint' ? 'Письмо проверяется по рубрике и образцу, считаются пять осей и сравнение с прошлым тестом, пересобирается программа — до минуты.' : 'Письмо проверяется по рубрике и образцу, считаются пять осей — до минуты.'}</p>}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
@@ -274,22 +305,25 @@ function WritingInput({ prompt, words, text, setText, disabled, rec }: { prompt:
   );
 }
 
-type FinishedProps = { view: View; onClose: () => void; onRestart: () => void; onRescore: () => void; busy: string | null; error: string | null };
+type FinishedProps = { view: View; kind: TestKind; onClose: () => void; onRestart: () => void; onRescore: () => void; busy: string | null; error: string | null };
 
-function Finished({ view, onClose, onRestart, onRescore, busy, error }: FinishedProps) {
+function Finished({ view, kind, onClose, onRestart, onRescore, busy, error }: FinishedProps) {
   const s = view.summary;
   const r = view.result;
   const baseline = view.kind === 'baseline';
+  const checkpoint = view.kind === 'checkpoint';
+  const cp = checkpoint ? (view as Checkpoint) : null;
   const keyCtx = { cancel: busy == null };
   useHotkeys(keyCtx, { onCancel: onClose });
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>{baseline ? 'Исходный срез' : 'Результат теста'}</h2>
-        {view.finishedAt && <span className="muted" style={{ fontSize: 14 }}>{longDate(view.finishedAt.slice(0, 10))}</span>}
+        <h2 style={{ margin: 0 }}>{baseline ? 'Исходный срез' : TITLES[kind].finished}</h2>
+        {view.finishedAt && <span className="muted" style={{ fontSize: 14 }}>{longDate(view.finishedAt.slice(0, 10))}{cp?.day ? ` · день ${cp.day.position} программы` : checkpoint ? ' · вне плана' : ''}</span>}
       </div>
       {r ? (
-        <ResultView result={r} levelLabel={view.levelLabel} finishedAt={view.finishedAt} onRescore={baseline ? undefined : onRescore} rescoring={busy === 'score'} baseline={baseline} />
+        <ResultView result={r} levelLabel={view.levelLabel} finishedAt={view.finishedAt} onRescore={baseline ? undefined : onRescore} rescoring={busy === 'score'} baseline={baseline} checkpoint={checkpoint}
+          comparison={checkpoint && view.comparison ? <ComparisonView c={view.comparison} significant={SIGNIFICANT_DEFAULT} /> : checkpoint ? <p className="muted" style={{ margin: 0 }}>Сравнивать пока не с чем: это первая оценка — следующий срез покажет разницу.</p> : null} />
       ) : (
         <>
           <div className="level-row" style={{ marginTop: 12 }}>
@@ -308,9 +342,11 @@ function Finished({ view, onClose, onRestart, onRescore, busy, error }: Finished
         </ul>
       )}
       {error && <p className="error" role="alert">{error}</p>}
+      {cp?.programAdjusted && <p className="muted hint" style={{ marginTop: 0 }}>Оставшиеся дни программы пересобраны по этому срезу — порядок тем в карточке «Программа» мог измениться.</p>}
+      {cp && cp.status === 'finished' && !cp.programAdjusted && !cp.day && <p className="muted hint" style={{ marginTop: 0 }}>Срез вне плана программу не трогает; пересобрать её по новому профилю можно кнопкой в карточке «Программа».</p>}
       <div className="row" style={{ marginTop: 8 }}>
         <button className="btn" type="button" onClick={onClose} disabled={busy != null} aria-keyshortcuts="Escape">На главную</button>
-        <button className="link" type="button" onClick={onRestart} disabled={busy != null}>{baseline ? 'Пройти тест уровня' : 'Пройти тест заново'}</button>
+        {!checkpoint && <button className="link" type="button" onClick={onRestart} disabled={busy != null}>{baseline ? 'Пройти тест уровня' : 'Пройти тест заново'}</button>}
       </div>
       <KeyHints ctx={keyCtx} />
     </section>

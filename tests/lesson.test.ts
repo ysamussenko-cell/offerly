@@ -29,7 +29,7 @@ const card = (topic: string, over: Partial<ErrorCard> = {}): ErrorCard => ({
 });
 const assessment = (level: Level = 'B1'): Assessment => ({
   id: 'a1', userId: USER, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level, currentLevel: level,
-  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null,
+  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: null, adaptiveCount: 12, programDayId: null,
 });
 function makeItem(kind: Kind, level: Level, topic: string, over: Partial<Item> = {}): Item {
   const n = ++seq;

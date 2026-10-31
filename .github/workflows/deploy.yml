@@ -172,3 +172,11 @@ jobs:
           echo "::notice title=voice::POST /api/voice/transcribe без cookie → $VT; POST /api/voice/speak → $VS; GET /api/voice/meta → $VM (ждём 401 везде); контур: $VOICE"
           [ "$VT" = "401" ] && [ "$VS" = "401" ] && [ "$VM" = "401" ] || { echo "::error title=voice::неожиданные коды ответа"; exit 1; }
           case "$VOICE" in ok:*) ;; *) echo "::warning title=voice::голосовой контур не подтверждён: $VOICE";; esac
+          # контрольный срез (4.3): маршруты без cookie → 401
+          CPG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/checkpoint")
+          CPS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/start")
+          CPA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"attemptId":"x","answer":"A"}' "$P/api/checkpoint/answer")
+          CPR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/score")
+          CPB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/abandon")
+          echo "::notice title=checkpoint::GET /api/checkpoint без cookie → $CPG; POST /api/checkpoint/start → $CPS; POST /api/checkpoint/answer → $CPA; POST /api/checkpoint/score → $CPR; POST /api/checkpoint/abandon → $CPB (ждём 401 везде)"
+          [ "$CPG" = "401" ] && [ "$CPS" = "401" ] && [ "$CPA" = "401" ] && [ "$CPR" = "401" ] && [ "$CPB" = "401" ] || { echo "::error title=checkpoint::неожиданные коды ответа"; exit 1; }

@@ -23,7 +23,7 @@ const card = (topic: string, retired = false): ErrorCard => ({
 });
 const assessment = (axes: Record<string, number | null>, kind: Assessment['kind'] = 'baseline'): Assessment => ({
   id: 'a1', userId: USER, kind, status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z', level: 'B1', currentLevel: 'B1',
-  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null, ...axes } as any, overall: 53, scoredAt: NOW, scoringNote: null,
+  updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null, ...axes } as any, overall: 53, scoredAt: NOW, scoringNote: null, adaptiveCount: 12, programDayId: null,
 });
 const item = (id: string, topic: string): Item => ({
   id, kind: 'mcq', level: 'B1', topic, domain: null, prompt: '___', options: ['a', 'b', 'c', 'd'], answer: 'A', rubric: null, explanation: null,

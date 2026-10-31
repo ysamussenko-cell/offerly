@@ -12,12 +12,15 @@
  *  Пройденная репетиция интервью (rehearsal.ts) считается как занятие: её сводный балл даёт тот же вклад
  *  в готовность, день идёт в серию, минуты — в недельную цель.
  *
- *  Серия: дни подряд с пройденным занятием или репетицией. День программы с занятием, оставшийся без занятия,
+ *  Контрольный срез (checkpoint.ts) — новая точка отсчёта: его сводный балл становится базой готовности, занятия
+ *  считаются после него; его день идёт в серию, минуты — в недельную цель.
+ *
+ *  Серия: дни подряд с пройденным занятием, репетицией или срезом. День программы с занятием, оставшийся без занятия,
  *  рвёт серию, если в его календарной неделе (пн–вс) заморозка ещё не потрачена; первая такая дыра в неделе
- *  закрывается заморозкой сама. Дни без программы и срезы (до 4.3 недоступны) серию не рвут и не растят;
- *  пропущенная репетиция серию тоже не рвёт — это недельный формат, а не ежедневная привычка; сегодня ещё открыт.
- *  Минуты недели — по шагам занятий и вопросам репетиции: от выдачи до ответа, но не больше STEP_CAP_MINUTES
- *  за шаг, чтобы пауза между подходами не засчитывалась. Недельная цель — своя (PUT /api/dashboard/goal),
+ *  закрывается заморозкой сама. Дни без программы серию не рвут и не растят; пропущенные репетиция и срез серию
+ *  тоже не рвут — это недельные форматы, а не ежедневная привычка; сегодня ещё открыт.
+ *  Минуты недели — по шагам занятий, вопросам репетиции и заданиям среза: от выдачи до ответа, но не больше
+ *  STEP_CAP_MINUTES за шаг, чтобы пауза между подходами не засчитывалась. Недельная цель — своя (PUT /api/dashboard/goal),
  *  по умолчанию минуты в день из анкеты × GOAL_DAYS_DEFAULT. */
 import type { Assessment, AssessmentStore } from './assessment';
 import { LEVELS, type Level } from './items';
@@ -210,7 +213,6 @@ export function weekPlan(days: ProgramDay[], lessons: { dayDate: string; status:
     if (fin || d?.status === 'done') status = 'done';
     else if (ls.some(l => l.status === 'active')) status = 'active';
     else if (!d) status = 'free';
-    else if (d.format === 'checkpoint') status = 'unavailable';
     else if (date === today) status = 'today';
     else if (date > today) status = 'planned';
     else if (streak.frozen.includes(date)) status = 'frozen';
@@ -227,7 +229,7 @@ export interface DashboardStore {
   saveWeeklyGoal(userId: string, minutes: number | null, nowIso: string): Promise<void>;
 }
 
-export type Store = Pick<AssessmentStore, 'latestFinishedAssessment'> & Pick<LessonStore, 'listLessons' | 'listSteps'> & Pick<ProgramStore, 'listProgramDays'> & Pick<RehearsalStore, 'listRehearsals' | 'listTurns'>;
+export type Store = Pick<AssessmentStore, 'latestFinishedAssessment' | 'listAttempts'> & Pick<LessonStore, 'listLessons' | 'listSteps'> & Pick<ProgramStore, 'listProgramDays'> & Pick<RehearsalStore, 'listRehearsals' | 'listTurns'>;
 
 /** Репетиция в виде занятия для готовности и плана недели: балл — сводный, бонуса нет. */
 export const rehearsalAsLesson = (r: Rehearsal): Pick<Lesson, 'dayDate' | 'score' | 'status' | 'finishedAt' | 'bonus'> =>
@@ -254,6 +256,9 @@ export async function dashboard(store: Store, userId: string, tz: string, profil
 
   const done = new Set(lessons.filter(l => l.status === 'finished').map(l => l.dayDate));
   for (const d of days) if (d.status === 'done' && d.dayDate <= today) done.add(d.dayDate);
+  // Контрольный срез в приложении: день засчитан в серию (и вне плана), минуты — в неделю.
+  const cpDate = assessment?.kind === 'checkpoint' && assessment.finishedAt ? todayIn(tz, new Date(assessment.finishedAt)) : null;
+  if (cpDate && cpDate <= today) done.add(cpDate);
   const required = new Set(days.filter(d => d.format === 'lesson' && d.dayDate <= today).map(d => d.dayDate));
   const streak = computeStreak(done, required, today);
 
@@ -271,6 +276,9 @@ export async function dashboard(store: Store, userId: string, tz: string, profil
   }
   for (const r of rehearsals.filter(r => r.dayDate >= start && r.dayDate <= end)) {
     weekLessons.push({ ...rehearsalAsLesson(r), minutes: lessonMinutes(await store.listTurns(r.id)) });
+  }
+  if (cpDate && cpDate >= start && cpDate <= end) {
+    weekLessons.push({ dayDate: cpDate, status: 'finished', score: assessment!.overall, minutes: lessonMinutes(await store.listAttempts(assessment!.id)) });
   }
   const goal = weeklyGoal(profile);
   const doneMinutes = weekLessons.reduce((s, l) => s + l.minutes, 0);

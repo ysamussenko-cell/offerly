@@ -34,8 +34,24 @@ export type Assessment = {
   startedAt: string; finishedAt: string | null; level: Level | null; levelLabel: string | null;
   summary: { adaptiveTotal: number; adaptiveCorrect: number; readingScore: number | null; writingWords: number | null } | null;
   result: AssessmentResult | null;
+  /** Сравнение с предыдущим завершённым тестом или срезом; null — сравнивать не с чем. */
+  comparison: Comparison | null;
+  programDayId: string | null;
 };
 export type AxisId = 'grammar' | 'vocabulary' | 'coherence' | 'taskResponse' | 'fluency';
+export type LevelChange = 'up' | 'same' | 'down';
+export type Comparison = {
+  previous: { id: string; kind: AssessmentKind; kindLabel: string; finishedAt: string | null; level: Level; overall: number };
+  overall: { before: number; after: number; delta: number };
+  level: { before: Level; after: Level; change: LevelChange };
+  axes: { id: AxisId; label: string; before: number | null; after: number | null; delta: number | null }[];
+  improved: AxisId[]; declined: AxisId[];
+  verdict: string;
+};
+/** Контрольный срез: тот же тест короче, плюс день программы и признак пересборки программы. */
+export type Checkpoint = Assessment & { day: ProgramDay | null; programAdjusted: boolean };
+export type CheckpointMeta = { total: number; adaptive: number; significant: number };
+export type CheckpointToday = CheckpointMeta & { ok: true; today: string; scheduled: boolean; day: ProgramDay | null; next: ProgramDay | null; checkpoint: Checkpoint | null };
 export type ErrorExample = { source: 'writing' | 'correction' | 'mcq' | 'reading'; quote: string; correction: string; note: string | null; topicLabel: string | null };
 export type AssessmentResult = {
   axes: { id: AxisId; label: string; score: number | null }[];
@@ -198,6 +214,11 @@ export const api = {
   answerAssessment: (attemptId: string, answer: string | string[]) => post<{ ok: true; assessment: Assessment }>('/assessment/answer', { attemptId, answer }),
   abandonAssessment: () => post<{ ok: true; abandoned: boolean }>('/assessment/abandon', {}),
   scoreAssessment: (force = false) => post<{ ok: true; assessment: Assessment }>('/assessment/score', { force }),
+  checkpoint: () => call<CheckpointToday>('/checkpoint'),
+  startCheckpoint: () => post<{ ok: true; checkpoint: Checkpoint }>('/checkpoint/start', {}),
+  answerCheckpoint: (attemptId: string, answer: string | string[]) => post<{ ok: true; checkpoint: Checkpoint }>('/checkpoint/answer', { attemptId, answer }),
+  abandonCheckpoint: () => post<{ ok: true; abandoned: boolean }>('/checkpoint/abandon', {}),
+  scoreCheckpoint: (force = false) => post<{ ok: true; checkpoint: Checkpoint }>('/checkpoint/score', { force }),
   cards: () => call<{ ok: true; topics: { id: string; label: string }[]; cards: ErrorCard[] }>('/cards'),
   program: () => call<ProgramResponse>('/program'),
   generateProgram: () => post<ProgramResponse>('/program/generate', {}),
@@ -251,11 +272,12 @@ export const ERRORS: Record<string, string> = {
   assessment_none: 'Теста нет: ни начатого, ни завершённого. Нажмите «Начать тест».',
   assessment_stale: 'Это задание уже закрыто — экран обновлён, ответьте на текущее.',
   assessment_finished: 'Тест уже завершён.',
+  assessment_busy: 'Сейчас идёт другой тест: завершите или прервите его, тогда можно начать этот.',
   answer_invalid: 'Ответ не принят: проверьте, что он заполнен.',
   bank_empty: 'В банке нет подходящего задания, и модель не смогла написать новое. Пополните банк и попробуйте снова.',
   program_invalid: 'Переставить не получилось: менять местами можно только два ещё не пройденных занятия, не раньше сегодняшнего дня.',
   lesson_no_day: 'На сегодня нет дня программы. Составьте программу в карточке «Программа».',
-  lesson_unavailable: 'Сегодня по программе не занятие: репетиция интервью — в карточке «Репетиция», контрольный срез появится в следующей версии.',
+  lesson_unavailable: 'Сегодня по программе не занятие: репетиция интервью — в карточке «Репетиция интервью», контрольный срез — в карточке «Контрольный срез».',
   lesson_none: 'Активного занятия на сегодня нет. Вернитесь на главную и начните занятие.',
   lesson_stale: 'Этот шаг уже закрыт — экран обновлён, ответьте на текущий.',
   lesson_eval_failed: 'Модель не оценила письмо. Текст на месте — отправьте ещё раз через минуту.',
