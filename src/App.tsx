@@ -17,6 +17,7 @@ import { HomeCard } from './screens/Home';
 import { AchievementsCard } from './screens/Achievements';
 import { DigestCard } from './screens/Digest';
 import { PushCard } from './screens/Push';
+import Settings from './screens/Settings';
 
 type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
@@ -35,6 +36,8 @@ export default function App() {
   const [lesson, setLesson] = useState(false);
   /** Экран репетиции интервью открыт. */
   const [rehearsal, setRehearsal] = useState(false);
+  /** Экран настроек открыт (ссылка в шапке). */
+  const [settings, setSettings] = useState(false);
   const online = useOnline();
 
   useEffect(() => {
@@ -43,7 +46,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); setLesson(false); setRehearsal(false); return; }
+    if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setTesting(null); setLesson(false); setRehearsal(false); setSettings(false); return; }
     api.profile().then(r => setProfile({ state: 'ready', profile: r.profile })).catch(() => setProfile({ state: 'ready', profile: null }));
   }, [auth.state]);
 
@@ -73,6 +76,7 @@ export default function App() {
         {auth.state === 'in' && (
           <div className="row">
             <span className="muted mono who" title={auth.user.email}>{auth.user.email}</span>
+            {profile.state === 'ready' && profile.profile && <button className="link" onClick={() => setSettings(v => !v)} aria-pressed={settings}>Настройки</button>}
             <button className="link" onClick={signOut}>Выйти</button>
           </div>
         )}
@@ -102,19 +106,23 @@ export default function App() {
         <Questionnaire profile={ready} user={auth.user} onSaved={gotAnswers} onCancel={() => setSurvey('closed')} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && !rehearsal && testing && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && settings && (
+        <Settings onClose={() => { setSettings(false); setTestRuns(n => n + 1); }} />
+      )}
+
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !settings && !lesson && !rehearsal && testing && (
         <Assessment kind={testing.kind} mode={testing.mode} onClose={() => { setTesting(null); setTestRuns(n => n + 1); }} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && lesson && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !settings && lesson && (
         <Lesson onClose={() => { setLesson(false); setTestRuns(n => n + 1); }} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && !lesson && rehearsal && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !settings && !lesson && rehearsal && (
         <Rehearsal onClose={() => { setRehearsal(false); setTestRuns(n => n + 1); }} />
       )}
 
-      {auth.state === 'in' && ready && !showResume && !showSurvey && !testing && !lesson && !rehearsal && (
+      {auth.state === 'in' && ready && !showResume && !showSurvey && !settings && !testing && !lesson && !rehearsal && (
         <div className="stack" style={{ marginTop: 0 }}>
           {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenDay={f => f === 'rehearsal' ? setRehearsal(true) : f === 'checkpoint' ? setTesting({ kind: 'checkpoint', mode: 'test' }) : setLesson(true)} />}
           {ready.analyzed && <LessonCard refreshKey={testRuns} onOpen={() => setLesson(true)} />}

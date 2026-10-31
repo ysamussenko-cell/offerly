@@ -12,6 +12,7 @@ import type { Rehearsal, RehearsalStore, Turn } from '../../functions/_lib/rehea
 import type { SpeechStore, SpeechTake } from '../../functions/_lib/voice';
 import type { DigestStore } from '../../functions/_lib/digest';
 import type { PushStore, PushSubscription, PushSetting } from '../../functions/_lib/push';
+import type { ProviderKey, SettingsStore } from '../../functions/_lib/settings';
 
 /** Память вместо D1 — та же семантика, что у SQL в d1Store и d1ProfileStore. */
 export function memoryStore() {
@@ -35,13 +36,14 @@ export function memoryStore() {
   const pushSettings = new Map<string, PushSetting>();
   const pushes: { userId: string; sentOn: string; sentAt: string | null; note: string }[] = [];
   const settings = new Map<string, string>();
+  const providerKeys = new Map<string, ProviderKey>();
   const patchInto = (target: any, patch: object) => Object.assign(target, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   const blank = (userId: string, now: string): Profile => ({
     userId, specialty: null, industry: null, years: null, targetRole: null, keywords: [], summary: null,
     resumeText: null, resumeName: null, resumeAt: null,
     interviewDate: null, interviewFormat: null, minutesPerDay: null, nativeLanguage: null, onboardedAt: null, targetLevel: null, weeklyGoalMinutes: null, notifyAt: null, digestSentOn: null, updatedAt: now,
   });
-  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore = {
+  const store: AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore & SettingsStore = {
     async countRecentCodes(email, since) { return codes.filter(c => c.email === email && c.createdAt >= since).length; },
     async insertCode(c) { codes.push({ ...c }); },
     async latestActiveCode(email, now) {
@@ -235,6 +237,12 @@ export function memoryStore() {
     },
     async getSetting(key) { return settings.get(key) ?? null; },
     async initSetting(key, value) { if (!settings.has(key)) settings.set(key, value); return settings.get(key)!; },
+
+    async getProviderKey(userId) { const k = providerKeys.get(userId); return k ? { ...k } : null; },
+    async saveProviderKey(k) { providerKeys.set(k.userId, { ...k }); },
+    async deleteProviderKey(userId) { return providerKeys.delete(userId); },
+    async listAssessments(userId) { return assessments.filter(a => a.userId === userId).sort((p, q) => p.startedAt.localeCompare(q.startedAt)).map(a => ({ ...a })); },
+    async listSpeeches(userId) { return speeches.filter(s => s.userId === userId).sort((p, q) => p.createdAt.localeCompare(q.createdAt)).map(s => ({ ...s })); },
   };
-  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches, digests, pushSubs, pushSettings, pushes, settings };
+  return { store, codes, users, sessions, profiles, items, assessments, attempts, cards, programDays, lessons, steps, achievements, rehearsals, turns, speeches, digests, pushSubs, pushSettings, pushes, settings, providerKeys };
 }

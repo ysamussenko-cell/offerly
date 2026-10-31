@@ -227,3 +227,12 @@ jobs:
           PSH=$(node -e 'const h=require("./deep.json"); console.log(String(h.push))')
           echo "::notice title=push::GET /api/push без cookie → $PSG; PUT /api/push → $PSP; POST /api/push/subscribe → $PSS; DELETE → $PSD; POST /api/push/send → $PSN (ждём 401 везде); GET /push-sw.js → $PSW, подключён в sw.js: $PSI; ключи VAPID: $PSH"
           [ "$PSG" = "401" ] && [ "$PSP" = "401" ] && [ "$PSS" = "401" ] && [ "$PSD" = "401" ] && [ "$PSN" = "401" ] && [ "$PSW" = "200" ] && [ "$PSI" != "0" ] || { echo "::error title=push::неожиданные коды ответа или скрипт push не подключён"; exit 1; }
+          # Настройки (4.6): ключ провайдера, уведомления, экспорт — без cookie везде 401 (ключ и экспорт не должны течь без сессии)
+          STG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/settings")
+          STK=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"provider":"groq","apiKey":"gsk_0123456789"}' "$P/api/settings/key")
+          STC=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/settings/key/check")
+          STD=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$P/api/settings/key")
+          STN=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"at":"07:00","mail":true}' "$P/api/settings/notifications")
+          STE=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/export")
+          echo "::notice title=settings::GET /api/settings без cookie → $STG; PUT /api/settings/key → $STK; POST /api/settings/key/check → $STC; DELETE → $STD; PUT /api/settings/notifications → $STN; GET /api/export → $STE (ждём 401 везде)"
+          [ "$STG" = "401" ] && [ "$STK" = "401" ] && [ "$STC" = "401" ] && [ "$STD" = "401" ] && [ "$STN" = "401" ] && [ "$STE" = "401" ] || { echo "::error title=settings::неожиданные коды ответа"; exit 1; }

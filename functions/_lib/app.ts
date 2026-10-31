@@ -20,15 +20,16 @@ import { d1RehearsalStore, today as rehearsalToday, startOrResume as startRehear
 import { d1SpeechStore, recordSpeech, speak, publicSpeech, validateTtsText, selfTestVoice, VoiceError, MAX_AUDIO_BYTES, MAX_SECONDS, MAX_TTS_CHARS, STT_MODEL, TTS_MODEL, type SpeechStore } from './voice';
 import { d1DigestStore, parseNotifyAt, digestState, nextDigest, buildDigest, sendDigestNow, localClock, minutesOf, DEFAULT_NOTIFY_AT, SEND_WINDOW_MINUTES, CRON_STEP_MINUTES, type DigestStore } from './digest';
 import { d1PushStore, vapidKeys, parseSubscribeBody, publicSubscription, sendPushNow, sentOnIfPassed, PushError, VAPID_SETTING_KEY, type PushEnv, type PushStore } from './push';
+import { d1SettingsStore, masterKey, parseKeyBody, saveKey, checkKey, userProvider, publicKey, providerOptions, decryptSecret, exportData, exportCounts, exportFileName, SettingsError, type SettingsEnv, type SettingsStore } from './settings';
 
-export interface Env extends ProviderEnv, MailEnv, PushEnv {
+export interface Env extends ProviderEnv, MailEnv, PushEnv, SettingsEnv {
   /** Адрес приложения для ссылок в письмах; без него — адрес по умолчанию из digest.ts. */
   APP_URL?: string;
   /** Только для локальной разработки: при '1' код входа возвращается в ответе, если почта не настроена. */
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore & SettingsStore;
 
 type Vars = { store: Store; auth: { user: User; sessionId: string } | null };
 
@@ -39,7 +40,7 @@ const EXTRACT_STATUS: Record<ExtractError['code'], number> = {
 };
 
 /** Создаёт приложение API. Хранилище можно подменить (тесты). */
-export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB), ...d1PushStore(env.DB) })) {
+export function createApp(version: string, makeStore: (env: Env) => Store = env => ({ ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB), ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB), ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB), ...d1PushStore(env.DB), ...d1SettingsStore(env.DB) })) {
   const app = new Hono<{ Bindings: Env; Variables: Vars }>().basePath('/api');
 
   app.use('*', async (c, next) => {
@@ -55,6 +56,12 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
     const found = await sessionFromToken(c.get('store'), token);
     if (!found) return c.json({ ok: false, error: 'unauthorized' }, 401);
     c.set('auth', { user: found.user, sessionId: found.session.id });
+    // Свой ключ провайдера (4.6): расшифровывается на время запроса и уходит в env — chat() возьмёт его вместо встроенной модели.
+    // Сбой чтения ключа не должен ронять запрос: без него работает встроенная модель.
+    try {
+      const own = await userProvider(c.env, c.get('store'), found.user.id);
+      if (own) c.env = { ...c.env, USER_PROVIDER: own };
+    } catch (e) { console.error('provider key unreadable', String(e instanceof Error ? e.message : e).slice(0, 200)); }
     await next();
   };
 
@@ -676,6 +683,99 @@ export function createApp(version: string, makeStore: (env: Env) => Store = env 
       if (r.delivered === 0) { console.error(JSON.stringify(r.devices)); return c.json({ ok: false, error: 'push_failed', devices: r.devices, reminder: r.reminder }, 502); }
       return c.json({ ok: true, delivered: r.delivered, devices: r.devices, reminder: r.reminder });
     } catch (e) { return pushFail(c, e); }
+  });
+
+  // --- настройки (4.6): свой ключ провайдера, время уведомлений, экспорт данных ---
+
+  const SETTINGS_STATUS: Record<SettingsError['code'], number> = { key_invalid: 400, key_unreadable: 409, key_none: 404, key_check_failed: 502 };
+  const settingsFail = (c: any, e: unknown) => {
+    if (e instanceof SettingsError) return c.json({ ok: false, error: e.code, reason: e.reason, detail: e.message !== e.code ? e.message : undefined }, SETTINGS_STATUS[e.code]);
+    throw e;
+  };
+  /** Сводка настроек: ключ (без самого ключа), откуда мастер-ключ, оба канала уведомлений с общим поясом, счётчики для экспорта. */
+  const settingsView = async (c: any) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    const now = new Date();
+    const row = await store.getProviderKey(user.id);
+    const { key: mk, source } = await masterKey(c.env, store, now.toISOString());
+    const readable = row ? (await decryptSecret(mk, row.keyEnc, user.id)) != null : false;
+    const p = await store.getProfile(user.id);
+    const push = await store.getPushSetting(user.id);
+    const subs = await store.listPushSubscriptions(user.id);
+    const clock = localClock(user.tz, now);
+    return {
+      ok: true,
+      provider: { key: publicKey(row, readable), keySource: source, providers: providerOptions(), builtin: PROVIDERS[0].name },
+      notifications: {
+        tz: user.tz, localTime: clock.time, defaultAt: DEFAULT_NOTIFY_AT, windowMinutes: SEND_WINDOW_MINUTES,
+        mail: { at: p?.notifyAt ?? null, enabled: Boolean(p?.notifyAt), configured: Boolean(c.env.RESEND_API_KEY) },
+        push: { at: push?.pushAt ?? null, enabled: Boolean(push?.pushAt), devices: subs.length },
+      },
+      data: { counts: await exportCounts(store, user.id), file: exportFileName(clock.date) },
+    };
+  };
+
+  app.get('/settings', requireAuth, async (c) => { try { return c.json(await settingsView(c)); } catch (e) { return settingsFail(c, e); } });
+
+  /** Сохранить свой ключ: {provider, apiKey, model?}. Ключ шифруется, в ответе — только провайдер, модель и последние четыре знака. */
+  app.put('/settings/key', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const body = await c.req.json().catch(() => ({}));
+    const v = parseKeyBody(body);
+    if (!v.ok) return c.json({ ok: false, error: 'key_invalid', reason: v.reason }, 400);
+    try {
+      await saveKey(c.env, c.get('store'), user.id, v.value, new Date().toISOString());
+      return c.json(await settingsView(c));
+    } catch (e) { return settingsFail(c, e); }
+  });
+
+  /** Проверить сохранённый ключ коротким вызовом модели (без отката на встроенную): {ok, reply | detail}. */
+  app.post('/settings/key/check', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    try {
+      const r = await checkKey(c.env, c.get('store'), user.id, new Date().toISOString());
+      const view = await settingsView(c);
+      if (!r.ok) return c.json({ ...view, ok: false, error: 'key_check_failed', detail: r.detail }, 502);
+      return c.json({ ...view, reply: r.reply });
+    } catch (e) { return settingsFail(c, e); }
+  });
+
+  /** Убрать свой ключ — дальше работает встроенная модель. */
+  app.delete('/settings/key', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const removed = await c.get('store').deleteProviderKey(user.id);
+    try { return c.json({ ...(await settingsView(c)), removed }); } catch (e) { return settingsFail(c, e); }
+  });
+
+  /** Общее время уведомлений: {at: "HH:MM", mail: bool, push: bool}. Канал без галочки выключается; push без подписанных
+   *  устройств включить нельзя — push_no_subscriptions 404. Прошедшее сегодня время — первое уведомление завтра. */
+  app.put('/settings/notifications', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const store = c.get('store');
+    const body = await c.req.json().catch(() => ({}));
+    const mail = body?.mail === true, push = body?.push === true;
+    const v = mail || push ? parseNotifyAt(body?.at) : { ok: true as const, value: null };
+    if (!v.ok) return c.json({ ok: false, error: 'notify_invalid', reason: v.reason }, 400);
+    if (push && (await store.listPushSubscriptions(user.id)).length === 0) return c.json({ ok: false, error: 'push_no_subscriptions' }, 404);
+    const now = new Date();
+    const at = v.value;
+    const mailAt = mail ? at : null, pushAt = push ? at : null;
+    await store.saveNotifyAt(user.id, mailAt, sentOnIfPassed(mailAt, user.tz, now), now.toISOString());
+    await store.savePushAt(user.id, pushAt, sentOnIfPassed(pushAt, user.tz, now), now.toISOString());
+    try { return c.json(await settingsView(c)); } catch (e) { return settingsFail(c, e); }
+  });
+
+  /** Все данные пользователя одним JSON-файлом (без ключа провайдера и адресов push-подписок). */
+  app.get('/export', requireAuth, async (c) => {
+    const user = c.get('auth')!.user;
+    const now = new Date();
+    const data = await exportData(c.get('store'), user, version, now.toISOString());
+    const name = exportFileName(localClock(user.tz, now).date);
+    return new Response(JSON.stringify(data, null, 2), {
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="${name}"`, 'cache-control': 'no-store' },
+    });
   });
 
   return app;

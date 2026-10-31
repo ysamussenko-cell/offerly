@@ -169,6 +169,25 @@ export type Push = {
 };
 export type PushDelivery = { id: string; ok: boolean; status: number; gone: boolean; detail: string | null };
 export type PushSendResult = { ok: true; delivered: number; devices: PushDelivery[]; reminder: { title: string; body: string; url: string; tag: string } };
+export type ProviderOption = { id: string; name: string; short: string; keyUrl: string | null; defaultModel: string; prefix: string | null; free: boolean };
+/** Сохранённый ключ провайдера — без самого ключа: провайдер, модель, последние четыре знака, читается ли текущим мастер-ключом, итог проверки. */
+export type ProviderKeyInfo = {
+  provider: string; providerName: string; short: string; model: string | null; custom: boolean; hint: string; readable: boolean;
+  checkedAt: string | null; checkNote: string | null; createdAt: string; updatedAt: string;
+};
+export type Settings = {
+  ok: true;
+  provider: { key: ProviderKeyInfo | null; keySource: 'env' | 'db'; providers: ProviderOption[]; builtin: string };
+  notifications: {
+    tz: string; localTime: string; defaultAt: string; windowMinutes: number;
+    mail: { at: string | null; enabled: boolean; configured: boolean };
+    push: { at: string | null; enabled: boolean; devices: number };
+  };
+  data: { counts: { assessments: number; cards: number; programDays: number; lessons: number; rehearsals: number; speeches: number }; file: string };
+  /** После проверки ключа — ответ модели. */
+  reply?: string;
+  removed?: boolean;
+};
 export type Health = { ok: boolean; version: string; db: 'ok' | 'missing' | 'error'; ai: 'ok' | 'missing' | 'error'; mail?: 'ok' | 'missing'; push?: 'env' | 'db' | 'pending' | 'error' };
 
 export class ApiError extends Error {
@@ -270,6 +289,13 @@ export const api = {
     post<Push>('/push/subscribe', { endpoint: sub.endpoint, keys: sub.keys, userAgent, ...(pushAt ? { pushAt } : {}) }),
   unsubscribePush: (endpoint: string) => del<Push & { removed: boolean }>('/push/subscribe', { endpoint }),
   sendPush: () => post<PushSendResult>('/push/send', {}),
+  settings: () => call<Settings>('/settings'),
+  saveKey: (provider: string, apiKey: string, model: string) => put<Settings>('/settings/key', { provider, apiKey, model }),
+  checkKey: () => post<Settings>('/settings/key/check', {}),
+  deleteKey: () => del<Settings>('/settings/key', {}),
+  saveNotifications: (at: string, mail: boolean, push: boolean) => put<Settings>('/settings/notifications', { at, mail, push }),
+  /** Адрес файла экспорта — открывается ссылкой, cookie сессии уходит сам. */
+  exportUrl: '/api/export',
 };
 
 /** Тексты ошибок API — одной строкой, прямо и без восклицаний. */
@@ -325,6 +351,10 @@ export const ERRORS: Record<string, string> = {
   stt_failed: 'Модель распознавания не ответила. Повторите через минуту или ответьте текстом.',
   tts_failed: 'Озвучить не удалось: модель не ответила. Попробуйте позже.',
   tts_text_invalid: 'Нечего озвучивать.',
+  key_invalid: 'Ключ не принят: проверьте провайдера, сам ключ и имя модели.',
+  key_none: 'Своего ключа нет — работает встроенная модель.',
+  key_unreadable: 'Сохранённый ключ не читается: мастер-ключ сервера сменился. Введите ключ заново.',
+  key_check_failed: 'Провайдер не ответил на пробный запрос. Проверьте ключ и модель.',
   request_failed: 'Сервер не ответил. Проверьте связь и попробуйте снова.',
 };
 
