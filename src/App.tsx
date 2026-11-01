@@ -43,6 +43,8 @@ function Shell() {
   const [auth, setAuth] = useState<Auth>({ state: 'loading' });
   const [profile, setProfile] = useState<ProfileState>({ state: 'loading' });
   const [replacing, setReplacing] = useState(false);
+  // Причина последнего неудачного разбора резюме — показывается на карточке профиля, пока профиль не собран.
+  const [profileNotice, setProfileNotice] = useState<string | null>(null);
   /** Анкета: 'auto' — открыть сразу после разбора резюме, 'open' — по кнопке, 'closed' — отложена или сохранена. */
   const [survey, setSurvey] = useState<'auto' | 'open' | 'closed'>('auto');
   /** Открытый экран (занятие, репетиция, тест, срез, настройки); счётчик — чтобы карточки перечитали состояние после закрытия. */
@@ -94,7 +96,7 @@ function Shell() {
     try { await api.logout(); } finally { setAuth({ state: 'anonymous' }); }
   }
 
-  function gotProfile(p: Profile) { setProfile({ state: 'ready', profile: p }); setReplacing(false); }
+  function gotProfile(p: Profile, notice?: string) { setProfile({ state: 'ready', profile: p }); setReplacing(false); setProfileNotice(notice ?? null); }
   function gotAnswers(p: Profile, u: User) {
     setProfile({ state: 'ready', profile: p });
     setSurvey('closed');
@@ -176,7 +178,7 @@ function Shell() {
           {ready.analyzed && <DigestCard refreshKey={testRuns} />}
           {ready.analyzed && <PushCard refreshKey={testRuns} />}
           {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
-          <ProfileCard profile={ready} onReplace={() => setReplacing(true)}
+          <ProfileCard profile={ready} notice={profileNotice} onReplace={() => setReplacing(true)}
             onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}
             onNext={ready.onboarded ? undefined : () => setSurvey('open')} />
           {ready.analyzed && <BankCard />}

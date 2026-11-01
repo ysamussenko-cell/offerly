@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent, type FormEvent } from 'react';
-import { api, ApiError, errorText, type Profile } from '../api';
+import { api, errorText, failedAnalysis, type Profile } from '../api';
 import { yearsText } from '../text';
 import { useHotkeys } from '../KeyHints';
 
@@ -9,7 +9,7 @@ const MIN_CHARS = 200;
 type Phase = { kind: 'idle' } | { kind: 'reading' } | { kind: 'analyzing' };
 
 /** Загрузка резюме: файл или вставленный текст → профиль. Экран показывается, пока профиля нет или его меняют. */
-export default function Resume({ profile, onProfile, onCancel }: { profile: Profile | null; onProfile: (p: Profile) => void; onCancel?: () => void }) {
+export default function Resume({ profile, onProfile, onCancel }: { profile: Profile | null; onProfile: (p: Profile, notice?: string) => void; onCancel?: () => void }) {
   const [mode, setMode] = useState<'file' | 'text'>('file');
   const [text, setText] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
@@ -26,9 +26,10 @@ export default function Resume({ profile, onProfile, onCancel }: { profile: Prof
       const r = await task();
       onProfile(r.profile);
     } catch (e) {
-      setError(errorText(e));
-      // Разбор не удался, но текст сохранён — показать профиль с кнопкой повтора.
-      if (e instanceof ApiError && e.code === 'profile_failed' && e.body?.profile) onProfile(e.body.profile);
+      // Разбор не удался, но текст сохранён — показать профиль с кнопкой повтора; причина переходит на карточку.
+      const failed = failedAnalysis(e);
+      if (failed) onProfile(failed.profile, failed.notice);
+      else setError(errorText(e));
     } finally { setPhase({ kind: 'idle' }); }
   }
 
@@ -100,7 +101,7 @@ export default function Resume({ profile, onProfile, onCancel }: { profile: Prof
 }
 
 /** Карточка профиля: что тренер понял из резюме. Пока анкета не заполнена — ведёт к ней. */
-export function ProfileCard({ profile, onReplace, onRetry, onNext }: { profile: Profile; onReplace: () => void; onRetry: () => Promise<void>; onNext?: () => void }) {
+export function ProfileCard({ profile, notice, onReplace, onRetry, onNext }: { profile: Profile; notice?: string | null; onReplace: () => void; onRetry: () => Promise<void>; onNext?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const when = profile.resumeAt ? new Date(profile.resumeAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : null;
@@ -109,6 +110,8 @@ export function ProfileCard({ profile, onReplace, onRetry, onNext }: { profile: 
     setBusy(true); setError(null);
     try { await onRetry(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
+  // Причина неудачного разбора с экрана загрузки — пока профиль не собран и повтор не идёт.
+  const shown = error ?? (busy || profile.analyzed ? null : notice ?? null);
 
   return (
     <section className="card">
@@ -132,7 +135,7 @@ export function ProfileCard({ profile, onReplace, onRetry, onNext }: { profile: 
       ) : (
         <p className="muted">Текст резюме сохранён{when ? ` ${when}` : ''}, но профиль ещё не собран.</p>
       )}
-      {error && <p className="error" role="alert" style={{ marginTop: 12 }}>{error}</p>}
+      {shown && <p className="error" role="alert" style={{ marginTop: 12 }}>{shown}</p>}
       <div className="row" style={{ marginTop: 20 }}>
         {!profile.analyzed && <button className="btn" type="button" disabled={busy} onClick={retry}>{busy ? 'Разбираю…' : 'Разобрать снова'}</button>}
         {onNext && <button className="btn" type="button" disabled={busy} onClick={onNext}>Дальше — шесть вопросов</button>}

@@ -56,3 +56,4 @@
   - [x] Из обзора: API-тесты на `sqlStore` — вторая партия из семи файлов (achievements, cards, dashboard, digest, program, seed, settings), помощники `putAssessment`/`putProfile` (0.25.14); осталось 6 файлов
   - [x] Из обзора: API-тесты на `sqlStore` — третья партия (assessment, checkpoint, lesson, push, rehearsal, scoring), `memoryStore` удалён, правило под тестом архитектуры (0.25.15)
   - [x] Из обзора: сценарий Playwright для знакомства — резюме файлом (TXT, DOCX) и текстом, сбой и повтор разбора, анкета, правка ответов, замена резюме (0.25.16: `e2e/onboarding.e2e.ts`)
+  - [x] Замечено после 0.25.16: причина сбоя разбора резюме (`profile_failed`) видна на карточке профиля, а не теряется при смене экрана (0.25.17)

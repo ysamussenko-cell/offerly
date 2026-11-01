@@ -406,6 +406,12 @@ export const errorText = (e: unknown) => {
   return detail ? `${base} Ответ сервера: ${detail}` : base;
 };
 
+/** Разбор резюме не удался, но текст сохранён: профиль для карточки и строка причины, которую карточка покажет. */
+export function failedAnalysis(e: unknown): { profile: Profile; notice: string } | null {
+  if (e instanceof ApiError && e.code === 'profile_failed' && e.body?.profile) return { profile: e.body.profile as Profile, notice: errorText(e) };
+  return null;
+}
+
 /** То же для репетиции: отказ по длине ответа объясняется её мерками. */
 export const rehearsalErrorText = (e: unknown) => {
   if (e instanceof ApiError && e.code === 'answer_invalid') return REHEARSAL_REFUSALS[String(e.body?.reason)] ?? ERRORS.answer_invalid;

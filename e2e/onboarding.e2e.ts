@@ -57,6 +57,9 @@ describe('резюме', () => {
     await profileCard.waitFor();
     expect(await text(profileCard)).toMatch(/профиль ещё не собран/);
     expect(await text(profileCard)).toMatch(/resume\.docx/);
+    // причина сбоя не теряется при смене экрана — строка на карточке профиля
+    const reason = profileCard.getByRole('alert');
+    expect(await text(reason)).toMatch(/^Текст сохранён, но модель не смогла собрать профиль\. Нажмите «Разобрать снова»\./);
     await profileCard.getByRole('button', { name: 'Разобрать снова' }).waitFor();
 
     const row = profileRow();
