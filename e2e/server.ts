@@ -29,10 +29,11 @@ export interface Stand {
 /** Модель стенда. По умолчанию недоступна: любой вызов падает с понятной ошибкой — сценарии не зависят от неё,
  *  а экраны показывают путь сбоя (встроенный сценарий, «Разобрать снова», «Оценить письмо снова»).
  *  Сценарий может положить заготовленный ответ экзаменатора: reply(match, json) — он уйдёт первому вызову, у которого
- *  системная подсказка содержит match, один раз. Это ответ «модели», а не эталон: эталоны и рубрики остаются в банке,
+ *  системная подсказка содержит match (или запрос — при where 'user': так различаются параллельные вызовы с одной
+ *  подсказкой, например проверка каждого задания экзаменатором банка), один раз. Это ответ «модели», а не эталон: эталоны и рубрики остаются в банке,
  *  и сервер проверяет ответ так же, как настоящий (цитаты, которых нет в тексте ученика, отбрасываются). */
 export interface StandAi {
-  reply(match: string, body: unknown): void;
+  reply(match: string, body: unknown, where?: 'system' | 'user'): void;
   /** Все вызовы модели: системная подсказка, запрос и чем кончился вызов. */
   calls: { system: string; user: string; answered: boolean }[];
   /** Заготовки, которые ещё никто не забрал. */
@@ -40,17 +41,17 @@ export interface StandAi {
 }
 
 function standAi(): StandAi & { run(model: string, input: { messages?: { role: string; content: string }[] }): Promise<{ response: string }> } {
-  const queue: { match: string; body: string }[] = [];
+  const queue: { match: string; body: string; where: 'system' | 'user' }[] = [];
   const calls: StandAi['calls'] = [];
   return {
     calls,
-    reply(match, body) { queue.push({ match, body: typeof body === 'string' ? body : JSON.stringify(body) }); },
+    reply(match, body, where = 'system') { queue.push({ match, where, body: typeof body === 'string' ? body : JSON.stringify(body) }); },
     pending: () => queue.length,
     async run(_model, input) {
       const msgs = input?.messages ?? [];
       const system = msgs.filter(m => m.role === 'system').map(m => m.content).join('\n');
       const user = msgs.filter(m => m.role === 'user').map(m => m.content).join('\n');
-      const i = queue.findIndex(q => system.includes(q.match));
+      const i = queue.findIndex(q => (q.where === 'user' ? user : system).includes(q.match));
       calls.push({ system, user, answered: i >= 0 });
       if (i < 0) throw new Error('на стенде e2e модель отключена');
       return { response: queue.splice(i, 1)[0].body };

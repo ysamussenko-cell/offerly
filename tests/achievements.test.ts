@@ -193,4 +193,16 @@ describe('API достижений', () => {
     const g2: any = await (await call('/achievements', { headers: { cookie } })).json();
     expect(g2).toMatchObject({ unlocked: 1, fresh: 0 }); expect(g2.achievements[0].new).toBe(false);
   });
+
+  it('открытое раньше (ответом в занятии) и не увиденное считается в fresh — иначе клиент не гасит «новое»', async () => {
+    const { mem, call, post, cookie, userId } = await login();
+    mem.cards.push({ ...cardOf(true), userId });
+    // открытие произошло вне GET /achievements — как при ответе на шаг занятия
+    await syncAchievements(mem.store, userId, 'Asia/Almaty');
+    const g: any = await (await call('/achievements', { headers: { cookie } })).json();
+    expect(g).toMatchObject({ unlocked: 1, fresh: 1 }); expect(g.achievements[0].new).toBe(true);
+    await post('/achievements/seen', {}, cookie);
+    const g2: any = await (await call('/achievements', { headers: { cookie } })).json();
+    expect(g2).toMatchObject({ unlocked: 1, fresh: 0 });
+  });
 });

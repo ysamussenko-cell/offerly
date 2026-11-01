@@ -16,6 +16,8 @@ export interface SeedOptions {
   tz?: string;
   /** Формат дня программы на сегодня: занятие (по умолчанию), репетиция или срез. */
   format?: DayFormat;
+  /** false — без дня программы: программу ученик составляет сам на экране. */
+  program?: boolean;
 }
 
 export const SEED_TOPICS = ['conjunctions', 'articles', 'tenses', 'prepositions'] as const;
@@ -96,7 +98,7 @@ export async function seedUser(memory: ReturnType<typeof memoryStore>, opts: See
     id: nextId('e2e-day'), userId: user.id, dayDate: today, position: 1, week: 1, format: opts.format ?? 'lesson', topic: opts.format === 'checkpoint' ? 'mixed' : topic, writing: opts.format && opts.format !== 'lesson' ? null : 'review',
     reason: opts.format === 'checkpoint' ? 'укороченный тест стенда e2e' : 'Стартовая тема стенда e2e', status: 'planned', minutes: 25, score: null, completedAt: null, generatedAt: now, updatedAt: null,
   };
-  await store.replacePlannedDays(user.id, today, [day]);
+  if (opts.program !== false) await store.replacePlannedDays(user.id, today, [day]);
 
   return { userId: user.id, today, items: items.length, cards: cardsAdded, topic };
 }

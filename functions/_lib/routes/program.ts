@@ -65,11 +65,13 @@ export function programRoutes() {
 
   // --- достижения ---
 
-  /** Каталог достижений с прогрессом: условия пересчитываются по ответам, новые открываются при каждом запросе. */
+  /** Каталог достижений с прогрессом: условия пересчитываются по ответам, новые открываются при каждом запросе.
+   *  fresh — сколько открытых ещё не отмечено увиденным, включая открытые раньше ответом в занятии или тесте:
+   *  по нему клиент гасит отметку «новое». */
   r.get('/achievements', requireAuth, async (c) => {
     const user = c.get('auth')!.user;
     const a = await syncAchievements(c.get('store'), user.id, user.tz);
-    return c.json({ ok: true, total: ACHIEVEMENTS.length, unlocked: a.all.filter(x => x.unlocked).length, fresh: a.fresh.length, achievements: a.all });
+    return c.json({ ok: true, total: ACHIEVEMENTS.length, unlocked: a.all.filter(x => x.unlocked).length, fresh: a.all.filter(x => x.new).length, achievements: a.all });
   });
 
   /** Отметить открытые достижения увиденными — «новое» больше не показывается. */
