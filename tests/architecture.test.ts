@@ -116,6 +116,13 @@ describe('бюджеты размера', () => {
     expect(over.map(f => `${f}: ${lineCount(f)}`)).toEqual([]);
   });
 
+  it('подсказки модели репетиции — в rehearsal-prompts.ts: в rehearsal.ts нет системных подсказок, обратного импорта нет', () => {
+    expect(readFileSync('functions/_lib/rehearsal.ts', 'utf-8')).not.toMatch(/role:\s*'system'/);
+    expect(readFileSync('functions/_lib/rehearsal-prompts.ts', 'utf-8')).toMatch(/role:\s*'system'/);
+    expect(graph.edges.filter(e => e.from === 'functions/_lib/rehearsal-prompts.ts' && e.to === 'functions/_lib/rehearsal.ts')).toEqual([]);
+    expect(lineCount('functions/_lib/rehearsal.ts')).toBeLessThan(600);
+  });
+
   it('app.ts — только склейка (≤ 120 строк, без своих маршрутов); маршруты — в routes/*, модуль области ≤ 350 строк, всего 50–90', () => {
     expect(routeCount('functions/_lib/app.ts')).toBe(0);
     expect(lineCount('functions/_lib/app.ts')).toBeLessThanOrEqual(120);

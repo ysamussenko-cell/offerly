@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
+import * as rehearsalModule from '../functions/_lib/rehearsal';
+import * as prompts from '../functions/_lib/rehearsal-prompts';
+import { CARD_TOPICS } from '../functions/_lib/cards';
+import { LEVELS } from '../functions/_lib/items';
 import {
-  QUESTION_KINDS, QUESTION_COUNT, ANSWER_WORDS, REPLACEMENTS, CARD_SOURCE, KIND_LABELS,
-  scriptPrompt, normalizeScript, defaultScript, writeScript, validateAnswer, reviewPrompt, normalizeReview, reviewRehearsal, rehearsalAxes,
+  QUESTION_KINDS, REPLACEMENTS, scriptPrompt, defaultScript, reviewPrompt,
+} from '../functions/_lib/rehearsal-prompts';
+import {
+  QUESTION_COUNT, ANSWER_WORDS, CARD_SOURCE, KIND_LABELS,
+  normalizeScript, writeScript, validateAnswer, normalizeReview, reviewRehearsal, rehearsalAxes,
   draftsFromReplacements, replacementOrigin, today as rehearsalToday, startOrResume, answer, rescore, abandon, d1RehearsalStore, RehearsalError,
   type Rehearsal, type Turn,
 } from '../functions/_lib/rehearsal';
@@ -391,5 +398,33 @@ describe('маршруты /api/rehearsal', () => {
     expect(r.status).toBe(404);
     expect(await r.json()).toMatchObject({ ok: false, error: 'rehearsal_none' });
     expect(new RehearsalError('rehearsal_none').message).toBe('rehearsal_none');
+  });
+});
+
+describe('подсказки модели в rehearsal-prompts.ts', () => {
+  it('rehearsal.ts реэкспортирует те же объекты, а не копии', () => {
+    for (const k of ['QUESTION_KINDS', 'REPLACEMENTS', 'SCRIPT_SCHEMA', 'REVIEW_SCHEMA', 'scriptPrompt', 'defaultScript', 'reviewPrompt'] as const) {
+      expect(rehearsalModule[k], k).toBe(prompts[k]);
+    }
+  });
+
+  it('схемы ответа модели перечисляют те же виды вопросов, уровни и все темы карточек', () => {
+    const kinds = (prompts.SCRIPT_SCHEMA.properties.questions.items.properties.kind as { enum: string[] }).enum;
+    expect(kinds).toEqual([...prompts.QUESTION_KINDS]);
+    expect(prompts.REVIEW_SCHEMA.properties.level.enum).toEqual([...LEVELS]);
+    const topics = (prompts.REVIEW_SCHEMA.properties.replacements.items.properties.topic as { enum: string[] }).enum;
+    expect(topics).toEqual(CARD_TOPICS.map(t => t.id));
+    expect(reviewPrompt({ targetRole: null, level: 'B1' }, [], { specialty: null, industry: null, targetRole: null, keywords: [] })[1].content).toContain('Target role: not specified');
+  });
+
+  it('подсказка экзаменатора принимает ход репетиции как есть: голосовой ответ помечен, пустой — «(no answer)»', () => {
+    const turns: prompts.PromptTurn[] = [
+      { position: 1, kind: 'experience', question: 'Tell me about your experience.', rubric: ['Конкретика'], answer: 'I built forecasting models for retail chains.', speechId: 'sp1' },
+      { position: 2, kind: 'mistake', question: 'What went wrong?', rubric: ['Причина'], answer: null, speechId: null },
+    ];
+    const user = reviewPrompt({ targetRole: 'Analyst', level: 'B2' }, turns, { specialty: 'data', industry: null, targetRole: null, keywords: [] })[1].content;
+    expect(user).toContain('(spoken; automatic transcript');
+    expect(user).toContain('QUESTION 2 (mistake): What went wrong?');
+    expect(user).toContain('(no answer)');
   });
 });
