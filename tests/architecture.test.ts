@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { importGraph, cycles, lineCount, listSources } from './helpers/imports';
+import { mismatches } from '../scripts/release-version.mjs';
 
 /**
  * Архитектурные правила из обзора docs/review-2026-10-31.md. Падение теста — не «сломалось»,
@@ -16,9 +17,10 @@ const routeCount = (f: string) => readFileSync(f, 'utf-8').match(/\b(app|r)\.(ge
 
 describe('границы слоёв', () => {
   it('фронт и API не импортируют друг друга — общаются только по HTTP', () => {
+    // Единственное исключение — functions/_lib/version.ts читает версию из package.json (встраивается при сборке).
     const crossing = graph.edges.filter(e =>
       (e.from.startsWith('src/') && !e.to.startsWith('src/')) ||
-      (e.from.startsWith('functions/') && !e.to.startsWith('functions/')));
+      (e.from.startsWith('functions/') && !e.to.startsWith('functions/') && !(e.from === 'functions/_lib/version.ts' && e.to === 'package.json')));
     expect(crossing.map(e => `${e.from} → ${e.to}`)).toEqual([]);
   });
 
@@ -27,11 +29,11 @@ describe('границы слоёв', () => {
     expect(bad.map(e => `${e.from} → ${e.to}`)).toEqual([]);
   });
 
-  it('Hono знают только app.ts и routes/context.ts (area); точка входа Pages импортирует только app.ts', () => {
+  it('Hono знают только app.ts и routes/context.ts (area); точка входа Pages импортирует только app.ts и version.ts', () => {
     const hono = [...graph.external.entries()].filter(([, pkgs]) => [...pkgs].some(p => p === 'hono' || p.startsWith('hono/'))).map(([f]) => f);
     expect(hono).toEqual(['functions/_lib/app.ts', 'functions/_lib/routes/context.ts']);
     const entry = graph.edges.filter(e => e.from === 'functions/api/[[route]].ts').map(e => e.to);
-    expect(entry).toEqual(['functions/_lib/app.ts']);
+    expect(entry).toEqual(['functions/_lib/app.ts', 'functions/_lib/version.ts']);
   });
 
   it('SQL к D1 пишут только модули functions/_lib (Worker — лишь проверка связи)', () => {
@@ -166,14 +168,17 @@ describe('тесты и версии', () => {
     expect(Number(tsVersion.replace(/^\D*/, '').split('.')[1])).toBeGreaterThanOrEqual(7); // Uint8Array<…> появился в TypeScript 5.7
   });
 
-  it('версия одна во всех пяти местах', () => {
+  it('версия задаётся в package.json: API и Worker читают её через functions/_lib/version.ts, остальное правит release:version', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf-8')).version as string;
     expect(pkg).toMatch(/^\d+\.\d+\.\d+$/);
-    const route = readFileSync('functions/api/[[route]].ts', 'utf-8').match(/const VERSION = '([^']+)'/)?.[1];
-    const worker = readFileSync('workers/digest/index.ts', 'utf-8').match(/export const VERSION = '([^']+)'/)?.[1];
-    const tauri = JSON.parse(readFileSync('desktop/src-tauri/tauri.conf.json', 'utf-8')).version as string;
-    const cargo = readFileSync('desktop/src-tauri/Cargo.toml', 'utf-8').match(/^version = "([^"]+)"/m)?.[1];
-    expect({ route, worker, tauri, cargo }).toEqual({ route: pkg, worker: pkg, tauri: pkg, cargo: pkg });
+    // Ни одного литерала версии в коде сервера и Worker — только импорт из version.ts.
+    const literal = graph.files.filter(f => (f.startsWith('functions/') || f.startsWith('workers/')) && /\bVERSION\s*=\s*['"]/.test(readFileSync(f, 'utf-8')));
+    expect(literal).toEqual([]);
+    expect(readFileSync('functions/_lib/version.ts', 'utf-8')).toContain(`from '../../package.json'`);
+    const users = graph.edges.filter(e => e.to === 'functions/_lib/version.ts').map(e => e.from).sort();
+    expect(users).toEqual(['functions/api/[[route]].ts', 'workers/digest/index.ts']);
+    // Файлы других инструментов (npm, Tauri, Cargo) сверяет тот же модуль, что их поднимает.
+    expect(mismatches()).toEqual([]);
     const changelog = readFileSync('CHANGELOG.md', 'utf-8');
     expect(changelog, 'CHANGELOG.md должен содержать раздел текущей версии').toContain(`## ${pkg} `);
   });

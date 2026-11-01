@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022", "lib": ["ES2022"], "module": "ESNext", "moduleResolution": "bundler",
-    "strict": true, "skipLibCheck": true, "noEmit": true, "types": ["@cloudflare/workers-types"]
+    "strict": true, "skipLibCheck": true, "noEmit": true, "resolveJsonModule": true, "types": ["@cloudflare/workers-types"]
   },
   "include": ["functions", "workers"]
 }

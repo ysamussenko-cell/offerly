@@ -366,8 +366,8 @@ describe('D1 и Worker', () => {
     expect(toml).toContain('database_id = "__D1_ID__"');
     expect(toml).toContain('name = "offerly-digest"');
     expect(toml).toContain('APP_URL = "https://offerly-c8b.pages.dev"');
-    // версия Worker — та же, что у приложения (package.json и functions/api/[[route]].ts)
+    // версия Worker — та же, что у приложения: обе читают package.json через functions/_lib/version.ts
     expect(VERSION).toBe(JSON.parse(readFileSync('package.json', 'utf-8')).version);
-    expect(readFileSync('functions/api/[[route]].ts', 'utf-8')).toContain(`const VERSION = '${VERSION}'`);
+    expect(readFileSync('functions/api/[[route]].ts', 'utf-8')).toContain(`import { VERSION } from '../_lib/version'`);
   });
 });

@@ -165,10 +165,10 @@ describe('релиз для Windows: версии и latest.json', () => {
   const root = new URL('..', import.meta.url);
   const read = (p: string) => readFileSync(new URL(p, root), 'utf8');
 
-  it('версия одна везде: package.json, API, Worker, tauri.conf.json, Cargo.toml', () => {
+  it('версия одна везде: package.json, API и Worker (читают package.json), tauri.conf.json, Cargo.toml', () => {
     const pkg = JSON.parse(read('package.json')).version;
-    expect(read('functions/api/[[route]].ts')).toContain(`const VERSION = '${pkg}'`);
-    expect(read('workers/digest/index.ts')).toContain(`export const VERSION = '${pkg}'`);
+    expect(read('functions/api/[[route]].ts')).toContain(`import { VERSION } from '../_lib/version'`);
+    expect(read('workers/digest/index.ts')).toContain(`import { VERSION } from '../../functions/_lib/version'`);
     expect(JSON.parse(read('desktop/src-tauri/tauri.conf.json')).version).toBe(pkg);
     expect(read('desktop/src-tauri/Cargo.toml')).toMatch(new RegExp(`^version = "${pkg.replace(/\./g, '\\.')}"$`, 'm'));
   });
