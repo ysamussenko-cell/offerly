@@ -1,17 +1,17 @@
 {
   "current_task": null,
-  "last_completed": "Постоянно / из обзора 31.10: API-тесты Vitest на настоящем SQL — первая партия (0.25.13). Помощник sqlStore() в tests/helpers/sqliteD1.ts (d1AllStores поверх node:sqlite, rows в camelCase — общий rowsOf со стендом e2e, addUser). Переведены auth, api, onboarding, items, voice, desktop, errors, release, smoke; API собирается createApp('test') с env.DB. Храповик в tests/architecture.test.ts: список файлов на memoryStore только сокращается — осталось 13 (achievements, assessment, cards, checkpoint, dashboard, digest, lesson, program, push, rehearsal, scoring, seed, settings; самые тяжёлые — lesson, checkpoint, push, scoring с засевом items/attempts). Тесты 543, e2e 26/26. Следующий архитектурный обзор — около 07.11.",
+  "last_completed": "Постоянно / из обзора 31.10: API-тесты Vitest на настоящем SQL — вторая партия (0.25.14). Переведены achievements, cards, dashboard, digest, program, seed, settings: засев через методы хранилищ D1, проверки rows(), API через createApp('test') с env.DB. В sqlStore() добавлены putAssessment (create+update, как оценка) и putProfile (профиль целиком одной строкой). Храповик: на memoryStore осталось 6 файлов — assessment, checkpoint, lesson, push, rehearsal, scoring (засев банка, попыток, шагов; key()-функции читают эталон из локального массива items, item_id — из attempts, как в cards.test). Тестов 544. Следующий архитектурный обзор — около 07.11.",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "5a1c1a5",
-    "run": 41296467583,
-    "version": "0.25.13",
-    "health": "ok:true version 0.25.13 db:ok ai:ok mail:ok push:db — по аннотации health в run 41296467583; WebFetch из плановой сессии снова PROVENANCE_REQUIRED",
+    "commit": "f7a6f8b",
+    "run": 41300993313,
+    "version": "0.25.14",
+    "health": "ok:true version 0.25.14 db:ok ai:ok mail:ok push:db — по аннотации health в run 41300993313; WebFetch из плановой сессии снова PROVENANCE_REQUIRED",
     "seed": "миграций нет",
     "worker": "offerly-digest задеплоен (аннотация в run)",
-    "desktop": "workflow Desktop run 41296467675 запущен вместе с деплоем",
-    "smoke": "run завершён успешно (все шаги зелёные); e2e 26/26 локально"
+    "desktop": "workflow Desktop run 41300993199 запущен вместе с деплоем",
+    "smoke": "run завершён успешно (все шаги зелёные)"
   },
   "defects": [],
   "pending_from_yuriy": [
