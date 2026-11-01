@@ -5,7 +5,7 @@ import {
   type Transcript, type SpeechTake,
 } from '../functions/_lib/voice';
 import { rehearsalAxes, answer, startOrResume, reviewPrompt, type Turn } from '../functions/_lib/rehearsal';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 import { d1Of, freshDb } from './helpers/sqliteD1';
 import type { Env } from '../functions/_lib/providers';
 
@@ -109,17 +109,18 @@ describe('расшифровка', () => {
     await expect(transcribe(ENV, audio(), { aiRun: async () => ({ text: '' }) })).rejects.toMatchObject({ code: 'audio_empty' });
   });
   it('recordSpeech: проверка, распознавание, запись в хранилище с мерками; publicSpeech без владельца', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
+    mem.addUser(USER);
     const take = await recordSpeech(ENV, mem.store, USER, audio(), 'audio/wav', { aiRun: async () => TURBO, now: () => NOW, id: () => 's1' });
     expect(take).toMatchObject({ id: 's1', userId: USER, text: TURBO.text, words: 17, wpm: 85, model: STT_MODEL, createdAt: NOW });
-    expect(mem.speeches).toHaveLength(1);
+    expect(mem.rows('SELECT id FROM speech_takes')).toHaveLength(1);
     expect(await mem.store.getSpeech('s1', USER)).toMatchObject({ id: 's1' });
     expect(await mem.store.getSpeech('s1', 'other')).toBeNull();
     const pub = publicSpeech(take) as any;
     expect(pub.userId).toBeUndefined();
     expect(pub.fluency).toBe(take.fluency);
     await expect(recordSpeech(ENV, mem.store, USER, audio(10), 'audio/wav', { aiRun: async () => TURBO })).rejects.toMatchObject({ code: 'audio_empty' });
-    expect(mem.speeches).toHaveLength(1);
+    expect(mem.rows('SELECT id FROM speech_takes')).toHaveLength(1);
   });
   it('base64 туда и обратно', () => {
     const b = new Uint8Array(70000).map((_, i) => i % 251);
@@ -180,7 +181,8 @@ describe('беглость в репетиции', () => {
     expect(some.overall).toBe(60);
   });
   it('answer с speechId: запись своя — хранится на вопросе и видна меркой; чужая или неизвестная — answer_invalid speech_unknown; в подсказке экзаменатору ответ помечен как устный', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
+    mem.addUser(USER);
     await mem.store.insertSpeech(take('s1', 48));
     const fail = async () => { throw new Error('AI down'); };
     const o = { chatFn: fail, now: () => NOW, id: (() => { let n = 0; return () => `id${++n}`; })() };
@@ -191,7 +193,7 @@ describe('беглость в репетиции', () => {
     expect(v.spoken).toBe(1);
     expect(v.turns[0].speech).toMatchObject({ wpm: 105, pauses: 1, fillers: 0, fluency: 48 });
     expect(v.turns[0].speech).not.toHaveProperty('text');
-    expect(mem.turns[0].speechId).toBe('s1');
+    expect(mem.rows('SELECT speech_id FROM rehearsal_turns WHERE answer IS NOT NULL')[0].speechId).toBe('s1');
     const turns = await mem.store.listTurns(v.id);
     const [, user] = reviewPrompt({ targetRole: null, level: 'B1' }, turns, { specialty: null, industry: null, targetRole: null, keywords: [] });
     expect(user.content).toContain("CANDIDATE'S ANSWER (spoken; automatic transcript");
@@ -221,10 +223,10 @@ describe('маршруты /api/voice', () => {
   const mp3 = new Uint8Array(2048).fill(3);
   const turbo = { text: 'I led the commissioning of two boilers and we reduced the start-up time by forty percent for the plant.', transcription_info: { duration: 9 }, segments: [] };
   async function session(aiRun: (m: string, i: any) => Promise<any>) {
-    const mem = memoryStore();
-    const env = { DB: null, AI: { run: aiRun }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
+    const mem = sqlStore();
+    const env = { DB: mem.DB, AI: { run: aiRun }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
     const { createApp } = await import('../functions/_lib/app');
-    const app = createApp('test', () => mem.store);
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) => call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const r1 = await post('/auth/request', { email: 'y@example.com' });
@@ -247,7 +249,8 @@ describe('маршруты /api/voice', () => {
   it('transcribe: WAV → запись с расшифровкой и мерками; подсказка словаря из профиля; её id принимает ответ репетиции', async () => {
     const inputs: any[] = [];
     const { call, post, h, mem } = await session(async (m, i) => { inputs.push([m, i]); return m === STT_MODEL ? turbo : { response: '{}' }; });
-    mem.profiles.set(mem.users[0].id, { ...(await mem.store.getProfile(mem.users[0].id) ?? {} as any), userId: mem.users[0].id, keywords: ['boiler efficiency', 'steam turbine'] });
+    const [{ id: uid }] = mem.rows('SELECT id FROM users');
+    mem.db.prepare('INSERT INTO profiles (user_id, keywords) VALUES (?, ?)').run(uid, JSON.stringify(['boiler efficiency', 'steam turbine']));
     const r = await upload(call, h, audio(50000), 'audio/wav');
     expect(r.status).toBe(200);
     const j = await r.json() as any;
@@ -256,8 +259,7 @@ describe('маршруты /api/voice', () => {
     expect(j.speech.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(j.speech.userId).toBeUndefined();
     expect(inputs[0][1].initial_prompt).toBe('boiler efficiency, steam turbine');
-    expect(mem.speeches).toHaveLength(1);
-    expect(mem.speeches[0].userId).toBe(mem.users[0].id);
+    expect(mem.rows('SELECT user_id FROM speech_takes')).toEqual([{ userId: uid }]);
     const meta = await (await call('/voice/meta', { headers: h })).json() as any;
     expect(meta).toMatchObject({ ok: true, maxBytes: MAX_AUDIO_BYTES, maxChars: 600 });
     void post;

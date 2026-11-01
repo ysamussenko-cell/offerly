@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { validateAnswers, parseDate, isTimeZone, MAX_DAYS_AHEAD } from '../functions/_lib/onboarding';
 import { todayIn, daysBetween } from '../functions/_lib/dates';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 import { SAMPLE_RESUME } from './helpers/fixtures';
 
 const NOW = new Date('2026-10-30T06:00:00Z'); // в Алматы уже 11:00 30.10, в Лос-Анджелесе ещё 23:00 29.10
@@ -81,9 +81,9 @@ const PROFILE_JSON = JSON.stringify({
 });
 
 function makeApp() {
-  const mem = memoryStore();
-  const env = { DB: null, AI: { run: async () => ({ response: PROFILE_JSON }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
-  const app = createApp('test', () => mem.store);
+  const mem = sqlStore();
+  const env = { DB: mem.DB, AI: { run: async () => ({ response: PROFILE_JSON }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
+  const app = createApp('test');
   const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
   const send = (method: string, path: string, body: unknown, headers: Record<string, string> = {}) =>
     call(path, { method, headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -120,7 +120,7 @@ describe('API анкеты', () => {
     expect(j.profile.minutesPerDay).toBe(30);
     expect(j.profile.nativeLanguage).toBe('русский');
     expect(j.user.tz).toBe('Europe/Moscow');
-    expect(mem.users[0].tz).toBe('Europe/Moscow');
+    expect(mem.rows('SELECT tz FROM users')[0].tz).toBe('Europe/Moscow');
 
     const me: any = await (await call('/me', { headers: { cookie } })).json();
     expect(me.user.tz).toBe('Europe/Moscow');
@@ -139,7 +139,7 @@ describe('API анкеты', () => {
     const r2: any = await (await send('POST', '/resume/analyze', {}, { cookie })).json();
     expect(r2.profile.targetRole).toBe('эксперт по оценке ответов ИИ');
     expect(r2.profile.onboarded).toBe(true);
-    expect([...mem.profiles.values()][0].minutesPerDay).toBe(30);
+    expect(mem.rows('SELECT minutes_per_day FROM profiles')[0].minutesPerDay).toBe(30);
 
     // новое резюме тоже не сбрасывает анкету
     const r3: any = await (await send('POST', '/resume', { text: SAMPLE_RESUME.join('\n') }, { cookie })).json();

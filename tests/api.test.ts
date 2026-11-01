@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 import { loginCodeMail, sendMail } from '../functions/_lib/mail';
 import { makeDocx, makePdf, SAMPLE_RESUME } from './helpers/fixtures';
 
 function makeApp(envExtra: Partial<Env> = {}, aiRun: (...a: any[]) => Promise<any> = async () => ({ response: 'hi' })) {
-  const mem = memoryStore();
-  const env = { DB: null, AI: { run: aiRun }, APP_NAME: 'Offerly', ...envExtra } as unknown as Env;
-  const app = createApp('test', () => mem.store);
+  const mem = sqlStore();
+  const env = { DB: mem.DB, AI: { run: aiRun }, APP_NAME: 'Offerly', ...envExtra } as unknown as Env;
+  const app = createApp('test');
   const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -20,7 +20,7 @@ describe('API входа', () => {
     const r = await post('/auth/request', { email: 'a@b.cc' });
     expect(r.status).toBe(503);
     expect(await r.json()).toEqual({ ok: false, error: 'mail_not_configured' });
-    expect(mem.codes).toHaveLength(1);
+    expect(mem.rows('SELECT id FROM login_codes')).toHaveLength(1);
   });
 
   it('в режиме DEV_ECHO_CODE проходит полный цикл: код → cookie → /me → выход', async () => {
@@ -148,7 +148,7 @@ describe('API резюме и профиля', () => {
     expect(j.profile.analyzed).toBe(true);
     expect(j.profile.resumeText).toBeUndefined();
     expect(aiRun).toHaveBeenCalledTimes(1);
-    const stored = [...mem.profiles.values()][0];
+    const [stored] = mem.rows('SELECT resume_text FROM profiles');
     expect(stored.resumeText).toContain('energy audit');
   });
 
@@ -194,7 +194,7 @@ describe('API резюме и профиля', () => {
       expect(j.error).toBe('profile_failed');
       expect(j.profile.analyzed).toBe(false);
       expect(j.profile.resumeChars).toBeGreaterThan(200);
-      expect([...mem.profiles.values()][0].resumeText).toContain('Almaty');
+      expect(mem.rows('SELECT resume_text FROM profiles')[0].resumeText).toContain('Almaty');
 
       const r2 = await post('/resume/analyze', {}, { cookie });
       expect(r2.status).toBe(200);

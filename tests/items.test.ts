@@ -4,7 +4,7 @@ import {
   checkPrompt, parseGenerateBody, domainText, topicById, TOPICS, LEVELS, KINDS, type Check, type Topic,
 } from '../functions/_lib/items';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 
 const ARTICLES = topicById('articles')!;
 const DOMAIN = { specialty: 'инженер-теплоэнергетик', industry: 'энергетика', targetRole: 'эксперт по оценке ответов ИИ', keywords: ['boiler efficiency', 'energy audit'] };
@@ -159,7 +159,7 @@ describe('generateItems', () => {
   const MCQ3 = { ...MCQ, prompt: 'We measured ___ pressure in the main steam line.', options: ['a', 'an', 'the', '—'], answer: 'C' };
 
   it('проверяет каждое задание, пишет verified и rejected, дубли отбрасывает до проверки', async () => {
-    const { store, items } = memoryStore();
+    const { store, rows } = sqlStore();
     let n = 0;
     const { fn, calls } = fakeChat({ items: [MCQ, MCQ2, MCQ3, { ...MCQ, prompt: MCQ.prompt + ' ' }] }, (u) =>
       u.includes('She works as') ? { answer: 'A', level: 'B1', issues: [] } : { answer: 'C', level: 'B1', issues: [] });
@@ -169,7 +169,7 @@ describe('generateItems', () => {
     expect(r.items.map(i => i.status)).toEqual(['verified', 'rejected', 'verified']);
     expect(r.items[1].checkNote).toBe('ключ B не совпал с решением экзаменатора A');
     expect(r.items[0]).toMatchObject({ id: 'id-1', verifiedAt: '2026-10-30T10:00:00Z', source: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', topic: 'articles' });
-    expect(items).toHaveLength(3);
+    expect(rows('SELECT id FROM items')).toHaveLength(3);
     expect(await store.bankStats()).toEqual(expect.arrayContaining([{ level: 'B1', kind: 'mcq', status: 'verified', count: 2 }, { level: 'B1', kind: 'mcq', status: 'rejected', count: 1 }]));
 
     // повторная генерация тех же заданий — всё дубли, экзаменатор не вызывается, в банк ничего не пишется
@@ -179,7 +179,7 @@ describe('generateItems', () => {
     expect(calls).toHaveLength(5);
   });
   it('сбой экзаменатора — задание отклоняется с причиной, остальное не падает', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     let k = 0;
     const fn = async (_e: unknown, m: { content: string }[]) => {
       if (m[m.length - 1].content.startsWith('Write ')) return JSON.stringify({ items: [MCQ] });
@@ -190,22 +190,22 @@ describe('generateItems', () => {
     expect(r.items[0]).toMatchObject({ status: 'rejected', checkNote: 'проверка не выполнена: AI 429' });
   });
   it('генератор вернул не JSON — ошибка с началом ответа', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     await expect(generateItems(env, store, req, { chatFn: (async () => 'Sure! Here are the items...') as any })).rejects.toThrow(/генератор не вернул JSON.*Sure!/);
   });
 });
 
 describe('API банка', () => {
   function makeApp(examiner: (u: string) => unknown = () => ({ answer: 'C', level: 'B1', issues: [] })) {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const ai = { run: async (_m: string, input: any) => {
       const user = input.messages[input.messages.length - 1].content as string;
       if (user.startsWith('Write ')) return { response: JSON.stringify({ items: [MCQ] }) };
       if (user.startsWith('RÉSUMÉ')) return { response: JSON.stringify({ specialty: 'инженер', industry: 'энергетика', years: 15, keywords: ['boiler'], summary: 'Вы инженер.' }) };
       return { response: JSON.stringify(examiner(user)) };
     } };
-    const env = { DB: null, AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
-    const app = createApp('test', () => mem.store);
+    const env = { DB: mem.DB, AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const send = (method: string, path: string, body: unknown, headers: Record<string, string> = {}) =>
       call(path, { method, headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });

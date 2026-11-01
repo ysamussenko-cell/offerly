@@ -9,7 +9,7 @@ import { SettingsError } from '../functions/_lib/settings';
 import { PushError } from '../functions/_lib/push';
 import { ExtractError } from '../functions/_lib/extract';
 import { createApp, INTERNAL_ERROR, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 
 const ENV = { DB: null, AI: { run: async () => ({ response: '' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
 
@@ -75,7 +75,7 @@ describe('DomainError — общая ошибка области', () => {
 
 describe('app.onError', () => {
   async function login(patch: (store: any) => void) {
-    const mem = memoryStore();
+    const mem = sqlStore();
     patch(mem.store);
     const app = createApp('test', () => mem.store);
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, ENV);

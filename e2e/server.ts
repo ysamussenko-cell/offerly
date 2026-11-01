@@ -9,7 +9,7 @@ import { extname, join, normalize } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { DatabaseSync } from 'node:sqlite';
 import { createApp, d1AllStores, type Env } from '../functions/_lib/app';
-import { d1Of, freshDb } from '../tests/helpers/sqliteD1';
+import { d1Of, freshDb, rowsOf, type Row } from '../tests/helpers/sqliteD1';
 import { seedUser, type SeedOptions } from './seed';
 
 export const E2E_VERSION = 'e2e';
@@ -20,10 +20,7 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
 
-/** Строка таблицы для проверок сценария: колонки в camelCase (user_id → userId), значения как в SQLite (булевы — 0/1, JSON — строкой). */
-export type Row = Record<string, any>;
-
-const camel = (k: string) => k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+export type { Row };
 
 export interface Stand {
   url: string;
@@ -105,8 +102,7 @@ export async function startStand(opts: { dist?: string; port?: number } = {}): P
   // RELEASE_URL задаётся после старта: адрес стенда, который отвечает 404 — страница установки показывает «готовится» без похода на GitHub.
   const env = { DB: d1Of(db), AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env & { RELEASE_URL?: string };
   const app = createApp(E2E_VERSION);
-  const rows = <T,>(sql: string, ...params: (string | number | null)[]) =>
-    db.prepare(sql).all(...params).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [camel(k), v]))) as T[];
+  const rows = rowsOf(db);
   const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
   const index = await readFile(join(dist, 'index.html'));
 

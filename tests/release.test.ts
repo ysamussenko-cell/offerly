@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { parseLatest, fetchRelease, fileNameOf, latestUrl, LATEST_URL, RELEASES_URL, CACHE_SECONDS } from '../functions/_lib/release';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 
 const SETUP_URL = 'https://github.com/ysamussenko-cell/offerly/releases/download/v0.23.0/Offerly_0.23.0_x64-setup.exe';
 const LATEST = {
@@ -92,9 +92,9 @@ describe('fetchRelease', () => {
 
 describe('GET /api/release', () => {
   function makeApp(envExtra: Partial<Env> = {}) {
-    const mem = memoryStore();
-    const env = { DB: null, AI: null, APP_NAME: 'Offerly', ...envExtra } as unknown as Env;
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const env = { DB: mem.DB, AI: null, APP_NAME: 'Offerly', ...envExtra } as unknown as Env;
+    const app = createApp('test');
     return (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
   }
   it('открыт без сессии, отдаёт релиз и заголовок кэша', async () => {

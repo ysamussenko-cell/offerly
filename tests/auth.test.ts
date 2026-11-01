@@ -3,7 +3,7 @@ import {
   requestCode, verifyCode, sessionFromToken, logout, normalizeEmail, normalizeCode, randomCode,
   readCookie, sessionCookie, clearSessionCookie, hashCode, CODE_MAX_ATTEMPTS, CODES_PER_WINDOW, CODE_TTL_SEC,
 } from '../functions/_lib/auth';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 
 describe('нормализация ввода', () => {
   it('приводит почту к нижнему регистру и отбрасывает мусор', () => {
@@ -25,21 +25,22 @@ describe('нормализация ввода', () => {
 
 describe('запрос кода', () => {
   it('создаёт запись с хэшем, а не с кодом', async () => {
-    const { store, codes } = memoryStore();
+    const { store, rows } = sqlStore();
     const r = await requestCode(store, 'User@mail.ru');
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    const codes = rows('SELECT * FROM login_codes');
     expect(codes).toHaveLength(1);
     expect(codes[0].email).toBe('user@mail.ru');
     expect(codes[0].codeHash).not.toContain(r.code);
     expect(codes[0].codeHash).toBe(await hashCode(codes[0].id, 'user@mail.ru', r.code));
   });
   it('отказывает на плохой адрес', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     expect(await requestCode(store, 'bad')).toEqual({ ok: false, reason: 'bad_email' });
   });
   it('ограничивает число кодов за окно', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     for (let i = 0; i < CODES_PER_WINDOW; i++) expect((await requestCode(store, 'a@b.cc')).ok).toBe(true);
     expect(await requestCode(store, 'a@b.cc')).toEqual({ ok: false, reason: 'too_many' });
     // другой адрес не затронут
@@ -49,30 +50,31 @@ describe('запрос кода', () => {
 
 describe('проверка кода и сессия', () => {
   it('верный код создаёт пользователя и сессию, повторно код не работает', async () => {
-    const { store, users, sessions } = memoryStore();
+    const { store, rows } = sqlStore();
     const r = await requestCode(store, 'a@b.cc');
     if (!r.ok) throw new Error();
     const v = await verifyCode(store, 'A@B.CC', r.code);
     expect(v.ok).toBe(true);
     if (!v.ok) return;
     expect(v.isNew).toBe(true);
-    expect(users).toHaveLength(1);
+    expect(rows('SELECT id FROM users')).toHaveLength(1);
+    const sessions = rows('SELECT id FROM sessions');
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).not.toBe(v.token); // в базе только хэш
     expect(await verifyCode(store, 'a@b.cc', r.code)).toEqual({ ok: false, reason: 'no_code' });
   });
   it('второй вход того же адреса не создаёт второго пользователя', async () => {
-    const { store, users } = memoryStore();
+    const { store, rows } = sqlStore();
     for (let i = 0; i < 2; i++) {
       const r = await requestCode(store, 'a@b.cc');
       if (!r.ok) throw new Error();
       const v = await verifyCode(store, 'a@b.cc', r.code);
       expect(v.ok && v.isNew).toBe(i === 0);
     }
-    expect(users).toHaveLength(1);
+    expect(rows('SELECT id FROM users')).toHaveLength(1);
   });
   it('неверный код считает попытки и блокирует после лимита', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     const r = await requestCode(store, 'a@b.cc');
     if (!r.ok) throw new Error();
     const wrong = r.code === '000000' ? '000001' : '000000';
@@ -83,14 +85,14 @@ describe('проверка кода и сессия', () => {
     expect(await verifyCode(store, 'a@b.cc', r.code)).toEqual({ ok: false, reason: 'locked' });
   });
   it('просроченный код не принимается', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     const t0 = Date.now();
     const r = await requestCode(store, 'a@b.cc', t0);
     if (!r.ok) throw new Error();
     expect(await verifyCode(store, 'a@b.cc', r.code, t0 + (CODE_TTL_SEC + 1) * 1000)).toEqual({ ok: false, reason: 'no_code' });
   });
   it('сессия находится по токену, истекает и удаляется при выходе', async () => {
-    const { store } = memoryStore();
+    const { store } = sqlStore();
     const t0 = Date.now();
     const r = await requestCode(store, 'a@b.cc', t0);
     if (!r.ok) throw new Error();

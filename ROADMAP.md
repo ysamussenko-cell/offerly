@@ -52,3 +52,4 @@
   - [x] После 0.25.8–0.25.9: календарь сервера в одном модуле `functions/_lib/dates.ts` — четыре копии `addDays`, `todayIn`, `daysBetween`, `weekdayOf`; правило под тестом архитектуры (0.25.10)
   - [x] Из обзора: версия в одном месте — API и Worker читают `package.json` (`functions/_lib/version.ts`), npm/Tauri/Cargo поднимает `npm run release:version -- patch|minor` (0.25.11)
   - [x] Из обзора: стенд Playwright на настоящем SQL — `createApp` с хранилищами D1 поверх `node:sqlite` (`tests/helpers/sqliteD1.ts`), проверки сценариев запросами `stand.rows`; `memoryStore` в `e2e/` не используется (0.25.12)
+  - [x] Из обзора: API-тесты Vitest на `sqlStore` (SQL миграций) — первая партия из девяти файлов, храповик в тесте архитектуры (0.25.13); осталось 13 файлов

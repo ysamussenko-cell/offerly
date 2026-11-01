@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 import { GROUPS, runSmoke, annotation, escapeData, parseArgs } from '../scripts/smoke.mjs';
 
 /** Дымовые проверки scripts/smoke.mjs прогоняются против API в памяти; статика PWA — заглушки, как их отдаёт Pages. */
@@ -15,13 +15,13 @@ const STATIC: Record<string, () => Response> = {
 };
 
 function stand(patch: (path: string, init?: RequestInit) => Response | null = () => null) {
-  const mem = memoryStore();
+  const mem = sqlStore();
   const env = {
-    DB: { prepare: () => ({ first: async () => ({ 1: 1 }) }) },
+    DB: mem.DB,
     AI: { run: async () => ({ response: 'ok' }) },
     APP_NAME: 'Offerly',
   } as unknown as Env;
-  const app = createApp('test', () => mem.store);
+  const app = createApp('test');
   const calls: string[] = [];
   const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));

@@ -4,7 +4,7 @@ import { isDesktop, clockIn, reminderState, applyReminder, makeTicker, desktopNo
 import { pushSupport, SUPPORT_TEXT, type SupportEnv } from '../src/push';
 import { parseLatest, LATEST_URL } from '../functions/_lib/release';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 // @ts-expect-error — модуль .mjs без типов: чистые функции сборки latest.json
 import { buildLatest, changelogNotes, pickSetup, SETUP_RE, describe as describeLatest } from '../desktop/scripts/latest.mjs';
 
@@ -139,7 +139,7 @@ describe('GET /api/push/reminder', () => {
   }
 
   it('без сессии — 401; с сессией — время (напоминание → письмо → по умолчанию), пояс, часы, окно и текст без отправки', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const app = createApp('test', () => mem.store);
     expect((await app.request('https://offerly.test/api/push/reminder', {}, appEnv)).status).toBe(401);
     const { call, cookie } = await login(app);
@@ -152,7 +152,7 @@ describe('GET /api/push/reminder', () => {
     expect(j.localTime).toMatch(/^\d{2}:\d{2}$/);
     expect(j.reminder.title).toMatch(/^Offerly: /);
     expect(j.reminder.body).toMatch(/карточ/);
-    expect(mem.pushSubs).toHaveLength(0);
+    expect(mem.rows('SELECT id FROM push_subscriptions')).toHaveLength(0);
 
     await call('/digest', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ notifyAt: '07:41' }) });
     expect(((await (await call('/push/reminder', { headers: { cookie } })).json()) as any).at).toBe('07:41');
