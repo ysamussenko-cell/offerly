@@ -1,15 +1,15 @@
 {
   "current_task": null,
-  "last_completed": "Постоянно / из обзора: проверка типов тестов (0.25.4). tsconfig.tests.json наследует tsconfig.app.json (DOM, jsx) и добавляет типы node и @cloudflare/workers-types, include tests — тесты клиента и API одним проходом; `npm run lint:tests`; в deploy.yml шаг «Typecheck tests» между npm test и сборкой, аннотация typecheck tests (ok / число ошибок и первая строка). Выправлены 18 расхождений типов в тестах (writingFormat у заглушек заданий в assessment/program, поля профиля в text, APP_NAME для sendMail/buildReminder, BlobPart, exportKey as ArrayBuffer, reviewedAt!, .then на синхронном ответе в seed, импорты .tsx). Байты для Blob/Response/WebCrypto — тип Bytes = Uint8Array<ArrayBuffer> в functions/_lib/types.ts: push (b64url.decode, concat, utf8, hkdf, parseSubscriptionKeys, encryptPayload, body), settings (b64url.decode, utf8, raw мастер-ключа), voice (fromBase64, normalizeTts — копия в свой буфер, speak), extract (extractResumeText, extractDocx, readZipEntry, inflateRaw, tinyDocx); tests/helpers/fixtures.ts возвращает Uint8Array<ArrayBuffer>. typescript ^5.9.3. Правило в architecture.test.ts (конфиг, скрипт, место шага в workflow, Bytes, TS ≥ 5.7). Версия 0.25.4 (patch) в семи файлах.",
+  "last_completed": "Постоянно / из обзора: сценарии Playwright для репетиции и среза (0.25.5). e2e/practice.e2e.ts — 4 сценария: репетиция вне плана (встроенный сценарий при отключённой модели, короткий ответ отклоняется, «Прервать» → «Отвечено 1 из 5», сбой разбора → «Разобрать снова», затем разбор с осями, 2 из 3 фраз (выдуманная отброшена), 2 карточки в журнале, баллы по вопросам); срез по плану (8 адаптивных с B1, после ошибки A2, чтение, письмо, «Оценить письмо снова», сравнение с исходным срезом 53/B1, правка письма, день программы done с баллом). Стенд: stand.ai.reply(match, json) — заготовленный ответ экзаменатора по подстроке системной подсказки, calls для проверок; засев: чтение (2 на уровень, ключ B,C) и format дня программы. Всего 15 сценариев. Версия 0.25.5 (patch) в семи файлах. Замечено, не исправлено: вердикт сравнения среза показывает дату в ISO («от 2026-10-29») — вместо «29 октября».",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "dcf7cc9",
-    "run": 41223949969,
-    "version": "0.25.4",
-    "health": "ok:true db:ok ai:ok mail:ok push:pending — по аннотации extract шага Deep check (version 0.25.4, extract:ok ai_chat:ok analysis:ok voice:ok tts 211302 bytes, whisper дословно); typecheck tests: ok; e2e: 2 файла, 11 сценариев прошли; WebFetch живого адреса из плановой сессии снова не прошёл (PROVENANCE_REQUIRED)",
+    "commit": "1478347",
+    "run": 41268441735,
+    "version": "0.25.5",
+    "health": "ok:true db:ok ai:ok mail:ok push:pending — по аннотации extract шага Deep check (version 0.25.5, extract:ok ai_chat:ok analysis:ok voice:ok tts 206182 bytes); typecheck tests: ok; e2e: 3 файла, 15 сценариев прошли; WebFetch живого адреса из плановой сессии снова не прошёл (PROVENANCE_REQUIRED)",
     "seed": "применён, миграций в этом релизе нет",
-    "worker": "offerly-digest 0.25.4 задеплоен, расписание */15 * * * *, states sent:1",
+    "worker": "offerly-digest 0.25.5 задеплоен, расписание */15 * * * *, states sent:1",
     "desktop": "workflow Desktop run 41223949964 — success (релиз v0.25.4 без подписи: секрет TAURI_SIGNING_PRIVATE_KEY не задан)",
     "smoke": "все шаги зелёные: typecheck tests, e2e, health, seed, deploy, digest"
   },
