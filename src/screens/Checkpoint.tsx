@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, errorText, type AssessmentMode as Mode, type Checkpoint as View, type CheckpointToday, type Comparison } from '../api';
-import { longDate, minutesText, plural } from '../text';
+import { longDate, longDateAt, minutesText, plural } from '../text';
 
 const cap = (s: string) => s ? s[0].toUpperCase() + s.slice(1) : s;
 const signed = (n: number) => n > 0 ? `+${n}` : `${n}`;
@@ -19,7 +19,7 @@ export function ComparisonView({ c, significant }: { c: Comparison; significant:
       <p className="compare-verdict">{c.verdict}</p>
       <div className="compare-row">
         <div className="compare-cell">
-          <small className="muted">{cap(c.previous.kindLabel)}{c.previous.finishedAt ? ` · ${longDate(c.previous.finishedAt.slice(0, 10))}` : ''}</small>
+          <small className="muted">{cap(c.previous.kindLabel)}{c.previous.finishedAt ? ` · ${longDateAt(c.previous.finishedAt)}` : ''}</small>
           <div className="compare-num"><b>{c.overall.before}</b><span className="muted">· {c.level.before}</span></div>
         </div>
         <span className={`compare-arrow ${tone(c.overall.delta)}`} aria-hidden="true">→</span>
@@ -68,7 +68,7 @@ export function CheckpointCard({ onOpen, refreshKey }: CardProps) {
   const t = state.t;
   const c: View | null = t?.checkpoint ?? null;
   const d = t?.day ?? null;
-  const doneToday = !!c && c.status === 'finished' && !!t && c.finishedAt?.slice(0, 10) === t.today;
+  const doneToday = !!c && c.status === 'finished' && !!t?.finishedToday;
   const active = c?.status === 'active';
   return (
     <section className="card">
@@ -110,7 +110,7 @@ export function CheckpointCard({ onOpen, refreshKey }: CardProps) {
             <span className="level-badge">{c.level}</span>
             <div>
               <p style={{ margin: 0, fontWeight: 600 }}>{doneToday ? 'Срез пройден' : 'Последний срез'}{c.result ? ` · ${c.result.overall} из 100` : ' — предварительно'}</p>
-              <p className="muted" style={{ margin: 0, fontSize: 14 }}>{c.finishedAt ? longDate(c.finishedAt.slice(0, 10)) : ''}{c.day ? ` · день ${c.day.position} программы` : ' · вне плана'}{c.summary ? ` · грамматика и лексика: ${c.summary.adaptiveCorrect} из ${c.summary.adaptiveTotal}` : ''}</p>
+              <p className="muted" style={{ margin: 0, fontSize: 14 }}>{c.finishedAt ? longDateAt(c.finishedAt) : ''}{c.day ? ` · день ${c.day.position} программы` : ' · вне плана'}{c.summary ? ` · грамматика и лексика: ${c.summary.adaptiveCorrect} из ${c.summary.adaptiveTotal}` : ''}</p>
             </div>
           </div>
           {c.comparison && <p style={{ margin: '10px 0 0', fontSize: 15 }}>{c.comparison.verdict}</p>}

@@ -3,7 +3,7 @@
  * что сказать про установщик для Windows. Экран — src/screens/Install.tsx.
  */
 import type { Release } from './api';
-import { longDate } from './text';
+import { longDateAt } from './text';
 
 /** Адрес страницы установки; остальные пути — приложение. */
 export const INSTALL_PATH = '/install';
@@ -71,7 +71,7 @@ export const INSTALL_BENEFITS = 'Своё окно без вкладок, зна
 
 /** Строка версии релиза: «Версия 0.22.0 · 1 ноября 2026», без даты — «Версия 0.22.0». */
 export function releaseLine(r: Extract<Release, { available: true }>): string {
-  const date = r.publishedAt ? longDate(r.publishedAt.slice(0, 10)) : null;
+  const date = r.publishedAt ? longDateAt(r.publishedAt) : null;
   return date ? `Версия ${r.version} · ${date}` : `Версия ${r.version}`;
 }
 

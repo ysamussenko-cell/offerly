@@ -21,6 +21,7 @@ import {
 import { createCards, draftFromItem, draftsFromWriting, type CardStore } from './cards';
 import { DomainError } from './errors';
 import { longDateRu } from './dates';
+import { todayIn } from './onboarding';
 import type { Attempt } from './types';
 
 export const ADAPTIVE_COUNT = 12;
@@ -364,6 +365,8 @@ export interface RunOpts extends GenerateOpts {
   kind?: Exclude<AssessmentKind, 'baseline'>;
   /** День программы, к которому привязан срез (checkpoint.ts). */
   programDayId?: string | null;
+  /** Часовой пояс ученика: от его «сегодня» считается срок карточек из ошибок теста (без пояса — UTC). */
+  tz?: string;
 }
 
 const pickRandom = <T,>(arr: T[], rng: () => number): T => arr[Math.min(arr.length - 1, Math.floor(rng() * arr.length))];
@@ -510,7 +513,7 @@ export async function score(env: ProviderEnv, store: Store, a: Assessment, attem
   const patch: AssessmentPatch = { axes: s.axes, overall: s.overall, level: s.level, scoredAt: ts, scoringNote: note, updatedAt: ts };
   await store.updateAssessment(a.id, patch);
   Object.assign(a, patch);
-  if (store.insertCards && store.listCards && store.updateCard) await cardsFromAttempts(store as Store & CardStore, a.userId, attempts, items, writing, wa ?? null, ts.slice(0, 10), opts);
+  if (store.insertCards && store.listCards && store.updateCard) await cardsFromAttempts(store as Store & CardStore, a.userId, attempts, items, writing, wa ?? null, todayIn(opts.tz ?? 'UTC', new Date(ts)), opts);
   return a;
 }
 

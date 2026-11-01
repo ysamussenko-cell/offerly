@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api, errorText, type Push } from '../api';
-import { longDate, tzLabel } from '../text';
+import { longDateAt, longDateTimeAt, tzLabel } from '../text';
 import { currentSubscription, permissionText, pushStatusText, pushSupport, subscribe, supportEnv, unsubscribe, PushClientError, SUPPORT_TEXT } from '../push';
 import { desktopNotify } from '../desktop';
 
 type Props = { refreshKey?: number };
 
-const when = (iso: string | null) => (iso ? `${longDate(iso.slice(0, 10))} ${iso.slice(11, 16)} UTC` : null);
+const when = (iso: string | null) => (iso ? longDateTimeAt(iso) : null);
 
 /** Карточка «Напоминание»: одно push-уведомление в день к назначенному времени — на этом и других устройствах.
  *  Подписка живёт в браузере (PushManager) и на сервере; расписание держит тот же Worker, что и письмо. */
@@ -125,7 +125,7 @@ export function PushCard({ refreshKey }: Props) {
             <ul className="muted" style={{ fontSize: 14, margin: '12px 0 0', paddingLeft: 18 }}>
               {d.subscriptions.map(s => (
                 <li key={s.id}>
-                  {s.device} — подписано {longDate(s.createdAt.slice(0, 10))}
+                  {s.device} — подписано {longDateAt(s.createdAt)}
                   {s.lastSentAt ? `, последнее напоминание ${when(s.lastSentAt)}` : ', напоминаний ещё не было'}
                   {s.lastError && <span className="bad">; последняя попытка не доставлена: {s.lastError}</span>}
                 </li>

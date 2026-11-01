@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api, errorText, type Achievement, type Achievements as Catalogue } from '../api';
-import { longDate } from '../text';
+import { longDate, longDateAt } from '../text';
 
 type Props = { refreshKey?: number };
 
 /** Подпись прогресса: «3 из 5», «открыто 3 ноября». */
 export function progressText(a: Achievement): string {
-  if (a.unlocked) return a.detail ? `открыто · ${longDate(a.detail)}` : a.unlockedAt ? `открыто · ${longDate(a.unlockedAt.slice(0, 10))}` : 'открыто';
+  if (a.unlocked) return a.detail ? `открыто · ${longDate(a.detail)}` : a.unlockedAt ? `открыто · ${longDateAt(a.unlockedAt)}` : 'открыто';
   return a.progress.target === 1 ? 'ещё впереди' : `${a.progress.value} из ${a.progress.target}`;
 }
 

@@ -7,7 +7,7 @@ import { MicButton, SpeakButton, useRecorder, type Recorder } from '../Recorder'
 import { mergeTranscript } from '../voice';
 import { useWakeLock } from '../wakeLock';
 import { autoFocusFields } from '../mobile';
-import { longDate, plural } from '../text';
+import { longDateAt, plural } from '../text';
 import ResultView from './Result';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
@@ -57,7 +57,7 @@ export function TestCard({ onOpen, refreshKey }: CardProps) {
             <span className="level-badge">{a.level}</span>
             <div>
               <p style={{ margin: 0, fontWeight: 600 }}>{a.levelLabel && a.levelLabel[0].toUpperCase() + a.levelLabel.slice(1)}{a.result ? ` · ${a.result.overall} из 100` : ' — предварительно'}</p>
-              <p className="muted" style={{ margin: 0, fontSize: 14 }}>{a.kind === 'baseline' ? 'Исходный срез · ' : ''}{a.finishedAt ? longDate(a.finishedAt.slice(0, 10)) : ''}{a.summary ? ` · грамматика и лексика: ${a.summary.adaptiveCorrect} из ${a.summary.adaptiveTotal}` : ''}</p>
+              <p className="muted" style={{ margin: 0, fontSize: 14 }}>{a.kind === 'baseline' ? 'Исходный срез · ' : ''}{a.finishedAt ? longDateAt(a.finishedAt) : ''}{a.summary ? ` · грамматика и лексика: ${a.summary.adaptiveCorrect} из ${a.summary.adaptiveTotal}` : ''}</p>
             </div>
           </div>
           {a.kind === 'baseline' && <p className="muted" style={{ fontSize: 14, marginTop: 0 }}>Срез получен вне приложения и служит точкой отсчёта. Тест уровня в приложении заменит его.</p>}
@@ -325,7 +325,7 @@ function Finished({ view, kind, onClose, onRestart, onRescore, busy, error }: Fi
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <h2 style={{ margin: 0 }}>{baseline ? 'Исходный срез' : TITLES[kind].finished}</h2>
-        {view.finishedAt && <span className="muted" style={{ fontSize: 14 }}>{longDate(view.finishedAt.slice(0, 10))}{cp?.day ? ` · день ${cp.day.position} программы` : checkpoint ? ' · вне плана' : ''}</span>}
+        {view.finishedAt && <span className="muted" style={{ fontSize: 14 }}>{longDateAt(view.finishedAt)}{cp?.day ? ` · день ${cp.day.position} программы` : checkpoint ? ' · вне плана' : ''}</span>}
       </div>
       {r ? (
         <ResultView result={r} levelLabel={view.levelLabel} finishedAt={view.finishedAt} onRescore={baseline ? undefined : onRescore} rescoring={busy === 'score'} baseline={baseline} checkpoint={checkpoint}

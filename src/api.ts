@@ -53,7 +53,7 @@ export type Comparison = {
 /** Контрольный срез: тот же тест короче, плюс день программы и признак пересборки программы. */
 export type Checkpoint = Assessment & { day: ProgramDay | null; programAdjusted: boolean };
 export type CheckpointMeta = { total: number; adaptive: number; significant: number };
-export type CheckpointToday = CheckpointMeta & { ok: true; today: string; scheduled: boolean; day: ProgramDay | null; next: ProgramDay | null; checkpoint: Checkpoint | null };
+export type CheckpointToday = CheckpointMeta & { ok: true; today: string; scheduled: boolean; day: ProgramDay | null; next: ProgramDay | null; checkpoint: Checkpoint | null; finishedToday: boolean };
 export type ErrorExample = { source: 'writing' | 'correction' | 'mcq' | 'reading'; quote: string; correction: string; note: string | null; topicLabel: string | null };
 export type AssessmentResult = {
   axes: { id: AxisId; label: string; score: number | null }[];

@@ -17,14 +17,16 @@ export function assessmentRoutes() {
    *  модель оценивает письмо по рубрике и образцу, считаются пять осей и уровень — ответ приходит с result. */
   r.post('/assessment/answer', requireAuth, async (c) => {
     const body = await bodyOf(c);
-    return c.json({ ok: true, assessment: await answerAssessment(c.env, c.get('store'), c.get('auth')!.user.id, body.attemptId, body.answer, await domainOf(c)) });
+    const user = c.get('auth')!.user;
+    return c.json({ ok: true, assessment: await answerAssessment(c.env, c.get('store'), user.id, body.attemptId, body.answer, await domainOf(c), { tz: user.tz }) });
   });
 
   /** Пересчитать оценку последнего завершённого теста: письмо оценивается заново, если прошлый раз модель не ответила
    *  (или {force: true}); оси и уровень считаются заново. Для тестов, пройденных до появления оценки. */
   r.post('/assessment/score', requireAuth, async (c) => {
     const body = await bodyOf(c);
-    return c.json({ ok: true, assessment: await rescore(c.env, c.get('store'), c.get('auth')!.user.id, {}, body?.force === true) });
+    const user = c.get('auth')!.user;
+    return c.json({ ok: true, assessment: await rescore(c.env, c.get('store'), user.id, { tz: user.tz }, body?.force === true) });
   });
 
   /** Бросить начатый тест: следующий start начнёт новый, виденные задания не повторятся. */

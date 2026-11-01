@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "offerly"
-version = "0.25.8"
+version = "0.25.9"
 dependencies = [
  "log",
  "serde",

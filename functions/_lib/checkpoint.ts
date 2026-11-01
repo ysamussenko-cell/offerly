@@ -35,6 +35,8 @@ export interface TodayInfo {
   next: PublicDay | null;
   /** Активный срез или последний завершённый; null — срезов ещё не было. */
   checkpoint: View | null;
+  /** Последний срез завершён сегодня по часовому поясу ученика (а не по дате UTC). */
+  finishedToday: boolean;
 }
 
 const domainOf = (p: Profile | null): Domain => ({ specialty: p?.specialty ?? null, industry: p?.industry ?? null, targetRole: p?.targetRole ?? null, keywords: p?.keywords ?? [] });
@@ -60,7 +62,8 @@ export async function today(store: Store, userId: string, tz: string, opts: RunO
   const t = todayIn(tz, new Date(now()));
   const { day, next } = await dayOf(store, userId, t);
   const cur = await currentAssessment(store, userId, 'checkpoint');
-  return { today: t, scheduled: !!day, day: day ? publicDay(day, t) : null, next: next ? publicDay(next, t) : null, checkpoint: cur ? await withDay(store, cur, t) : null };
+  const finishedToday = !!cur && cur.status === 'finished' && !!cur.finishedAt && todayIn(tz, new Date(cur.finishedAt)) === t;
+  return { today: t, scheduled: !!day, day: day ? publicDay(day, t) : null, next: next ? publicDay(next, t) : null, checkpoint: cur ? await withDay(store, cur, t) : null, finishedToday };
 }
 
 /** Начать срез или продолжить начатый. Новый срез привязывается к сегодняшнему непройденному дню-срезу, если он есть. */
@@ -76,7 +79,7 @@ export async function startOrResume(env: ProviderEnv, store: Store, userId: stri
 export async function answer(env: ProviderEnv, store: Store, userId: string, attemptId: unknown, raw: unknown, tz: string, profile: Profile | null, opts: RunOpts = {}): Promise<View> {
   const now = opts.now ?? (() => new Date().toISOString());
   const t = todayIn(tz, new Date(now()));
-  const v = await answerAssessment(env, store, userId, attemptId, raw, domainOf(profile), { ...opts, kind: 'checkpoint' });
+  const v = await answerAssessment(env, store, userId, attemptId, raw, domainOf(profile), { ...opts, kind: 'checkpoint', tz });
   let adjusted = false;
   if (v.status === 'finished') adjusted = await finish(store, userId, tz, profile, v, opts);
   return withDay(store, v, t, adjusted);
@@ -86,7 +89,7 @@ export async function answer(env: ProviderEnv, store: Store, userId: string, att
 export async function rescore(env: ProviderEnv, store: Store, userId: string, tz: string, profile: Profile | null, force = false, opts: RunOpts = {}): Promise<View> {
   const now = opts.now ?? (() => new Date().toISOString());
   const t = todayIn(tz, new Date(now()));
-  const v = await rescoreAssessment(env, store, userId, { ...opts, kind: 'checkpoint' }, force);
+  const v = await rescoreAssessment(env, store, userId, { ...opts, kind: 'checkpoint', tz }, force);
   const adjusted = await finish(store, userId, tz, profile, v, opts);
   return withDay(store, v, t, adjusted);
 }

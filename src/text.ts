@@ -40,6 +40,27 @@ export function longDate(iso: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
+/** Метка времени ISO → дата YYYY-MM-DD в поясе браузера (по умолчанию) или указанном, а не по UTC. */
+export function localDateOf(iso: string, tz?: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  return todayIn(tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone, d);
+}
+
+/** Метка времени ISO → «23 ноября 2026» по местной дате: прохождение в 01:30 по Алматы — это сегодня, а не вчера по UTC. */
+export const longDateAt = (iso: string, tz?: string) => longDate(localDateOf(iso, tz));
+
+/** Метка времени ISO → «23 ноября 2026, 08:15» по местному времени. */
+export function longDateTimeAt(iso: string, tz?: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const zone = tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let hm: string;
+  try { hm = new Intl.DateTimeFormat('ru-RU', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d); }
+  catch { hm = iso.slice(11, 16); }
+  return `${longDateAt(iso, tz)}, ${hm}`;
+}
+
 /** Часовые пояса для списка: все известные браузеру, а если он их не отдаёт — короткий набор. */
 export const FALLBACK_TIME_ZONES = [
   'Asia/Almaty', 'Asia/Astana', 'Asia/Tashkent', 'Asia/Bishkek', 'Asia/Dubai', 'Asia/Yekaterinburg', 'Asia/Novosibirsk', 'Asia/Tbilisi', 'Asia/Yerevan', 'Asia/Baku',

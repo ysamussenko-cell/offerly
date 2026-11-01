@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { plural, daysText, yearsText, minutesText, countdownText, longDate, timeZoneList, tzLabel, FORMAT_LABELS } from '../src/text';
+import { plural, daysText, yearsText, minutesText, countdownText, longDate, localDateOf, longDateAt, longDateTimeAt, timeZoneList, tzLabel, FORMAT_LABELS } from '../src/text';
 import { initialAnswers } from '../src/screens/Questionnaire';
 import { INTERVIEW_FORMATS } from '../functions/_lib/onboarding';
 import type { Profile, User } from '../src/api';
@@ -70,5 +70,17 @@ describe('начальные ответы анкеты', () => {
   });
   it('без профиля — пустая цель', () => {
     expect(initialAnswers(null, user).targetRole).toBe('');
+  });
+});
+
+describe('даты по местному времени', () => {
+  it('метка ISO → местная дата в поясе, а не первые десять символов UTC', () => {
+    expect(localDateOf('2026-11-12T19:30:00.000Z', 'Asia/Almaty')).toBe('2026-11-13');
+    expect(localDateOf('2026-11-12T19:30:00.000Z', 'UTC')).toBe('2026-11-12');
+    expect(localDateOf('2026-11-12T19:30:00.000Z', 'Нет/Такого')).toBe('2026-11-12');
+    expect(localDateOf('не дата', 'UTC')).toBe('не дата');
+    expect(longDateAt('2026-11-12T19:30:00.000Z', 'Asia/Almaty')).toBe(longDate('2026-11-13'));
+    expect(longDateTimeAt('2026-11-12T19:30:00.000Z', 'Asia/Almaty')).toBe(`${longDate('2026-11-13')}, 00:30`);
+    expect(longDateTimeAt('2026-11-12T19:30:00.000Z', 'UTC')).toBe(`${longDate('2026-11-12')}, 19:30`);
   });
 });

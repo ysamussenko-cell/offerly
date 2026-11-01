@@ -218,6 +218,33 @@ describe('ход среза', () => {
   });
 });
 
+describe('местная дата ученика', () => {
+  it('срез в 00:30 по Алматы (19:30 UTC накануне): «пройден сегодня» и срок карточек от местной даты, а не от UTC', async () => {
+    const mem = memoryStore(); fillBank(mem.items);
+    mem.assessments.push(baseline());
+    const FINISH = '2026-11-12T19:30:00.000Z'; // 13 ноября 00:30 в Алматы, по UTC ещё 12-е
+    const o = { ...opts(), now: () => FINISH };
+    let v = await startOrResume(ENV, mem.store, USER, TZ, null, o);
+    const key = (attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
+    let first = true;
+    while (v.status === 'active') {
+      const cur = v.current!;
+      const right = cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? SHORT : key(cur.attemptId).answer;
+      const wrong = cur.kind === 'mcq' ? (right === 'A' ? 'B' : 'A') : 'The turbine are broken.';
+      v = await answer(ENV, mem.store, USER, cur.attemptId, first && (cur.kind === 'mcq' || cur.kind === 'correction') ? wrong : right, TZ, null, o);
+      first = false;
+    }
+    expect(v.status).toBe('finished');
+    expect(mem.cards.length).toBeGreaterThan(0);
+    expect(mem.cards.every(c => c.due === addDays(TODAY, 1))).toBe(true); // завтра по Алматы — 14 ноября, а не 13-е от UTC
+    const t = await checkpointToday(mem.store, USER, TZ, o);
+    expect(t.today).toBe(TODAY);
+    expect(t.finishedToday).toBe(true);
+    expect((await checkpointToday(mem.store, USER, 'UTC', o)).finishedToday).toBe(true); // в UTC тоже «сегодня» — 12-е
+    expect((await checkpointToday(mem.store, USER, TZ, { ...o, now: () => '2026-11-13T19:30:00.000Z' })).finishedToday).toBe(false); // местное 14-е
+  });
+});
+
 describe('API среза', () => {
   async function login(prep: (mem: ReturnType<typeof memoryStore>) => void = () => {}) {
     const mem = memoryStore(); fillBank(mem.items); prep(mem);

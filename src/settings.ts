@@ -1,6 +1,6 @@
 /** Тексты экрана настроек — чистые функции без DOM, чтобы проверять их тестами. */
 import { ApiError, ERRORS, type Settings } from './api';
-import { longDate } from './text';
+import { longDateAt } from './text';
 
 /** Строка о ключе: встроенная модель или свой провайдер с моделью, подсказкой ключа и итогом проверки. */
 export function keyStatusText(s: Settings['provider']): string {
@@ -9,7 +9,7 @@ export function keyStatusText(s: Settings['provider']): string {
   if (!k.readable) return `Сохранён ключ ${k.short} (${k.hint}), но он не читается: мастер-ключ сервера сменился. Введите ключ заново или уберите его.`;
   const model = k.custom ? `модель ${k.model}` : `модель по умолчанию ${k.model}`;
   const check = !k.checkNote ? 'ещё не проверялся'
-    : k.checkNote === 'ok' ? `проверен ${k.checkedAt ? longDate(k.checkedAt.slice(0, 10)) : ''}`.trim()
+    : k.checkNote === 'ok' ? `проверен ${k.checkedAt ? longDateAt(k.checkedAt) : ''}`.trim()
     : `последняя проверка не прошла: ${k.checkNote.replace(/^error:/, '')}`;
   return `Задания и проверку делает ${k.providerName}, ${model}, ключ ${k.hint} — ${check}${check.endsWith('.') ? '' : '.'}`;
 }
