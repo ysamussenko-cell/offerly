@@ -1,4 +1,4 @@
-/** Ключевые сценарии приложения в настоящем Chromium: вход → резюме → главный экран → занятие → тест → настройки.
+/** Ключевые сценарии приложения в настоящем Chromium: вход → резюме → главный экран → занятие → тест (старт и «Прервать»; до результата — `placement.e2e.ts`) → настройки.
  *  Стенд — собранный dist и API на SQLite в памяти (e2e/server.ts); модель отключена, задания из засеянного банка. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World } from './helpers';
