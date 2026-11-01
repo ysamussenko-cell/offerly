@@ -22,7 +22,7 @@ import { CARD_TOPICS, cardTopicById, createCards, type CardDraft, type CardStore
 import type { AssessmentStore } from './assessment';
 import { publicDay, type ProgramDay, type ProgramStore, type PublicDay } from './program';
 import type { Profile } from './profile';
-import { todayIn } from './onboarding';
+import { todayIn } from './dates';
 import { speechSummary, type SpeechMetrics, type SpeechStore } from './voice';
 import { DomainError } from './errors';
 

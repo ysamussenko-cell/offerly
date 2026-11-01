@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, errorText, type ErrorCard } from '../api';
-import { longDate, plural, daysText } from '../text';
+import { longDate, plural, daysText, daysBetween } from '../text';
 
 const cardsText = (n: number) => `${n} ${plural(n, 'карточка', 'карточки', 'карточек')}`;
 const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -81,6 +81,6 @@ export function JournalCard({ refreshKey }: Props) {
 export function reviewOutcome(card: { due: string | null; streak: number; left: number; retired: boolean }, correct: boolean, today: string): string {
   if (card.retired) return 'Карточка погашена: три верных подряд.';
   if (!correct) return 'Серия сброшена, карточка вернётся завтра.';
-  const days = card.due ? Math.max(1, Math.round((Date.parse(`${card.due}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000)) : null;
+  const days = card.due ? Math.max(1, daysBetween(today, card.due)) : null;
   return `${card.streak} из 3 верных подряд${days ? `, следующий повтор через ${daysText(days)}` : ''}.`;
 }

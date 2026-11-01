@@ -68,12 +68,22 @@ describe('циклы импортов', () => {
     expect(readFileSync('src/screens/Assessment.tsx', 'utf-8')).not.toMatch(/export type Mode\b/);
   });
 
-  it('основа API без зависимостей: errors, auth, providers, onboarding, fsrs, mail, release, types; extract — только errors', () => {
-    const leaves = ['errors', 'auth', 'providers', 'onboarding', 'fsrs', 'mail', 'release', 'types'].map(n => `functions/_lib/${n}.ts`);
+  it('основа API без зависимостей: errors, auth, providers, dates, mail, release, types; extract — только errors, onboarding и fsrs — только dates', () => {
+    const leaves = ['errors', 'auth', 'providers', 'dates', 'mail', 'release', 'types'].map(n => `functions/_lib/${n}.ts`);
     for (const leaf of leaves) {
       expect(graph.edges.filter(e => e.from === leaf && !e.typeOnly).map(e => e.to), leaf).toEqual([]);
     }
     expect(graph.edges.filter(e => e.from === 'functions/_lib/extract.ts' && !e.typeOnly).map(e => e.to)).toEqual(['functions/_lib/errors.ts']);
+    for (const f of ['onboarding', 'fsrs']) {
+      expect(graph.edges.filter(e => e.from === `functions/_lib/${f}.ts` && !e.typeOnly).map(e => e.to), f).toEqual(['functions/_lib/dates.ts']);
+    }
+  });
+
+  it('календарь сервера в одном месте: сегодня в поясе, сдвиг и разница дат — только в dates.ts (с 0.25.10)', () => {
+    // До 0.25.10 addDays жил в четырёх копиях (program, cards, fsrs, digest) — fsrs и cards копировали его, чтобы не замкнуть круг через program.
+    const serverFiles = graph.files.filter(f => (f.startsWith('functions/') || f.startsWith('workers/')) && f !== 'functions/_lib/dates.ts');
+    const offenders = serverFiles.filter(f => /86_?400_?000|Intl\.DateTimeFormat\('en-CA'|(const|function) (addDays\w*|todayIn|weekdayOf)\b/.test(readFileSync(f, 'utf-8')));
+    expect(offenders).toEqual([]);
   });
 
   it('ошибки областей наследуют DomainError, а маршруты не ловят их сами — это делает app.onError', () => {

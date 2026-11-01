@@ -7,6 +7,7 @@
 import { TOPICS, fingerprintOf, topicById, type Item, type Topic } from './items';
 import { review, RETIRE_AFTER, MIN_INTERVAL, type Grade } from './fsrs';
 import type { WritingError } from './types';
+import { addDays } from './dates';
 
 /** Темы карточек: темы банка заданий плюс «ответ на вопрос задания» — ось оценки, которой в банке нет. */
 export const CARD_TOPICS: Topic[] = [
@@ -82,7 +83,6 @@ export function reviewPatch(c: ErrorCard, correct: boolean, today: string): Requ
 // ---------- создание из ошибок ----------
 
 const LETTERS = ['A', 'B', 'C', 'D'];
-const addDays = (iso: string, n: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** Заготовка карточки: тема, правило, как написано, как надо и ключ источника. */
 export interface CardDraft { topic: string; rule: string | null; example: string; correction: string; origin: string }

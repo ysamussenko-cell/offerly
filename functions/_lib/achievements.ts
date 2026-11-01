@@ -11,7 +11,7 @@ import type { ErrorCard } from './cards';
 import type { Lesson, Part } from './lesson';
 import type { WritingFormat } from './program';
 import { parseWritingEval } from './scoring';
-import { todayIn } from './onboarding';
+import { todayIn } from './dates';
 
 /** Верных подряд по теме для достижения. */
 export const TOPIC_STREAK = 5;

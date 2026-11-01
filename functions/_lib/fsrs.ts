@@ -4,8 +4,7 @@
  *  Оценок у нас две: верно (Good) и неверно (Again) — ученик либо исправил предложение как надо, либо нет.
  *  Интервал до следующего повтора — такой, чтобы к сроку вероятность вспомнить равнялась DESIRED_RETENTION.
  *  Карточка гаснет после RETIRE_AFTER верных подряд; неверный ответ обнуляет серию и возвращает карточку завтра. */
-// Без импорта program.ts: cards → fsrs → program → cards замкнуло бы круг на уровне модулей.
-const addDays = (iso: string, n: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+import { addDays, daysBetween as signedDays } from './dates';
 
 /** Параметры FSRS-4.5 по умолчанию (w0…w16). */
 export const W = [0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.031, 1.6474, 0.1367, 1.0461, 2.1072, 0.0793, 0.3246, 1.587, 0.2272, 2.8755] as const;
@@ -75,7 +74,7 @@ export function forgetStability(s: number, d: number, r: number): number {
 }
 
 /** Дней между датами YYYY-MM-DD (b − a), не меньше нуля. */
-export const daysBetween = (a: string, b: string) => Math.max(0, Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000));
+export const daysBetween = (a: string, b: string) => Math.max(0, signedDays(a, b));
 
 /** Карточка ещё не повторялась — первая оценка задаёт S и D. */
 export const isNew = (c: Pick<FsrsState, 'reviewedAt' | 'reps' | 'lapses'>) => c.reviewedAt == null && c.reps === 0 && c.lapses === 0;

@@ -20,8 +20,7 @@ import {
 } from './scoring';
 import { createCards, draftFromItem, draftsFromWriting, type CardStore } from './cards';
 import { DomainError } from './errors';
-import { longDateRu } from './dates';
-import { todayIn } from './onboarding';
+import { longDateRu, todayIn } from './dates';
 import type { Attempt } from './types';
 
 export const ADAPTIVE_COUNT = 12;

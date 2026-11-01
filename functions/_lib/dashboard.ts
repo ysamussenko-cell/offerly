@@ -25,9 +25,10 @@
 import type { Assessment, AssessmentStore } from './assessment';
 import { LEVELS, type Level } from './items';
 import { BONUS_MULTIPLIER, type Lesson, type LessonStep, type LessonStore } from './lesson';
-import { DEFAULT_MINUTES, todayIn, daysBetween } from './onboarding';
+import { DEFAULT_MINUTES } from './onboarding';
+import { addDays, daysBetween, todayIn, weekdayOf } from './dates';
 import type { Profile } from './profile';
-import { addDays, publicDay, weekdayOf, WEEKDAYS_RU, type ProgramDay, type ProgramStore, type PublicDay } from './program';
+import { publicDay, WEEKDAYS_RU, type ProgramDay, type ProgramStore, type PublicDay } from './program';
 import { bandStart, LEVEL_THRESHOLD, nextStep, scoreToLevel } from './scoring';
 import type { Rehearsal, RehearsalStore } from './rehearsal';
 

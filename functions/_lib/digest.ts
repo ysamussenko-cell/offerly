@@ -17,8 +17,7 @@ import { dashboard, type Store as DashboardDeps, type View as DashboardView } fr
 import { dueForReview, type CardStore } from './cards';
 import { publicDay, type ProgramStore, type PublicDay } from './program';
 import { sendMail, type MailEnv, type SendResult } from './mail';
-import { daysBetween } from './onboarding';
-import { longDateRu } from './dates';
+import { addDays, daysBetween, longDateRu, weekdayOf } from './dates';
 
 /** Время по умолчанию, когда письмо включают без указания времени. */
 export const DEFAULT_NOTIFY_AT = '07:30';
@@ -88,13 +87,11 @@ export function digestState(p: Pick<Profile, 'notifyAt' | 'digestSentOn'>, tz: s
   return { state: 'late', date: clock.date, time: clock.time };
 }
 
-const addDaysIso = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-
 /** Когда придёт следующее письмо: сегодня, если время ещё не наступило, иначе завтра; null — выключено. */
 export function nextDigest(p: Pick<Profile, 'notifyAt' | 'digestSentOn'>, tz: string, now: Date): { date: string; time: string } | null {
   const s = digestState(p, tz, now);
   if (s.state === 'off') return null;
-  return { date: s.state === 'early' ? s.date : addDaysIso(s.date, 1), time: p.notifyAt as string };
+  return { date: s.state === 'early' ? s.date : addDays(s.date, 1), time: p.notifyAt as string };
 }
 
 // ---------- текст ----------
@@ -109,7 +106,7 @@ export const plural = (n: number, one: string, few: string, many: string) => {
 export const daysText = (n: number) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
 const minutesText = (n: number) => `${n} ${plural(n, 'минута', 'минуты', 'минут')}`;
 const cardsText = (n: number) => `${n} ${plural(n, 'карточка', 'карточки', 'карточек')}`;
-export const weekdayRu = (iso: string) => WEEKDAYS_LONG_RU[new Date(Date.parse(`${iso}T00:00:00Z`)).getUTCDay()];
+export const weekdayRu = (iso: string) => WEEKDAYS_LONG_RU[weekdayOf(iso)];
 
 const firstName = (u: User) => (u.name ?? '').trim().split(/\s+/)[0] || null;
 

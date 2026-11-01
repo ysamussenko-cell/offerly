@@ -10,7 +10,7 @@ import type { Assessment } from '../functions/_lib/assessment';
 import type { Profile } from '../functions/_lib/profile';
 import type { ProgramDay } from '../functions/_lib/program';
 import { createApp, type Env } from '../functions/_lib/app';
-import { todayIn } from '../functions/_lib/onboarding';
+import { todayIn } from '../functions/_lib/dates';
 import { memoryStore } from './helpers/memoryStore';
 import { freshDb, d1Of } from './helpers/sqliteD1';
 

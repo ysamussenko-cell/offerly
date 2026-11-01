@@ -6,7 +6,7 @@ import type { Item, Kind, Level } from '../functions/_lib/items';
 import type { Assessment } from '../functions/_lib/assessment';
 import type { ErrorCard } from '../functions/_lib/cards';
 import type { DayFormat, ProgramDay } from '../functions/_lib/program';
-import { todayIn } from '../functions/_lib/onboarding';
+import { todayIn } from '../functions/_lib/dates';
 
 export interface SeedOptions {
   email: string;

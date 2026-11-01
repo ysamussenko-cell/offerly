@@ -14,9 +14,8 @@ import { AXES, AXIS_LABELS, BAND, LEVEL_THRESHOLD, LEXICAL_TOPICS, type Axes, ty
 import type { Assessment } from './assessment';
 import type { Attempt } from './types';
 import type { Profile } from './profile';
-import { daysBetween, todayIn } from './onboarding';
 import { DomainError } from './errors';
-import { longDateRu } from './dates';
+import { addDays, daysBetween, longDateRu, todayIn, weekdayOf } from './dates';
 
 export const PROGRAM_DAYS = 28;
 /** Контрольный срез — в конце каждой второй недели. */
@@ -158,9 +157,6 @@ export function reasonText(w: TopicWeight, axes: Axes | null): string {
 
 // ---------- календарь ----------
 
-export const addDays = (iso: string, n: number): string => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-/** 0 — воскресенье … 6 — суббота; дата уже в поясе пользователя, поэтому считается как календарная. */
-export const weekdayOf = (iso: string): number => new Date(Date.parse(`${iso}T00:00:00Z`)).getUTCDay();
 
 /** Длина программы: четыре недели, но не дальше дня перед собеседованием; если собеседование сегодня,
  *  прошло или не назначено — четыре недели. */

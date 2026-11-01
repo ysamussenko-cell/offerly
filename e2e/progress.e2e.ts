@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World } from './helpers';
 import { ACHIEVEMENTS } from '../functions/_lib/achievements';
 import { PROGRAM_TOPICS, MIXED_TOPIC } from '../functions/_lib/program';
-import { todayIn } from '../functions/_lib/onboarding';
+import { todayIn } from '../functions/_lib/dates';
 
 const PLANNER = 'plan@offerly.test';
 const TZ = 'Asia/Almaty';

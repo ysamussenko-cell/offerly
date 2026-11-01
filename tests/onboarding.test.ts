@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { validateAnswers, parseDate, todayIn, daysBetween, isTimeZone, MAX_DAYS_AHEAD } from '../functions/_lib/onboarding';
+import { validateAnswers, parseDate, isTimeZone, MAX_DAYS_AHEAD } from '../functions/_lib/onboarding';
+import { todayIn, daysBetween } from '../functions/_lib/dates';
 import { createApp, type Env } from '../functions/_lib/app';
 import { memoryStore } from './helpers/memoryStore';
 import { SAMPLE_RESUME } from './helpers/fixtures';

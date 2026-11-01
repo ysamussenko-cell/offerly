@@ -21,7 +21,7 @@ import { evaluateWriting, parseWritingEval, type WritingEval } from './scoring';
 import { dueForReview, cardTopicById, reviewPatch, draftFromItem, draftsFromWriting, createCards, type CardStore, type ErrorCard } from './cards';
 import { RETIRE_AFTER } from './fsrs';
 import { programTopicById, publicDay, MIXED_TOPIC, WRITING_LABELS, type ProgramDay, type ProgramStore, type PublicDay, type WritingFormat } from './program';
-import { todayIn } from './onboarding';
+import { todayIn } from './dates';
 import { DomainError } from './errors';
 
 export const WARMUP_COUNT = 5;

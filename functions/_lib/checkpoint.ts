@@ -13,7 +13,7 @@ import {
 } from './assessment';
 import { generateProgram, current as currentProgram, publicDay, type ProgramDay, type ProgramStore, type ProgramDeps, type PublicDay } from './program';
 import type { Profile } from './profile';
-import { todayIn } from './onboarding';
+import { todayIn } from './dates';
 
 export type Store = AssessmentStoreFull & ProgramStore & ProgramDeps;
 

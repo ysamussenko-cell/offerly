@@ -1,6 +1,8 @@
 /** Анкета знакомства — шесть вопросов: целевая позиция, дата собеседования, формат, минуты в день,
  *  часовой пояс, родной язык. Ответы проверяются здесь, в базу попадает только допустимое. */
 
+import { daysBetween, todayIn } from './dates';
+
 export const INTERVIEW_FORMATS = ['written', 'video', 'ai', 'unknown'] as const;
 export type InterviewFormat = typeof INTERVIEW_FORMATS[number];
 
@@ -44,18 +46,6 @@ export function parseDate(raw: unknown): string | null {
   const dt = new Date(Date.UTC(y, mo - 1, d));
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
   return `${m[1]}-${m[2]}-${m[3]}`;
-}
-
-/** Сегодняшняя дата YYYY-MM-DD в часовом поясе пользователя. */
-export function todayIn(tz: string, now = new Date()): string {
-  try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-  } catch { return now.toISOString().slice(0, 10); }
-}
-
-/** Разница в днях между двумя датами YYYY-MM-DD (b − a). */
-export function daysBetween(a: string, b: string): number {
-  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 
 /** Часовой пояс считается допустимым, если его понимает Intl этой среды. */
