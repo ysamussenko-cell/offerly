@@ -9,8 +9,7 @@ import { d1CardStore, type ErrorCard } from '../functions/_lib/cards';
 import type { Assessment } from '../functions/_lib/assessment';
 import type { Item, Kind, Level } from '../functions/_lib/items';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 
 const ENV = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
 const USER = 'u1';
@@ -43,7 +42,21 @@ function fillBank(items: Item[], topic = 'conjunctions') {
   for (const l of ['B1', 'B2'] as Level[]) for (let i = 0; i < 4; i++) { items.push(makeItem('mcq', l, topic)); items.push(makeItem('correction', l, topic)); }
   items.push(makeItem('writing', 'B1', topic));
   items.push(makeItem('writing', 'B1', topic, { writingFormat: 'explain' }));
+  return items;
 }
+type Mem = ReturnType<typeof sqlStore>;
+/** SQLite со всеми миграциями, пользователь u1 и банк fillBank; items — те же задания локально (ключи ответов). */
+async function banked(topic = 'conjunctions') {
+  const mem = sqlStore(); mem.addUser(USER, 'u1@example.com', TZ);
+  const items = fillBank([], topic);
+  await mem.store.insertItems(items);
+  return Object.assign(mem, { items });
+}
+/** Шаги единственного занятия пользователя — по позиции, как в журнале шагов. */
+const stepsOf = async (mem: Mem) => mem.store.listSteps((await mem.store.listLessons(USER))[0].id);
+const cardsOf = (mem: Mem) => mem.store.listCards(USER);
+const dayOn = async (mem: Mem, date: string) => (await mem.store.listProgramDays(USER)).find(d => d.dayDate === date)!;
+const itemOf = async (mem: Mem, id: string | null) => (await mem.store.getItem(id!))!;
 const EVAL = { grammar: 60, vocabulary: 55, coherence: 58, task_response: 62, level: 'B2', summary: 'Коротко и по делу; следите за согласованием времён.', errors: [{ original: 'shows a small loss', corrected: 'showed a small loss', note: 'Прошедшее время для завершённого теста' }], rewrite: SHORT.replace(/shows/g, 'showed') };
 const evalChat = async () => JSON.stringify(EVAL);
 const day = (over: Partial<ProgramDay>): ProgramDay => ({
@@ -87,7 +100,7 @@ describe('план занятия', () => {
     expect(lessonScore([])).toBeNull();
   });
   it('выбор из банка: тема и уровень, затем соседние уровни; виденные не берутся; письмо — только формата дня', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
+    const mem = await banked();
     const used = new Set<string>();
     const a = await pickWarmup(mem.store, 'mcq', 'B1', ['conjunctions'], used, rng);
     expect(a).toMatchObject({ kind: 'mcq', level: 'B1', topic: 'conjunctions' });
@@ -104,17 +117,16 @@ describe('план занятия', () => {
 describe('занятие в хранилище', () => {
   const now = () => NOW;
   async function setup(cards = 3) {
-    const mem = memoryStore(); fillBank(mem.items);
-    mem.assessments.push(assessment());
-    for (let i = 0; i < cards; i++) mem.cards.push(card('conjunctions'));
-    mem.cards.push(card('tenses', { retired: true }));
+    const mem = await banked();
+    await mem.putAssessment(assessment());
+    await mem.store.insertCards([...Array.from({ length: cards }, () => card('conjunctions')), card('tenses', { retired: true })]);
     await generateProgram(mem.store, USER, TZ, null, { now, id: nextId });
     return mem;
   }
   const opts = { now, id: nextId, rng, generate: false, chatFn: evalChat as any };
 
   it('без программы — lesson_no_day; репетиция — lesson_unavailable', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore(); mem.addUser(USER, 'u1@example.com', TZ);
     const t = await lessonToday(mem.store, USER, TZ, { now });
     expect(t).toMatchObject({ today: TODAY, info: { day: null, available: false, reason: 'no_program' }, lesson: null });
     await expect(startOrResume(ENV, mem.store, USER, TZ, DOMAIN, opts)).rejects.toMatchObject({ code: 'lesson_no_day', reason: 'no_program' });
@@ -136,7 +148,7 @@ describe('занятие в хранилище', () => {
     // повторный старт возвращает тот же шаг
     const again = await startOrResume(ENV, mem.store, USER, TZ, DOMAIN, opts);
     expect(again.current!.stepId).toBe(v1.current!.stepId);
-    expect(mem.lessons).toHaveLength(1);
+    expect(mem.rows('SELECT id FROM lessons')).toHaveLength(1);
     // чужой шаг и пустой ответ
     await expect(answer(ENV, mem.store, USER, 'nope', 'A', TZ, DOMAIN, opts)).rejects.toMatchObject({ code: 'lesson_stale' });
     await expect(answer(ENV, mem.store, USER, v1.current!.stepId, '', TZ, DOMAIN, opts)).rejects.toMatchObject({ code: 'answer_invalid', reason: 'empty' });
@@ -148,13 +160,14 @@ describe('занятие в хранилище', () => {
     // 2: неверно — в журнале появляется карточка с выбранным и верным словом, сроком на завтра
     v = await answer(ENV, mem.store, USER, v.current!.stepId, 'A', TZ, DOMAIN, opts);
     expect(v.last).toMatchObject({ correct: 0, score: 0, newCards: 1 }); expect(v.last!.written).toContain('a energy audit');
-    const made1 = mem.cards.find(c => c.origin === stepOrigin(v.last!.stepId))!;
+    const made1 = (await cardsOf(mem)).find(c => c.origin === stepOrigin(v.last!.stepId))!;
     expect(made1).toMatchObject({ topic: 'conjunctions', source: CARD_SOURCE, rule: 'правило одной строкой', due: '2026-11-03', streak: 0, reviewedAt: null, retired: false });
     expect(made1.example).toContain('a energy audit'); expect(made1.correction).toContain('the energy audit');
-    expect(mem.cards).toHaveLength(5);
+    expect(await cardsOf(mem)).toHaveLength(5);
     // 3: исправление верно (регистр и знаки не важны)
     expect(v.current).toMatchObject({ position: 3, kind: 'correction', level: 'B1' });
-    const it3 = mem.items.find(i => i.id === mem.steps[2].itemId)!;
+    const step3 = (await stepsOf(mem))[2];
+    const it3 = mem.items.find(i => i.id === step3.itemId)!;
     v = await answer(ENV, mem.store, USER, v.current!.stepId, it3.answer.toUpperCase(), TZ, DOMAIN, opts);
     expect(v.last).toMatchObject({ correct: 1, correction: it3.answer });
     // 4 и 5 — растяжка ступенью выше
@@ -163,14 +176,14 @@ describe('занятие в хранилище', () => {
     expect(v.current).toMatchObject({ position: 5, kind: 'correction', level: 'B2' });
     v = await answer(ENV, mem.store, USER, v.current!.stepId, v.current!.prompt, TZ, DOMAIN, opts); // неизменённое предложение — неверно
     expect(v.last).toMatchObject({ correct: 0, newCards: 1 });
-    const made5 = mem.cards.find(c => c.origin === stepOrigin(v.last!.stepId))!;
+    const made5 = (await cardsOf(mem)).find(c => c.origin === stepOrigin(v.last!.stepId))!;
     expect(made5).toMatchObject({ topic: 'conjunctions', example: v.last!.prompt, correction: v.last!.correction }); // карточка — исходное предложение с ошибкой
     expect(v.parts.warmup).toEqual({ total: 5, done: 5, correct: 3 });
     // 6: письмо — формат дня, оценка моделью; сбой модели не записывает ответ
     expect(v.current).toMatchObject({ position: 6, part: 'writing', kind: 'writing', words: { min: 60, max: 80 } });
-    expect(mem.items.find(i => i.id === mem.steps[5].itemId)!.writingFormat).toBe('review');
+    expect((await itemOf(mem, (await stepsOf(mem))[5].itemId)).writingFormat).toBe('review');
     await expect(answer(ENV, mem.store, USER, v.current!.stepId, SHORT, TZ, DOMAIN, { ...opts, chatFn: (async () => 'no') as any })).rejects.toMatchObject({ code: 'lesson_eval_failed' });
-    expect(mem.steps[5].answeredAt).toBeNull();
+    expect((await stepsOf(mem))[5].answeredAt).toBeNull();
     await expect(answer(ENV, mem.store, USER, v.current!.stepId, 'too short', TZ, DOMAIN, opts)).rejects.toMatchObject({ code: 'answer_invalid', reason: 'too_short' });
     v = await answer(ENV, mem.store, USER, v.current!.stepId, SHORT, TZ, DOMAIN, opts);
     expect(v.last).toMatchObject({ part: 'writing', correct: null, score: 59, feedback: EVAL.summary, correction: EVAL.rewrite });
@@ -178,27 +191,28 @@ describe('занятие в хранилище', () => {
     expect(v.parts.writing).toEqual({ done: true, score: 59 });
     // ошибка письма без темы от экзаменатора — карточка по теме занятия
     expect(v.last!.newCards).toBe(1);
-    expect(mem.cards.find(c => c.origin === `${stepOrigin(v.last!.stepId)}:w1`)).toMatchObject({ topic: 'conjunctions', example: 'shows a small loss', correction: 'showed a small loss', rule: 'Прошедшее время для завершённого теста' });
-    expect(mem.cards).toHaveLength(7);
+    expect((await cardsOf(mem)).find(c => c.origin === `${stepOrigin(v.last!.stepId)}:w1`)).toMatchObject({ topic: 'conjunctions', example: 'shows a small loss', correction: 'showed a small loss', rule: 'Прошедшее время для завершённого теста' });
+    expect(await cardsOf(mem)).toHaveLength(7);
     // 7–9: карточки — пример на экране, правило после ответа; счётчики и срок карточки меняются
     expect(v.current).toMatchObject({ position: 7, part: 'review', kind: 'card', kindLabel: 'карточка журнала', topicLabel: 'Союзы и инверсия' });
-    const c7 = mem.cards.find(c => c.id === mem.steps[6].cardId)!;
+    const c7 = (await mem.store.getCard((await stepsOf(mem))[6].cardId!))!;
     expect(v.current!.prompt).toBe(c7.example);
     v = await answer(ENV, mem.store, USER, v.current!.stepId, c7.correction, TZ, DOMAIN, opts);
     expect(v.last).toMatchObject({ part: 'review', correct: 1, score: 100, feedback: 'правило карточки', written: c7.correction, correction: c7.correction, newCards: 0 });
     // первый верный повтор по FSRS: стабильность w2 ≈ 3,7 дня → срок через четыре дня, серия 1, до гашения два
-    expect(c7).toMatchObject({ reps: 1, lapses: 0, streak: 1, reviewedAt: TODAY, due: '2026-11-06', retired: false });
-    expect(c7.stability).toBeCloseTo(3.7145, 3);
+    const c7after = (await mem.store.getCard(c7.id))!;
+    expect(c7after).toMatchObject({ reps: 1, lapses: 0, streak: 1, reviewedAt: TODAY, due: '2026-11-06', retired: false });
+    expect(c7after.stability).toBeCloseTo(3.7145, 3);
     expect(v.last!.card).toEqual({ id: c7.id, due: '2026-11-06', streak: 1, left: RETIRE_AFTER - 1, retired: false });
-    const c8 = mem.cards.find(c => c.id === mem.steps[7].cardId)!;
+    const c8 = (await mem.store.getCard((await stepsOf(mem))[7].cardId!))!;
     expect(c8.id).not.toBe(c7.id);
     v = await answer(ENV, mem.store, USER, v.current!.stepId, 'wrong answer here', TZ, DOMAIN, opts);
     // неверно: lapses, серия 0, карточка возвращается завтра; новая карточка из повтора не заводится
-    expect(v.last).toMatchObject({ correct: 0, newCards: 0 }); expect(c8).toMatchObject({ reps: 0, lapses: 1, streak: 0, due: '2026-11-03' });
+    expect(v.last).toMatchObject({ correct: 0, newCards: 0 }); expect(await mem.store.getCard(c8.id)).toMatchObject({ reps: 0, lapses: 1, streak: 0, due: '2026-11-03' });
     expect(v.last!.card).toMatchObject({ due: '2026-11-03', streak: 0, left: RETIRE_AFTER });
-    expect(mem.cards).toHaveLength(7);
+    expect(await cardsOf(mem)).toHaveLength(7);
     expect(v.current).toMatchObject({ position: 9, part: 'review' });
-    const c9 = mem.cards.find(c => c.id === mem.steps[8].cardId)!;
+    const c9 = (await mem.store.getCard((await stepsOf(mem))[8].cardId!))!;
     v = await answer(ENV, mem.store, USER, v.current!.stepId, c9.correction, TZ, DOMAIN, opts);
     // завершено: итог, день программы пройден с баллом
     expect(v.status).toBe('finished'); expect(v.current).toBeNull(); expect(v.answered).toBe(9);
@@ -206,7 +220,7 @@ describe('занятие в хранилище', () => {
     expect(v.score).toBe(Math.round((100 + 0 + 100 + 100 + 0 + 59 + 100 + 0 + 100) / 9));
     expect(v.steps).toHaveLength(9); expect(v.finishedAt).toBe(NOW);
     expect(v.day).toMatchObject({ status: 'done', score: v.score, completedAt: NOW });
-    expect(mem.programDays.find(d => d.dayDate === TODAY)).toMatchObject({ status: 'done', score: v.score });
+    expect(await dayOn(mem, TODAY)).toMatchObject({ status: 'done', score: v.score });
     // после завершения — то же занятие по GET и по start; ответов больше не принимает
     const t = await lessonToday(mem.store, USER, TZ, { now });
     expect(t.lesson).toMatchObject({ id: v.id, status: 'finished', score: v.score });
@@ -223,9 +237,9 @@ describe('занятие в хранилище', () => {
     expect(v.total).toBe(6); expect(v.parts.review.total).toBe(0);
     // день с темой, которой в банке нет
     const mem2 = await setup(0);
-    for (const d of mem2.programDays) if (d.dayDate === TODAY) d.topic = 'passive';
+    await mem2.store.updateProgramDay((await dayOn(mem2, TODAY)).id, { topic: 'passive' });
     await expect(startOrResume(ENV, mem2.store, USER, TZ, DOMAIN, opts)).rejects.toMatchObject({ code: 'bank_empty' });
-    expect(mem2.lessons).toHaveLength(1); // занятие создано, шаг не выдан — следующий старт попробует снова
+    expect(mem2.rows('SELECT id FROM lessons')).toHaveLength(1); // занятие создано, шаг не выдан — следующий старт попробует снова
     const chatFn = async (_env: unknown, msgs: { content: string }[]) => {
       const user = msgs[msgs.length - 1].content;
       if (user.startsWith('Write ')) return JSON.stringify({ items: [{ prompt: 'The report ___ by the auditor yesterday.', options: ['wrote', 'was written', 'is writing', 'has written'], answer: 'B', explanation: 'Пассив прошедшего времени.' }] });
@@ -233,30 +247,32 @@ describe('занятие в хранилище', () => {
     };
     const v2 = await startOrResume(ENV, mem2.store, USER, TZ, DOMAIN, { ...opts, generate: true, chatFn: chatFn as any });
     expect(v2.current).toMatchObject({ position: 1, kind: 'mcq', topicLabel: 'Пассив' });
-    expect(mem2.items.filter(i => i.topic === 'passive' && i.status === 'verified')).toHaveLength(1);
+    expect(mem2.rows("SELECT id FROM items WHERE topic = 'passive' AND status = 'verified'")).toHaveLength(1);
   });
 
   it('смешанное повторение в субботу берёт темы недели; письмо генерируется с форматом дня, когда в банке его нет', async () => {
     const mem = await setup(1);
     const sat = () => '2026-11-07T03:00:00.000Z';
-    for (const d of mem.programDays) if (d.dayDate >= '2026-11-02' && d.dayDate <= '2026-11-06') d.topic = 'register';
-    mem.items.push(makeItem('mcq', 'B1', 'register'), makeItem('mcq', 'B1', 'register'), makeItem('correction', 'B1', 'register'));
-    const satDay = mem.programDays.find(d => d.dayDate === '2026-11-07')!;
+    for (const d of await mem.store.listProgramDays(USER)) if (d.dayDate >= '2026-11-02' && d.dayDate <= '2026-11-06') await mem.store.updateProgramDay(d.id, { topic: 'register' });
+    await mem.store.insertItems([makeItem('mcq', 'B1', 'register'), makeItem('mcq', 'B1', 'register'), makeItem('correction', 'B1', 'register')]);
+    const satDay = await dayOn(mem, '2026-11-07');
     expect(satDay.topic).toBe('mixed');
-    satDay.writing = 'explain';
+    mem.db.prepare("UPDATE program_days SET writing = 'explain' WHERE id = ?").run(satDay.id); // у хранилища программы формат письма не правится
     const o = { ...opts, now: sat };
     let v = await startOrResume(ENV, mem.store, USER, TZ, DOMAIN, o);
     expect(v.topicLabel).toBe('Смешанное повторение');
     expect(v.current).toMatchObject({ kind: 'mcq', topicLabel: 'Регистр рецензента' });
     for (let i = 0; i < 5; i++) v = await answer(ENV, mem.store, USER, v.current!.stepId, v.current!.kind === 'mcq' ? 'C' : v.current!.prompt, TZ, DOMAIN, o);
     expect(v.current).toMatchObject({ part: 'writing' });
-    expect(mem.items.find(i => i.id === mem.steps[mem.steps.length - 1].itemId)!.writingFormat).toBe('explain');
+    expect((await itemOf(mem, (await stepsOf(mem)).at(-1)!.itemId)).writingFormat).toBe('explain');
     // письма формата explain в банке больше нет — генерация с форматом
     const mem2 = await setup(0);
-    mem2.items.splice(0, mem2.items.length, ...mem2.items.filter(i => i.writingFormat !== 'explain'));
+    mem2.db.exec("DELETE FROM items WHERE writing_format = 'explain'");
+    expect(mem2.rows("SELECT id FROM items WHERE writing_format = 'explain'")).toEqual([]);
     const tue = () => '2026-11-03T03:00:00.000Z';
-    const tueDay = mem2.programDays.find(d => d.dayDate === '2026-11-03')!;
-    tueDay.topic = 'conjunctions'; tueDay.writing = 'explain';
+    const tueDay = await dayOn(mem2, '2026-11-03');
+    await mem2.store.updateProgramDay(tueDay.id, { topic: 'conjunctions' });
+    mem2.db.prepare("UPDATE program_days SET writing = 'explain' WHERE id = ?").run(tueDay.id);
     const seen: string[] = [];
     const chatFn = async (_env: unknown, msgs: { content: string }[]) => {
       seen.push(msgs[0].content);
@@ -270,7 +286,7 @@ describe('занятие в хранилище', () => {
     for (let i = 0; i < 5; i++) w = await answer(ENV, mem2.store, USER, w.current!.stepId, w.current!.kind === 'mcq' ? 'C' : w.current!.prompt, TZ, DOMAIN, o2);
     expect(w.current).toMatchObject({ part: 'writing', kind: 'writing' });
     expect(seen.some(s => s.includes('EXPLANATION FOR A NON-SPECIALIST'))).toBe(true);
-    expect(mem2.items.find(i => i.id === mem2.steps[mem2.steps.length - 1].itemId)).toMatchObject({ writingFormat: 'explain', topic: mem2.programDays.find(d => d.dayDate === '2026-11-03')!.topic });
+    expect(await itemOf(mem2, (await stepsOf(mem2)).at(-1)!.itemId)).toMatchObject({ writingFormat: 'explain', topic: (await dayOn(mem2, '2026-11-03')).topic });
   });
 });
 
@@ -279,19 +295,19 @@ describe('бонусная задача', () => {
   /** id занятия задаётся первым — от него зависит, предложат ли бонус (хеш < BONUS_CHANCE). */
   const idsFrom = (lessonId: string) => { let first = true; return () => { if (first) { first = false; return lessonId; } return nextId(); }; };
   async function setup(lessonId: string) {
-    const mem = memoryStore(); fillBank(mem.items);
-    mem.items.push(makeItem('correction', 'A2', 'conjunctions')); // ниже уровня занятия — бонусу не годится
-    mem.assessments.push(assessment());
+    const mem = await banked();
+    await mem.store.insertItems([makeItem('correction', 'A2', 'conjunctions')]); // ниже уровня занятия — бонусу не годится
+    await mem.putAssessment(assessment());
     await generateProgram(mem.store, USER, TZ, null, { now, id: nextId });
     return mem;
   }
   const optsFor = (lessonId: string) => ({ now, id: idsFrom(lessonId), rng, generate: false, chatFn: evalChat as any });
   /** Пройти занятие до конца: выбор варианта верно, исправления — верно, письмо — SHORT. */
-  async function runLesson(mem: ReturnType<typeof memoryStore>, opts: any) {
+  async function runLesson(mem: Mem, opts: any) {
     let v = await startOrResume(ENV, mem.store, USER, TZ, DOMAIN, opts);
     while (v.current) {
       const c = v.current;
-      const ans = c.kind === 'mcq' ? 'C' : c.kind === 'correction' ? mem.items.find(i => i.prompt === c.prompt)!.answer : SHORT;
+      const ans = c.kind === 'mcq' ? 'C' : c.kind === 'correction' ? mem.rows<{ answer: string }>('SELECT answer FROM items WHERE prompt = ?', c.prompt)[0].answer : SHORT;
       v = await answer(ENV, mem.store, USER, c.stepId, ans, TZ, DOMAIN, opts);
     }
     return v;
@@ -309,8 +325,9 @@ describe('бонусная задача', () => {
   });
 
   it('выбор задачи: исправление по теме дня ступенью выше, не ниже уровня занятия, виденные не берутся', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
-    mem.items.push(makeItem('correction', 'A2', 'conjunctions'));
+    const mem = await banked();
+    const a2 = makeItem('correction', 'A2', 'conjunctions');
+    await mem.store.insertItems([a2]); mem.items.push(a2);
     const l = { level: 'B1' } as Lesson;
     const a = await pickBonus(mem.store, l, ['conjunctions'], new Set(), rng);
     expect(a).toMatchObject({ kind: 'correction', level: 'B2', topic: 'conjunctions' });
@@ -338,7 +355,7 @@ describe('бонусная задача', () => {
     await expect(answer(ENV, mem.store, USER, 'x', 'A', TZ, DOMAIN, o)).rejects.toMatchObject({ code: 'lesson_none' });
     const d = await bonus(ENV, mem.store, USER, TZ, DOMAIN, false, o);
     expect(d.bonus).toMatchObject({ status: 'declined', step: null }); expect(d.current).toBeNull();
-    expect(mem.lessons[0].bonus).toBe('declined');
+    expect((await mem.store.listLessons(USER))[0].bonus).toBe('declined');
     await expect(bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o)).rejects.toMatchObject({ code: 'bonus_none', reason: 'declined' });
     expect((await lessonToday(mem.store, USER, TZ, { now })).lesson!.bonus!.status).toBe('declined');
   });
@@ -347,16 +364,16 @@ describe('бонусная задача', () => {
     const mem = await setup('L2');
     const o = optsFor('L2');
     const v = await runLesson(mem, o);
-    const score = v.score!, dayScore = mem.programDays.find(d => d.dayDate === TODAY)!.score;
-    const cardsBefore = mem.cards.length;
+    const score = v.score!, dayScore = (await dayOn(mem, TODAY)).score;
+    const cardsBefore = (await cardsOf(mem)).length;
     const b = await bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o);
     expect(b.status).toBe('finished'); expect(b.bonus).toMatchObject({ status: 'active', level: 'B2', step: null });
     expect(b.current).toMatchObject({ position: 7, part: 'bonus', partLabel: 'бонусная задача', kind: 'correction', level: 'B2', topicLabel: 'Союзы и инверсия' });
     expect(b.answered).toBe(6); expect(b.total).toBe(6); expect(b.steps).toHaveLength(6);
-    expect(mem.lessons[0].bonus).toBe('active');
+    expect((await mem.store.listLessons(USER))[0].bonus).toBe('active');
     // повторный запрос возвращает ту же задачу
     expect((await bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o)).current!.stepId).toBe(b.current!.stepId);
-    expect(mem.steps.filter(s => s.part === 'bonus')).toHaveLength(1);
+    expect((await stepsOf(mem)).filter(s => s.part === 'bonus')).toHaveLength(1);
     // GET тоже показывает её текущим шагом
     expect((await lessonToday(mem.store, USER, TZ, { now })).lesson!.current!.part).toBe('bonus');
     // чужой шаг и пустой ответ
@@ -367,10 +384,10 @@ describe('бонусная задача', () => {
     expect(w.bonus!.step).toMatchObject({ part: 'bonus', kind: 'correction', correct: 0, score: 0, newCards: 1 });
     expect(w.last).toMatchObject({ stepId: b.current!.stepId, part: 'bonus', correct: 0 });
     expect(w.current).toBeNull(); expect(w.score).toBe(score); expect(w.steps).toHaveLength(6);
-    expect(mem.lessons[0]).toMatchObject({ bonus: 'wrong', score, status: 'finished' });
-    expect(mem.programDays.find(d => d.dayDate === TODAY)!.score).toBe(dayScore);
-    expect(mem.cards).toHaveLength(cardsBefore + 1);
-    expect(mem.cards.find(c => c.origin === stepOrigin(b.current!.stepId))).toMatchObject({ topic: 'conjunctions', source: CARD_SOURCE, due: '2026-11-03' });
+    expect((await mem.store.listLessons(USER))[0]).toMatchObject({ bonus: 'wrong', score, status: 'finished' });
+    expect((await dayOn(mem, TODAY)).score).toBe(dayScore);
+    expect(await cardsOf(mem)).toHaveLength(cardsBefore + 1);
+    expect((await cardsOf(mem)).find(c => c.origin === stepOrigin(b.current!.stepId))).toMatchObject({ topic: 'conjunctions', source: CARD_SOURCE, due: '2026-11-03' });
     await expect(bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o)).rejects.toMatchObject({ code: 'bonus_none', reason: 'wrong' });
     await expect(answer(ENV, mem.store, USER, b.current!.stepId, 'x', TZ, DOMAIN, o)).rejects.toMatchObject({ code: 'lesson_none' });
   });
@@ -380,20 +397,23 @@ describe('бонусная задача', () => {
     const o = optsFor('L3');
     await runLesson(mem, o);
     const b = await bonus(ENV, mem.store, USER, TZ, DOMAIN, true, o);
-    const item = mem.items.find(i => i.id === mem.steps.find(s => s.part === 'bonus')!.itemId)!;
+    const item = await itemOf(mem, (await stepsOf(mem)).find(s => s.part === 'bonus')!.itemId);
     expect(item.level).toBe('B2');
-    const cardsBefore = mem.cards.length;
+    const cardsBefore = (await cardsOf(mem)).length;
     const w = await answer(ENV, mem.store, USER, b.current!.stepId, item.answer.toLowerCase(), TZ, DOMAIN, o);
     expect(w.bonus).toMatchObject({ status: 'correct', step: { correct: 1, score: 100, newCards: 0 } });
-    expect(mem.cards).toHaveLength(cardsBefore);
+    expect(await cardsOf(mem)).toHaveLength(cardsBefore);
     expect(await mem.store.usedLessonItemIds(USER)).toContain(item.id);
     // банк без исправлений уровня занятия и выше
     const mem2 = await setup('L4');
     const o2 = optsFor('L4');
     await runLesson(mem2, o2);
-    mem2.items.splice(0, mem2.items.length, ...mem2.items.filter(i => !(i.kind === 'correction' && i.level !== 'A2')));
+    // убрать из банка исправления уровня занятия и выше; выданные в занятии остаются (на них ссылаются шаги), но бонусу они не годятся — уже виденные
+    mem2.db.exec("DELETE FROM items WHERE kind = 'correction' AND level <> 'A2' AND id NOT IN (SELECT item_id FROM lesson_steps WHERE item_id IS NOT NULL)");
+    const usedIds = await mem2.store.usedLessonItemIds(USER);
+    expect(mem2.rows("SELECT id FROM items WHERE kind = 'correction' AND level <> 'A2'").every(r => usedIds.has(r.id))).toBe(true);
     await expect(bonus(ENV, mem2.store, USER, TZ, DOMAIN, true, o2)).rejects.toMatchObject({ code: 'bank_empty' });
-    expect(mem2.lessons[0].bonus).toBe('offered'); // предложение остаётся — можно пополнить банк и взять позже
+    expect((await mem2.store.listLessons(USER))[0].bonus).toBe('offered'); // предложение остаётся — можно пополнить банк и взять позже
   });
 });
 
@@ -441,14 +461,15 @@ describe('хранилище D1 (node:sqlite с миграциями)', () => {
 
 describe('API занятия', () => {
   async function login() {
-    const mem = memoryStore(); fillBank(mem.items);
-    const app = createApp('test', () => mem.store);
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, ENV);
+    const mem = sqlStore(); await mem.store.insertItems(fillBank([]));
+    const app = createApp('test');
+    const env = { ...ENV, DB: mem.DB } as Env;
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const post = (path: string, body: unknown, cookie?: string) => call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
     const r1: any = await (await post('/auth/request', { email: 'y@example.com' })).json();
     const r2 = await post('/auth/verify', { email: 'y@example.com', code: r1.code });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
-    return { mem, call, post, cookie, userId: mem.users[0].id };
+    return { mem, call, post, cookie, userId: mem.rows<{ id: string }>('SELECT id FROM users')[0]?.id };
   }
   it('без входа — 401', async () => {
     const { call, post } = await login();
@@ -479,7 +500,7 @@ describe('API занятия', () => {
     }
     // тема дня может быть любой — подложим задания по ней; суббота в первый день программы — смешанное повторение,
     // а без пройденных занятий и карточек разминка берёт spelling (warmupTopics)
-    for (const topic of [g1.day.topic, 'spelling']) for (const l of ['B1', 'B2'] as Level[]) for (let i = 0; i < 3; i++) { mem.items.push(makeItem('mcq', l, topic)); mem.items.push(makeItem('correction', l, topic)); }
+    for (const topic of [g1.day.topic, 'spelling']) for (const l of ['B1', 'B2'] as Level[]) for (let i = 0; i < 3; i++) await mem.store.insertItems([makeItem('mcq', l, topic), makeItem('correction', l, topic)]);
     const s2: any = await (await post('/lesson/start', {}, cookie)).json();
     expect(s2.ok).toBe(true); expect(s2.lesson.current.position).toBe(1);
     expect(JSON.stringify(s2.lesson.current)).not.toContain('"answer"');

@@ -9,7 +9,7 @@ import { LEVELS, TOPICS, type Item, type Kind, type Level } from '../functions/_
 import type { ProgramDay } from '../functions/_lib/program';
 import type { Profile } from '../functions/_lib/profile';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 
 const ENV = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
 const USER = 'u1';
@@ -35,11 +35,22 @@ function makeItem(kind: Kind, level: Level, topic = TOPICS[seq % TOPICS.length].
   ], answer: 'B,C' };
   return { ...base, prompt: `Write a short reply to a reviewer about calculation ${n} in 60–80 words.`, options: null, rubric: ['Отвечает прямо'], answer: SHORT };
 }
-function fillBank(items: Item[]) {
+function makeBank(): Item[] {
+  const items: Item[] = [];
   for (const l of LEVELS) {
     for (let i = 0; i < 4; i++) { items.push(makeItem('mcq', l)); items.push(makeItem('correction', l)); }
     items.push(makeItem('reading', l)); items.push(makeItem('reading', l)); items.push(makeItem('writing', l)); items.push(makeItem('writing', l));
   }
+  return items;
+}
+type Mem = ReturnType<typeof sqlStore>;
+/** Хранилище на SQL с банком заданий; банк возвращается, чтобы брать ключи ответов. */
+async function setup(user: string | null = USER) {
+  const mem = sqlStore(); if (user) mem.addUser(user);
+  const items = makeBank(); await mem.store.insertItems(items);
+  /** Эталон задания по попытке: item_id из таблицы attempts. */
+  const key = (attId: string) => { const [t] = mem.rows<{ itemId: string }>('SELECT item_id FROM attempts WHERE id = ?', attId); return items.find(i => i.id === t.itemId)!; };
+  return { mem, items, key };
 }
 
 const profile = (over: Partial<Profile> = {}): Profile => ({
@@ -56,13 +67,16 @@ const day = (over: Partial<ProgramDay> = {}): ProgramDay => ({
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** Программа 31.10–27.11: срез сегодня (14-й день), занятия до и после. */
-function seedProgram(days: ProgramDay[]) {
+async function seedProgram(mem: Mem) {
+  const days: ProgramDay[] = [];
   for (let p = 1; p <= 28; p++) {
     const date = addDays('2026-10-31', p - 1);
     if (p === 14 || p === 28) { days.push(day({ dayDate: date, position: p, week: Math.ceil(p / 7) })); continue; }
     days.push(day({ dayDate: date, position: p, week: Math.ceil(p / 7), format: 'lesson', topic: p % 2 ? 'articles' : 'tenses', writing: 'review', reason: 'тема', status: date < TODAY ? 'done' : 'planned', score: date < TODAY ? 70 : null, minutes: 25 }));
   }
+  await mem.store.replacePlannedDays(USER, '2026-10-31', days);
 }
+const programDays = (mem: Mem) => mem.store.listProgramDays(USER);
 
 const opts = () => ({ rng, id: nextId, now: () => NOW, generate: false });
 
@@ -109,10 +123,10 @@ describe('план среза и сравнение', () => {
 
 describe('ход среза', () => {
   it('по плану: старт с уровня последнего теста, 10 шагов, день программы → done с баллом, сравнение и пересборка программы', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
-    mem.assessments.push(baseline({ level: 'B2' }));
-    seedProgram(mem.programDays);
-    mem.profiles.set(USER, profile());
+    const { mem, key } = await setup();
+    await mem.putAssessment(baseline({ level: 'B2' }));
+    await seedProgram(mem);
+    mem.putProfile(profile());
     const o = opts();
 
     const t0 = await checkpointToday(mem.store, USER, TZ, o);
@@ -121,8 +135,9 @@ describe('ход среза', () => {
     let v = await startOrResume(ENV, mem.store, USER, TZ, profile(), o);
     expect(v.kind).toBe('checkpoint'); expect(v.status).toBe('active'); expect(v.total).toBe(10);
     expect(v.day?.position).toBe(14); expect(v.programDayId).toBe(t0.day!.id);
-    expect(mem.assessments[1]).toMatchObject({ kind: 'checkpoint', currentLevel: 'B2', adaptiveCount: 8, programDayId: t0.day!.id });
-    expect(mem.attempts[0].level).toBe('B2');
+    expect(await mem.store.listAssessments(USER)).toHaveLength(2);
+    expect(await mem.store.latestAssessment(USER, 'checkpoint')).toMatchObject({ id: v.id, kind: 'checkpoint', currentLevel: 'B2', adaptiveCount: 8, programDayId: t0.day!.id });
+    expect(mem.rows('SELECT level FROM attempts')).toEqual([{ level: 'B2' }]);
     // повторный старт — тот же срез
     expect((await startOrResume(ENV, mem.store, USER, TZ, profile(), o)).id).toBe(v.id);
     // карточка «Тест уровня» срез не видит: там исходный срез
@@ -130,8 +145,7 @@ describe('ход среза', () => {
     // тест уровня, пока идёт срез, не начать
     await expect(startAssessment(ENV, mem.store, USER, DOMAIN, o)).rejects.toMatchObject({ code: 'assessment_busy', reason: 'checkpoint' });
 
-    const key = (attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
-    const oldPlanned = mem.programDays.filter(d => d.status === 'planned' && d.dayDate > TODAY).map(d => d.id);
+    const oldPlanned = (await programDays(mem)).filter(d => d.status === 'planned' && d.dayDate > TODAY).map(d => d.id);
     expect(oldPlanned.length).toBe(14);
     while (v.status === 'active') {
       const cur = v.current!;
@@ -146,16 +160,16 @@ describe('ход среза', () => {
     expect(v.comparison!.previous.id).toBe('a-base'); expect(v.comparison!.level.change).toBe('up');
     expect(v.comparison!.verdict).toMatch(/^Уровень вырос: B2 → C1/);
     // день программы пройден с сводным баллом
-    const d = mem.programDays.find(x => x.id === t0.day!.id)!;
+    const d = (await mem.store.getProgramDay(t0.day!.id))!;
     expect(d.status).toBe('done'); expect(d.score).toBe(v.result!.overall); expect(d.completedAt).toBe(NOW);
     expect(v.day?.status).toBe('done');
     // программа пересобрана: planned-дни после сегодня заменены, пройденные и сегодняшний остались
     expect(v.programAdjusted).toBe(true);
-    const planned = mem.programDays.filter(x => x.status === 'planned' && x.dayDate > TODAY);
+    const planned = (await programDays(mem)).filter(x => x.status === 'planned' && x.dayDate > TODAY);
     expect(planned.length).toBe(14);
     expect(planned.every(x => !oldPlanned.includes(x.id))).toBe(true);
     expect(planned.every(x => x.generatedAt === NOW)).toBe(true);
-    expect(mem.programDays.filter(x => x.status === 'done')).toHaveLength(13 + 1);
+    expect((await programDays(mem)).filter(x => x.status === 'done')).toHaveLength(13 + 1);
     const cp28 = planned.find(x => x.position === 28)!;
     expect(cp28.format).toBe('checkpoint'); expect(cp28.reason).toContain('сравнение с контрольным срезом от 13 ноября 2026');
 
@@ -170,37 +184,36 @@ describe('ход среза', () => {
     // пересчёт без force ничего не меняет и программу второй раз не трогает
     const r = await rescore(ENV, mem.store, USER, TZ, profile(), false, o);
     expect(r.id).toBe(v.id); expect(r.programAdjusted).toBe(false);
-    expect(mem.programDays.filter(x => x.status === 'planned' && x.dayDate > TODAY).map(x => x.id)).toEqual(planned.map(x => x.id)); // не пересобрано: ids те же
+    expect((await programDays(mem)).filter(x => x.status === 'planned' && x.dayDate > TODAY).map(x => x.id)).toEqual(planned.map(x => x.id)); // не пересобрано: ids те же
   });
 
   it('вне плана: без дня программы, программа не трогается; abandon закрывает срез, следующий start — новый', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
-    mem.assessments.push(baseline());
+    const { mem, key } = await setup();
+    await mem.putAssessment(baseline());
     const o = { ...opts(), now: () => '2026-11-10T05:00:00.000Z' }; // вторник — занятие по плану
-    seedProgram(mem.programDays);
+    await seedProgram(mem);
     const t0 = await checkpointToday(mem.store, USER, TZ, o);
     expect(t0.scheduled).toBe(false); expect(t0.day).toBeNull(); expect(t0.next?.position).toBe(14);
     let v = await startOrResume(ENV, mem.store, USER, TZ, null, o);
     expect(v.day).toBeNull(); expect(v.programDayId).toBeNull();
-    expect(mem.attempts[0].level).toBe('B1'); // уровень исходного среза
+    expect(mem.rows('SELECT level FROM attempts')).toEqual([{ level: 'B1' }]); // уровень исходного среза
     expect(await abandon(mem.store, USER, o)).toBe(true);
     expect(await abandon(mem.store, USER, o)).toBe(false);
     expect((await checkpointToday(mem.store, USER, TZ, o)).checkpoint).toBeNull();
-    const before = mem.programDays.map(d => d.id);
+    const before = (await programDays(mem)).map(d => d.id);
     v = await startOrResume(ENV, mem.store, USER, TZ, null, o);
-    const key = (attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
     while (v.status === 'active') {
       const cur = v.current!;
       v = await answer(ENV, mem.store, USER, cur.attemptId, cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? SHORT : key(cur.attemptId).answer, TZ, null, o);
     }
     expect(v.status).toBe('finished'); expect(v.programAdjusted).toBe(false);
-    expect(mem.programDays.map(d => d.id)).toEqual(before);
-    expect(mem.programDays.filter(d => d.format === 'checkpoint' && d.status === 'done')).toHaveLength(0);
+    expect((await programDays(mem)).map(d => d.id)).toEqual(before);
+    expect((await programDays(mem)).filter(d => d.format === 'checkpoint' && d.status === 'done')).toHaveLength(0);
     expect(v.comparison?.previous.kind).toBe('baseline');
   });
 
   it('без прошлого теста сравнения нет; активный тест уровня блокирует срез, а срез не прерывает тест', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
+    const { mem, key } = await setup();
     const o = opts();
     const t = await startAssessment(ENV, mem.store, USER, DOMAIN, o);
     expect(t.kind).toBe('placement');
@@ -208,8 +221,7 @@ describe('ход среза', () => {
     expect(await abandon(mem.store, USER, o)).toBe(false); // срезов нет — тест уровня не трогаем
     expect(await abandonAssessment(mem.store, USER, o)).toBe(true);
     let v = await startOrResume(ENV, mem.store, USER, TZ, null, o);
-    expect(mem.attempts.filter(a => a.assessmentId === v.id)[0].level).toBe('B1'); // стартовый уровень без истории
-    const key = (attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
+    expect((await mem.store.listAttempts(v.id))[0].level).toBe('B1'); // стартовый уровень без истории
     while (v.status === 'active') {
       const cur = v.current!;
       v = await answer(ENV, mem.store, USER, cur.attemptId, cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? SHORT : key(cur.attemptId).answer, TZ, null, o);
@@ -220,12 +232,11 @@ describe('ход среза', () => {
 
 describe('местная дата ученика', () => {
   it('срез в 00:30 по Алматы (19:30 UTC накануне): «пройден сегодня» и срок карточек от местной даты, а не от UTC', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
-    mem.assessments.push(baseline());
+    const { mem, key } = await setup();
+    await mem.putAssessment(baseline());
     const FINISH = '2026-11-12T19:30:00.000Z'; // 13 ноября 00:30 в Алматы, по UTC ещё 12-е
     const o = { ...opts(), now: () => FINISH };
     let v = await startOrResume(ENV, mem.store, USER, TZ, null, o);
-    const key = (attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
     let first = true;
     while (v.status === 'active') {
       const cur = v.current!;
@@ -235,8 +246,9 @@ describe('местная дата ученика', () => {
       first = false;
     }
     expect(v.status).toBe('finished');
-    expect(mem.cards.length).toBeGreaterThan(0);
-    expect(mem.cards.every(c => c.due === addDays(TODAY, 1))).toBe(true); // завтра по Алматы — 14 ноября, а не 13-е от UTC
+    const cards = mem.rows<{ due: string | null }>('SELECT due FROM error_cards WHERE user_id = ?', USER);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every(c => c.due === addDays(TODAY, 1))).toBe(true); // завтра по Алматы — 14 ноября, а не 13-е от UTC
     const t = await checkpointToday(mem.store, USER, TZ, o);
     expect(t.today).toBe(TODAY);
     expect(t.finishedToday).toBe(true);
@@ -246,10 +258,11 @@ describe('местная дата ученика', () => {
 });
 
 describe('API среза', () => {
-  async function login(prep: (mem: ReturnType<typeof memoryStore>) => void = () => {}) {
-    const mem = memoryStore(); fillBank(mem.items); prep(mem);
-    const app = createApp('test', () => mem.store);
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, ENV);
+  async function login() {
+    const { mem } = await setup(null);
+    const app = createApp('test');
+    const env = { ...ENV, DB: mem.DB } as Env;
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
       call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const r1: any = await (await post('/auth/request', { email: 'y@x.kz' })).json();
@@ -259,16 +272,18 @@ describe('API среза', () => {
   }
 
   it('без входа — 401 на всех маршрутах', async () => {
-    const app = createApp('test', () => memoryStore().store);
+    const app = createApp('test');
+    const env = { ...ENV, DB: sqlStore().DB } as Env;
     for (const [m, p] of [['GET', '/checkpoint'], ['POST', '/checkpoint/start'], ['POST', '/checkpoint/answer'], ['POST', '/checkpoint/score'], ['POST', '/checkpoint/abandon']]) {
-      expect((await app.request(`https://offerly.test/api${p}`, { method: m }, ENV)).status).toBe(401);
+      expect((await app.request(`https://offerly.test/api${p}`, { method: m }, env)).status).toBe(401);
     }
   });
 
   it('GET → start → answer ×10 → finished со сравнением; тест уровня в GET /api/assessment не меняется', async () => {
     const { mem, call, post } = await login();
     const me: any = await (await call('/me')).json();
-    mem.assessments.push(baseline({ userId: me.user.id }));
+    expect(me.user.id).toBe(mem.rows<{ id: string }>('SELECT id FROM users')[0].id);
+    await mem.putAssessment(baseline({ userId: me.user.id }));
     const g0: any = await (await call('/checkpoint')).json();
     expect(g0).toMatchObject({ ok: true, total: 10, adaptive: 8, significant: SIGNIFICANT_DELTA, scheduled: false, day: null, next: null, checkpoint: null });
     let r: any = await (await post('/checkpoint/start', {})).json();

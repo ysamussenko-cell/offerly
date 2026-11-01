@@ -6,7 +6,7 @@ import {
 import { score, rescore, startOrResume, answer, ADAPTIVE_COUNT, type Assessment } from '../functions/_lib/assessment';
 import type { Attempt } from '../functions/_lib/types';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 import { makeItem } from './assessment.test';
 import { LEVELS, type Item, type Level } from '../functions/_lib/items';
 
@@ -160,26 +160,30 @@ describe('три примера ошибок', () => {
 });
 
 describe('оценка в ходе теста', () => {
-  function bank(mem: ReturnType<typeof memoryStore>) {
-    for (const l of LEVELS) { for (let i = 0; i < 3; i++) { mem.items.push(makeItem('mcq', l)); mem.items.push(makeItem('correction', l)); } mem.items.push(makeItem('reading', l)); mem.items.push(makeItem('writing', l)); }
+  /** Банк заданий в базе; массив остаётся у теста — в нём эталоны для верных ответов. */
+  async function bank(mem: ReturnType<typeof sqlStore>) {
+    const items: Item[] = [];
+    for (const l of LEVELS) { for (let i = 0; i < 3; i++) { items.push(makeItem('mcq', l)); items.push(makeItem('correction', l)); } items.push(makeItem('reading', l)); items.push(makeItem('writing', l)); }
+    await mem.store.insertItems(items);
+    return items;
   }
   const DOMAIN = { specialty: null, industry: null, targetRole: null, keywords: [] };
-  const key = (mem: ReturnType<typeof memoryStore>, attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
+  const key = (mem: ReturnType<typeof sqlStore>, items: Item[], attId: string) => { const [t] = mem.rows('SELECT item_id FROM attempts WHERE id = ?', attId); return items.find(i => i.id === t.itemId)!; };
 
-  async function runTest(mem: ReturnType<typeof memoryStore>, chatFn: any) {
+  async function runTest(mem: ReturnType<typeof sqlStore>, items: Item[], chatFn: any) {
     const opts = { rng: () => 0, generate: false, chatFn, now: () => '2026-10-30T12:00:00Z' };
     let v = await startOrResume(ENV, mem.store, 'u1', DOMAIN, opts);
     while (v.status === 'active') {
       const cur = v.current!;
-      const ans = cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? TEXT : key(mem, cur.attemptId).answer;
+      const ans = cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? TEXT : key(mem, items, cur.attemptId).answer;
       v = await answer(ENV, mem.store, 'u1', cur.attemptId, ans, DOMAIN, opts);
     }
     return v;
   }
 
   it('после письма модель оценивает его, тест получает пять осей, уровень и примеры; письмо получает балл и JSON оценки', async () => {
-    const mem = memoryStore(); bank(mem);
-    const v = await runTest(mem, async () => JSON.stringify(EVAL));
+    const mem = sqlStore(); mem.addUser('u1'); const items = await bank(mem);
+    const v = await runTest(mem, items, async () => JSON.stringify(EVAL));
     expect(v.status).toBe('finished'); expect(v.result).not.toBeNull();
     const r = v.result!;
     expect(r.axes.map(a => a.id)).toEqual([...AXES]);
@@ -189,15 +193,15 @@ describe('оценка в ходе теста', () => {
     expect(r.ladder.steps.map(s => s.from)).toEqual([0, 35, 60, 85]);
     expect(r.writing).toMatchObject({ level: 'B2', errors: 2 }); expect(r.writing!.rewrite).toContain('losses are');
     expect(r.examples.length).toBeGreaterThanOrEqual(2); expect(r.examples[0].source).toBe('writing');
-    const wa = mem.attempts.find(a => a.position === ADAPTIVE_COUNT + 2)!;
+    const a = (await mem.store.latestAssessment('u1'))!;
+    const wa = (await mem.store.listAttempts(a.id)).find(t => t.position === ADAPTIVE_COUNT + 2)!;
     expect(wa.score).toBe(68); expect(wa.feedback).toBe(EVAL.summary); expect(JSON.parse(wa.detail!).axes.grammar).toBe(55);
-    const a = mem.assessments[0] as Assessment;
     expect(a.axes!.grammar).toBe(r.axes[0].score); expect(a.overall).toBe(r.overall);
   });
 
   it('модель молчит — тест всё равно завершён, оси по остальным заданиям, причина в scoringNote; rescore с работающей моделью дооценивает', async () => {
-    const mem = memoryStore(); bank(mem);
-    const v = await runTest(mem, async () => 'Sorry, I cannot.');
+    const mem = sqlStore(); mem.addUser('u1'); const items = await bank(mem);
+    const v = await runTest(mem, items, async () => 'Sorry, I cannot.');
     expect(v.status).toBe('finished'); expect(v.result!.scoringNote).toMatch(/письмо не оценено/);
     expect(v.result!.writing).toBeNull(); expect(v.result!.axes.find(a => a.id === 'grammar')!.score).not.toBeNull();
     const again = await rescore(ENV, mem.store, 'u1', { chatFn: (async () => JSON.stringify(EVAL)) as any });
@@ -211,20 +215,24 @@ describe('оценка в ходе теста', () => {
   });
 
   it('score для теста 0.6.0 без оценки: оси появляются; без завершённого теста rescore — assessment_none', async () => {
-    const mem = memoryStore(); bank(mem);
+    const mem = sqlStore(); mem.addUser('u1'); const items = await bank(mem);
     await expect(rescore(ENV, mem.store, 'u1')).rejects.toMatchObject({ code: 'assessment_none' });
-    const v = await runTest(mem, async () => JSON.stringify(EVAL));
-    const a = mem.assessments[0];
-    Object.assign(a, { axes: null, overall: null, scoredAt: null }); // как будто тест пройден до 2.6
+    const v = await runTest(mem, items, async () => JSON.stringify(EVAL));
+    const id = (await mem.store.latestAssessment('u1'))!.id;
+    await mem.store.updateAssessment(id, { overall: null, scoredAt: null } as Partial<Assessment>); // как будто тест пройден до 2.6: без scored_at осей нет
+    const a = (await mem.store.latestAssessment('u1'))!;
+    expect(a.axes).toBeNull(); expect(a.overall).toBeNull();
     const atts = await mem.store.listAttempts(a.id);
     await score(ENV, mem.store, a, atts, { chatFn: (async () => JSON.stringify(EVAL)) as any });
     expect(a.axes).not.toBeNull(); expect(a.level).toBe(v.level);
+    const stored = (await mem.store.latestAssessment('u1'))!;
+    expect(stored.axes).not.toBeNull(); expect(stored.level).toBe(v.level);
   });
 
   it('API: POST /assessment/score без теста — 404, после теста — result с осями', async () => {
-    const mem = memoryStore(); bank(mem);
-    const env = { ...ENV, DEV_ECHO_CODE: '1', AI: { run: async () => ({ response: JSON.stringify(EVAL) }) } } as unknown as Env;
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore(); const items = await bank(mem);
+    const env = { ...ENV, DB: mem.DB, DEV_ECHO_CODE: '1', AI: { run: async () => ({ response: JSON.stringify(EVAL) }) } } as unknown as Env;
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const r1: any = await (await call('/auth/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@x.kz' }) })).json();
     const r2 = await call('/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@x.kz', code: r1.code }) });
@@ -234,7 +242,7 @@ describe('оценка в ходе теста', () => {
     let r: any = await (await post('/assessment/start', {})).json();
     while (r.assessment.status === 'active') {
       const cur = r.assessment.current;
-      const ans = cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? TEXT : key(mem, cur.attemptId).answer;
+      const ans = cur.kind === 'reading' ? ['B', 'C'] : cur.kind === 'writing' ? TEXT : key(mem, items, cur.attemptId).answer;
       r = await (await post('/assessment/answer', { attemptId: cur.attemptId, answer: ans })).json();
     }
     expect(r.assessment.result.axes).toHaveLength(5); expect(r.assessment.result.scoringNote).toBeNull();

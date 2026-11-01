@@ -47,7 +47,7 @@ export const rowsOf = (db: DatabaseSync) => <T = Row>(sql: string, ...params: (s
   db.prepare(sql).all(...params).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [camel(k), v]))) as T[];
 
 /** Хранилище API-тестов: настоящие хранилища D1 (d1AllStores) поверх SQLite в памяти со всеми миграциями.
- *  env подставляется в createApp/app.fetch как привязка DB; проверки базы — запросами rows. Замена memoryStore. */
+ *  env подставляется в createApp/app.fetch как привязка DB; проверки базы — запросами rows. Единственное хранилище API-тестов (memoryStore удалён в 0.25.15). */
 export function sqlStore() {
   const db = freshDb();
   const DB = d1Of(db);

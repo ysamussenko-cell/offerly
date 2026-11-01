@@ -11,8 +11,7 @@ import type { Profile } from '../functions/_lib/profile';
 import type { ProgramDay } from '../functions/_lib/program';
 import { createApp, type Env } from '../functions/_lib/app';
 import { todayIn } from '../functions/_lib/dates';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 
 const ENV = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
 const USER = 'u1';
@@ -71,17 +70,22 @@ const bothChat = async (_env: unknown, msgs: { role: string; content: string }[]
 const failChat = async () => { throw new Error('AI 429'); };
 const opts = (chatFn: any) => ({ chatFn, now: () => NOW, id: nextId });
 
-function seeded(withDay = true) {
-  const mem = memoryStore();
-  mem.assessments.push(assessment());
-  mem.profiles.set(USER, profile());
-  if (withDay) mem.programDays.push(day());
+type Mem = ReturnType<typeof sqlStore>;
+async function seeded(withDay = true) {
+  const mem = sqlStore(); mem.addUser(USER);
+  await mem.putAssessment(assessment());
+  mem.putProfile(profile());
+  if (withDay) await mem.store.replacePlannedDays(USER, TODAY, [day()]);
   return mem;
 }
+const profileOf = async (mem: Mem) => (await mem.store.getProfile(USER))!;
+const firstDay = async (mem: Mem, userId = USER) => (await mem.store.listProgramDays(userId))[0];
+const rehearsalsOf = (mem: Mem) => mem.store.listRehearsals(USER);
+const cardsOf = (mem: Mem) => mem.rows('SELECT * FROM error_cards WHERE user_id = ?', USER);
 
-async function runAll(mem: ReturnType<typeof memoryStore>, chatFn: any = bothChat) {
-  let v = await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(chatFn));
-  for (const a of ANSWERS) v = await answer(ENV, mem.store, USER, v.current!.turnId, a, TZ, mem.profiles.get(USER)!, opts(chatFn));
+async function runAll(mem: Mem, chatFn: any = bothChat) {
+  let v = await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(chatFn));
+  for (const a of ANSWERS) v = await answer(ENV, mem.store, USER, v.current!.turnId, a, TZ, await profileOf(mem), opts(chatFn));
   return v;
 }
 
@@ -192,20 +196,20 @@ describe('ответ и разбор', () => {
 
 describe('репетиция целиком', () => {
   it('start: сценарий от модели, пять вопросов, привязка к дню программы; повторный start возвращает ту же', async () => {
-    const mem = seeded();
-    const v = await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(scriptChat));
+    const mem = await seeded();
+    const v = await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(scriptChat));
     expect(v).toMatchObject({ status: 'active', date: TODAY, targetRole: 'OpenTrain AI', level: 'B2', scripted: true, total: 5, answered: 0 });
     expect(v.current).toMatchObject({ position: 1, kind: 'experience', kindLabel: KIND_LABELS.experience, words: { min: 40, max: 150 } });
     expect(v.current!.question).toContain('boiler efficiency');
     expect(v.day?.format).toBe('rehearsal');
     expect(v.turns.map(t => t.kind)).toEqual([...QUESTION_KINDS]);
-    expect(mem.rehearsals[0].programDayId).toBe(mem.programDays[0].id);
-    const again = await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(failChat));
+    expect((await rehearsalsOf(mem))[0].programDayId).toBe((await firstDay(mem)).id);
+    const again = await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(failChat));
     expect(again.id).toBe(v.id);
-    expect(mem.rehearsals).toHaveLength(1);
+    expect(await rehearsalsOf(mem)).toHaveLength(1);
   });
   it('start без дня программы и без теста: вне плана, уровень B1 по умолчанию; модель молчит — встроенный сценарий с пометкой', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore(); mem.addUser(USER);
     const v = await startOrResume(ENV, mem.store, USER, TZ, null, opts(failChat));
     expect(v).toMatchObject({ level: 'B1', scripted: false, targetRole: null, day: null });
     expect(v.current!.question).toContain('this role');
@@ -215,7 +219,7 @@ describe('репетиция целиком', () => {
     expect(t.rehearsal?.id).toBe(v.id);
   });
   it('пять ответов → разбор: оси, баллы вопросов, три фразы, карточки в журнале, день программы пройден', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const v = await runAll(mem);
     expect(v.status).toBe('finished');
     expect(v.current).toBeNull();
@@ -228,71 +232,72 @@ describe('репетиция целиком', () => {
     expect(v.turns[0].feedback).toContain('добавьте итог');
     expect(v.turns.every(t => t.answered && t.words! >= 40)).toBe(true);
     expect(v.reviewNote).toBeNull();
-    const cards = mem.cards.filter(c => c.source === CARD_SOURCE);
+    const cards = mem.rows('SELECT * FROM error_cards WHERE user_id = ? AND source = ? ORDER BY created_at, origin', USER, CARD_SOURCE);
     expect(cards).toHaveLength(3);
     expect(cards.map(c => c.origin)).toEqual(['rehearsal:' + v.id + ':r1', 'rehearsal:' + v.id + ':r2', 'rehearsal:' + v.id + ':r3']);
     expect(cards[0]).toMatchObject({ topic: 'conjunctions', example: 'In the result we recalibrated', correction: 'As a result, we recalibrated', due: '2026-11-02' });
-    expect(mem.programDays[0]).toMatchObject({ status: 'done', score: 62 });
-    expect(mem.rehearsals[0]).toMatchObject({ status: 'finished', overall: 62, axes: { grammar: 62, fluency: null } });
+    expect(await firstDay(mem)).toMatchObject({ status: 'done', score: 62 });
+    expect((await rehearsalsOf(mem))[0]).toMatchObject({ status: 'finished', overall: 62, axes: { grammar: 62, fluency: null } });
     // главный экран: репетиция считается как занятие — день в серии, вклад в готовность, минуты недели
-    const d = await dashboard(mem.store, USER, TZ, mem.profiles.get(USER)!, { now: () => NOW });
+    const d = await dashboard(mem.store, USER, TZ, await profileOf(mem), { now: () => NOW });
     expect(d.streak).toMatchObject({ current: 1, todayDone: true });
     expect(d.readiness).toMatchObject({ lessons: 1, gained: 1.2, value: 54 });
     expect(d.week.find(w => w.today)).toMatchObject({ status: 'done', score: 62 });
-    expect(rehearsalAsLesson(mem.rehearsals[0])).toEqual({ dayDate: TODAY, score: 62, status: 'finished', finishedAt: NOW, bonus: null });
+    expect(rehearsalAsLesson((await rehearsalsOf(mem))[0])).toEqual({ dayDate: TODAY, score: 62, status: 'finished', finishedAt: NOW, bonus: null });
   });
   it('ответы: чужой или старый вопрос — stale, короткий — answer_invalid, после завершения — finished; без репетиции — none', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     await expect(answer(ENV, mem.store, USER, 'x', ANSWERS[0], TZ, null, opts(bothChat))).rejects.toMatchObject({ code: 'rehearsal_none' });
-    const v = await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(scriptChat));
+    const v = await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(scriptChat));
     await expect(answer(ENV, mem.store, USER, 'nope', ANSWERS[0], TZ, null, opts(bothChat))).rejects.toMatchObject({ code: 'rehearsal_stale' });
     await expect(answer(ENV, mem.store, USER, v.current!.turnId, 'too short', TZ, null, opts(bothChat))).rejects.toMatchObject({ code: 'answer_invalid', reason: 'too_short' });
-    expect(mem.turns[0].answeredAt).toBeNull();
+    expect(mem.rows('SELECT answered_at FROM rehearsal_turns WHERE rehearsal_id = ? ORDER BY position LIMIT 1', v.id)).toEqual([{ answeredAt: null }]);
     const done = await runAll(mem);
     await expect(answer(ENV, mem.store, USER, done.turns[0].turnId, ANSWERS[0], TZ, null, opts(bothChat))).rejects.toMatchObject({ code: 'rehearsal_finished' });
   });
   it('сбой экзаменатора: репетиция закрыта с причиной, день отмечен без балла; review повторяет разбор, force — заново без дублей карточек', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const scriptOnly = async (_e: unknown, msgs: { content: string }[]) => { if (msgs[0].content.startsWith('You are an experienced hiring manager')) return JSON.stringify(SCRIPT); throw new Error('AI 500'); };
     const v = await runAll(mem, scriptOnly);
     expect(v.status).toBe('finished');
     expect(v.result).toBeNull();
     expect(v.reviewNote).toContain('AI 500');
-    expect(mem.programDays[0]).toMatchObject({ status: 'done', score: null });
-    expect(mem.cards).toHaveLength(0);
-    await expect(rescore(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, false, opts(failChat))).rejects.toMatchObject({ code: 'rehearsal_eval_failed' });
-    const ok = await rescore(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, false, opts(reviewChat));
+    expect(await firstDay(mem)).toMatchObject({ status: 'done', score: null });
+    expect(cardsOf(mem)).toHaveLength(0);
+    await expect(rescore(ENV, mem.store, USER, TZ, await profileOf(mem), false, opts(failChat))).rejects.toMatchObject({ code: 'rehearsal_eval_failed' });
+    const ok = await rescore(ENV, mem.store, USER, TZ, await profileOf(mem), false, opts(reviewChat));
     expect(ok.result?.overall).toBe(62);
-    expect(mem.programDays[0].score).toBe(62);
-    expect(mem.cards).toHaveLength(3);
+    expect((await firstDay(mem)).score).toBe(62);
+    expect(cardsOf(mem)).toHaveLength(3);
     // разбор есть — без force возвращается как есть (модель не зовётся); с force — заново, карточки те же
-    const same = await rescore(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, false, opts(failChat));
+    const same = await rescore(ENV, mem.store, USER, TZ, await profileOf(mem), false, opts(failChat));
     expect(same.result?.reviewedAt).toBe(ok.result?.reviewedAt);
-    const forced = await rescore(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, true, opts(reviewChat));
+    const forced = await rescore(ENV, mem.store, USER, TZ, await profileOf(mem), true, opts(reviewChat));
     expect(forced.result?.overall).toBe(62);
-    expect(mem.cards).toHaveLength(3);
-    await expect(rescore(ENV, memoryStore().store, USER, TZ, null, false, opts(reviewChat))).rejects.toMatchObject({ code: 'rehearsal_none' });
+    expect(cardsOf(mem)).toHaveLength(3);
+    const empty = sqlStore(); empty.addUser(USER);
+    await expect(rescore(ENV, empty.store, USER, TZ, null, false, opts(reviewChat))).rejects.toMatchObject({ code: 'rehearsal_none' });
   });
   it('abandon: начатая бросается, следующий start пишет новый сценарий; завершённую бросить нельзя', async () => {
-    const mem = seeded(false);
-    const v = await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(scriptChat));
+    const mem = await seeded(false);
+    const v = await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(scriptChat));
     expect(await abandon(mem.store, USER, TZ, { now: () => NOW })).toBe(true);
     expect((await rehearsalToday(mem.store, USER, TZ, { now: () => NOW })).rehearsal).toBeNull();
-    const v2 = await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(scriptChat));
+    const v2 = await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(scriptChat));
     expect(v2.id).not.toBe(v.id);
-    expect(mem.rehearsals).toHaveLength(2);
+    expect(await rehearsalsOf(mem)).toHaveLength(2);
     await runAll(mem);
     expect(await abandon(mem.store, USER, TZ, { now: () => NOW })).toBe(false);
   });
   it('today: сегодняшняя репетиция и последняя прежняя; в день программы — scheduled', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const past: Rehearsal = { id: 'old', userId: USER, programDayId: null, dayDate: '2026-10-25', targetRole: 'X', level: 'B1', status: 'finished', questionCount: 5, scriptModel: null, axes: { grammar: 40, vocabulary: 40, coherence: 40, taskResponse: 40, fluency: null }, overall: 40, review: JSON.stringify({ axes: { grammar: 40, vocabulary: 40, coherence: 40, taskResponse: 40 }, level: 'B1', summary: 's', strengths: [], replacements: [], turns: [], model: 'm', reviewedAt: NOW }), reviewNote: null, startedAt: '2026-10-25T05:00:00.000Z', finishedAt: '2026-10-25T05:20:00.000Z', updatedAt: null };
     await mem.store.createRehearsal(past, []);
     const t0 = await rehearsalToday(mem.store, USER, TZ, { now: () => NOW });
     expect(t0).toMatchObject({ scheduled: true, rehearsal: null });
     expect(t0.day?.format).toBe('rehearsal');
     expect(t0.last).toMatchObject({ id: 'old', result: { overall: 40, level: 'B1' } });
-    await startOrResume(ENV, mem.store, USER, TZ, mem.profiles.get(USER)!, opts(scriptChat));
+    await startOrResume(ENV, mem.store, USER, TZ, await profileOf(mem), opts(scriptChat));
     const t1 = await rehearsalToday(mem.store, USER, TZ, { now: () => NOW });
     expect(t1.rehearsal?.status).toBe('active');
     expect(t1.last?.id).toBe('old');
@@ -324,26 +329,26 @@ describe('хранилище D1 (node:sqlite)', () => {
 
 describe('маршруты /api/rehearsal', () => {
   async function session() {
-    const mem = seeded();
+    const mem = sqlStore();
     const ai = { run: async (_m: string, input: any) => ({ response: input.messages[0].content.startsWith('You are an experienced hiring manager') ? JSON.stringify(SCRIPT) : JSON.stringify(REVIEW) }) };
-    const env = { DB: null, AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
-    const app = createApp('test', () => mem.store);
+    const env = { DB: mem.DB, AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) => call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const r1 = await post('/auth/request', { email: 'y@example.com' });
     const { code } = await r1.json() as any;
     const r2 = await post('/auth/verify', { email: 'y@example.com', code });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
-    const u = mem.users[0];
-    // данные теста заведены на USER — переносим на вошедшего пользователя
-    for (const a of mem.assessments) a.userId = u.id;
-    mem.profiles.set(u.id, { ...mem.profiles.get(USER)!, userId: u.id });
-    for (const d of mem.programDays) { d.userId = u.id; d.dayDate = todayIn(TZ); } // маршруты живут по настоящим часам
-    u.tz = TZ;
-    return { mem, call, post, cookie, h: { cookie } };
+    const [u] = mem.rows<{ id: string }>('SELECT id FROM users');
+    // данные теста (как в seeded) — на вошедшего пользователя
+    await mem.putAssessment({ ...assessment(), userId: u.id });
+    mem.putProfile(profile({ userId: u.id }));
+    await mem.store.replacePlannedDays(u.id, todayIn(TZ), [day({ userId: u.id, dayDate: todayIn(TZ) })]); // маршруты живут по настоящим часам
+    mem.db.prepare('UPDATE users SET tz = ? WHERE id = ?').run(TZ, u.id);
+    return { mem, call, post, cookie, h: { cookie }, userId: u.id };
   }
   it('без входа — 401; GET отдаёт мету и состояние; start → answer ×5 → разбор; review без разбора — как есть; abandon завершённой — false', async () => {
-    const { call, post, cookie, h, mem } = await session();
+    const { call, post, cookie, h, mem, userId } = await session();
     expect((await call('/rehearsal')).status).toBe(401);
     expect((await post('/rehearsal/start', {})).status).toBe(401);
     const g0 = await (await call('/rehearsal', { headers: h })).json() as any;
@@ -370,7 +375,7 @@ describe('маршруты /api/rehearsal', () => {
     expect(cur.result.replacements).toHaveLength(3);
     const g1 = await (await call('/rehearsal', { headers: h })).json() as any;
     expect(g1.rehearsal.status).toBe('finished');
-    expect(mem.programDays[0].status).toBe('done');
+    expect((await firstDay(mem, userId)).status).toBe('done');
     const rv = await post('/rehearsal/review', {}, h);
     expect(rv.status).toBe(200);
     expect(((await rv.json()) as any).rehearsal.result.overall).toBe(62);

@@ -14,8 +14,7 @@ import type { ErrorCard } from '../functions/_lib/cards';
 import { seedStatements, FIRST_USER } from '../functions/_lib/seed';
 import { createApp, type Env } from '../functions/_lib/app';
 import worker, { makeStore, status, runAll, VERSION } from '../workers/digest/index';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 import { readFileSync } from 'node:fs';
 
 const TZ = 'Asia/Almaty'; // UTC+5
@@ -111,15 +110,16 @@ describe('VAPID', () => {
     await expect(vapidAuthorization({ publicKey: 'x', privateKey: 'y' }, 'https://a.b/c', 'mailto:a@b')).rejects.toBeInstanceOf(PushError);
   });
   it('vapidKeys: из секретов, если заданы (неверные — vapid_invalid); иначе создаются один раз и хранятся в app_settings', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const k = await generateVapidKeys();
     expect(await vapidKeys({ ...env, VAPID_PUBLIC_KEY: k.publicKey, VAPID_PRIVATE_KEY: k.privateKey }, mem.store)).toEqual({ keys: k, source: 'env' });
     await expect(vapidKeys({ ...env, VAPID_PUBLIC_KEY: 'bad', VAPID_PRIVATE_KEY: k.privateKey }, mem.store)).rejects.toMatchObject({ code: 'vapid_invalid' });
-    expect(mem.settings.size).toBe(0);
+    expect(mem.rows('SELECT key FROM app_settings')).toEqual([]);
     const a = await vapidKeys(env, mem.store, '2026-11-12T00:00:00.000Z');
     expect(a.source).toBe('db');
     expect(validVapidKeys(a.keys)).toBe(true);
-    expect(JSON.parse(mem.settings.get(VAPID_SETTING_KEY)!)).toEqual(a.keys);
+    expect(mem.rows('SELECT key FROM app_settings')).toEqual([{ key: VAPID_SETTING_KEY }]);
+    expect(JSON.parse((await mem.store.getSetting(VAPID_SETTING_KEY))!)).toEqual(a.keys);
     const b = await vapidKeys(env, mem.store);
     expect(b.keys).toEqual(a.keys); // второй вызов — те же ключи, не новые
     expect(vapidSubject({ VAPID_SUBJECT: 'mailto:y@example.com' })).toBe('mailto:y@example.com');
@@ -181,20 +181,26 @@ describe('шифрование aes128gcm', () => {
 });
 
 /** Данные занятого дня: программа, занятие по теме, 14 карточек, срез 53. */
-async function dataFor(opts: { done?: boolean; program?: boolean; cards?: number } = {}): Promise<{ mem: ReturnType<typeof memoryStore>; data: DigestData }> {
-  const mem = memoryStore();
-  mem.users.push(user());
-  mem.profiles.set('u1', profile());
-  mem.assessments.push(assessment());
+async function dataFor(opts: { done?: boolean; program?: boolean; cards?: number } = {}): Promise<{ mem: Mem; data: DigestData }> {
+  const mem = sqlStore();
+  await mem.store.insertUser(user());
+  mem.putProfile(profile());
+  await mem.putAssessment(assessment());
   if (opts.program !== false) {
-    mem.programDays.push(day('2026-11-11', { status: 'done', score: 70 }), day(TODAY, opts.done ? { status: 'done', score: 80 } : {}), day('2026-11-13', { topic: 'conditionals' }));
-    mem.lessons.push(lesson('2026-11-11', 70));
-    if (opts.done) mem.lessons.push(lesson(TODAY, 80));
+    await mem.store.replacePlannedDays('u1', '2026-11-01', [day('2026-11-11', { status: 'done', score: 70 }), day(TODAY, opts.done ? { status: 'done', score: 80 } : {}), day('2026-11-13', { topic: 'conditionals' })]);
+    await mem.store.createLesson(lesson('2026-11-11', 70));
+    if (opts.done) await mem.store.createLesson(lesson(TODAY, 80));
   }
-  for (let i = 0; i < (opts.cards ?? 14); i++) mem.cards.push(card('2026-11-10'));
+  await mem.store.insertCards(Array.from({ length: opts.cards ?? 14 }, () => card('2026-11-10')));
   const data = await collectDigest(mem.store, user(), profile(), { now: () => at('07:50').toISOString() });
   return { mem, data };
 }
+
+type Mem = ReturnType<typeof sqlStore>;
+/** Настройка напоминания u1 как она лежит в push_settings (null — строки нет). */
+const pushRow = (mem: Mem) => mem.rows('SELECT push_at, sent_on, sent_at, note, updated_at FROM push_settings WHERE user_id = ?', 'u1')[0] ?? null;
+const subsOf = (mem: Mem) => mem.store.listPushSubscriptions('u1');
+const addSubs = async (mem: Mem, ...list: PushSubscription[]) => { for (const s of list) await mem.store.upsertPushSubscription(s); };
 
 describe('напоминание', () => {
   it('заголовок — задание дня, тело — письмо, карточки, серия, неделя, собеседование; ссылка на приложение', async () => {
@@ -223,40 +229,44 @@ describe('проход расписания', () => {
   it('пора — напоминание на все устройства, день отмечен; второй проход не дублирует; рано — не трогаем', async () => {
     const { mem } = await dataFor();
     const br1 = await fakeBrowser(), br2 = await fakeBrowser();
-    mem.pushSubs.push(br1.sub({ id: 'sA' }), br2.sub({ id: 'sB', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1' }));
+    await addSubs(mem, br1.sub({ id: 'sA' }), br2.sub({ id: 'sB', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1' }));
     await mem.store.savePushAt('u1', '07:41', null, '2026-11-01T00:00:00.000Z');
     const fetchFn = pushOk();
     const early = await runPush(env, mem.store, { now: () => at('07:30').toISOString(), fetchFn });
     expect(early).toMatchObject({ checked: 1, sent: 0, skipped: 0, failed: 0, users: [{ userId: 'u1', state: 'early', note: null }] });
     expect(fetchFn).not.toHaveBeenCalled();
+    expect(pushRow(mem)).toEqual({ pushAt: '07:41', sentOn: null, sentAt: null, note: null, updatedAt: '2026-11-01T00:00:00.000Z' }); // рано — отметки нет
     const due = await runPush(env, mem.store, { now: () => at('07:50').toISOString(), fetchFn });
     expect(due).toMatchObject({ checked: 1, sent: 1, skipped: 0, failed: 0, users: [{ userId: 'u1', state: 'due', note: 'sent:2/2' }] });
     expect(fetchFn).toHaveBeenCalledTimes(2);
     const payload = JSON.parse(await br1.decrypt((fetchFn.mock.calls[0] as any)[1].body));
     expect(payload.title).toBe('Offerly: Занятие · Артикли');
     expect(payload.url).toBe('https://offerly-c8b.pages.dev/?screen=lesson'); // клик открывает занятие дня (6.1)
-    expect(mem.pushSettings.get('u1')).toMatchObject({ sentOn: TODAY, note: 'sent:2/2' });
-    expect(mem.pushSettings.get('u1')!.sentAt).toBe(at('07:50').toISOString());
-    expect(mem.pushSubs.map(s => s.lastSentAt)).toEqual([at('07:50').toISOString(), at('07:50').toISOString()]);
-    expect(mem.settings.has(VAPID_SETTING_KEY)).toBe(true); // ключи создались при первой отправке
+    expect(pushRow(mem)).toMatchObject({ sentOn: TODAY, note: 'sent:2/2' });
+    expect(pushRow(mem)!.sentAt).toBe(at('07:50').toISOString());
+    expect((await subsOf(mem)).map(s => s.lastSentAt)).toEqual([at('07:50').toISOString(), at('07:50').toISOString()]);
+    expect(await mem.store.getSetting(VAPID_SETTING_KEY)).not.toBeNull(); // ключи создались при первой отправке
     const again = await runPush(env, mem.store, { now: () => at('08:05').toISOString(), fetchFn });
     expect(again.users[0]).toEqual({ userId: 'u1', state: 'sent', note: null });
     expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(mem.pushes).toHaveLength(1);
+    // журнала попыток в D1 нет: единственная отметка — строка push_settings; второй проход её не перезаписал (updated_at — от 07:50)
+    expect(pushRow(mem)).toEqual({ pushAt: '07:41', sentOn: TODAY, sentAt: at('07:50').toISOString(), note: 'sent:2/2', updatedAt: at('07:50').toISOString() });
   });
   it('занятие уже пройдено — skipped:done без отправки; окно прошло — skipped:late; устройств нет — skipped:no_subscriptions', async () => {
     const { mem } = await dataFor({ done: true });
     const br = await fakeBrowser();
-    mem.pushSubs.push(br.sub());
+    const only = br.sub();
+    await addSubs(mem, only);
     await mem.store.savePushAt('u1', '07:41', null, '2026-11-01T00:00:00.000Z');
     const fetchFn = pushOk();
     const r = await runPush(env, mem.store, { now: () => at('07:50').toISOString(), fetchFn });
     expect(r).toMatchObject({ checked: 1, sent: 0, skipped: 1, users: [{ state: 'due', note: 'skipped:done' }] });
     expect(fetchFn).not.toHaveBeenCalled();
-    expect(mem.pushSettings.get('u1')).toMatchObject({ sentOn: TODAY, note: 'skipped:done', sentAt: null });
+    expect(pushRow(mem)).toMatchObject({ sentOn: TODAY, note: 'skipped:done', sentAt: null });
     const late = await runPush(env, mem.store, { now: () => at('12:00', '2026-11-13').toISOString(), fetchFn });
     expect(late.users[0]).toEqual({ userId: 'u1', state: 'late', note: 'skipped:late' });
-    mem.pushSubs.length = 0;
+    expect(await mem.store.deletePushSubscription(only.endpoint, 'u1')).toBe(true);
+    expect(await subsOf(mem)).toEqual([]);
     const none = await runPush(env, mem.store, { now: () => at('07:50', '2026-11-14').toISOString(), fetchFn });
     expect(none.users[0]).toEqual({ userId: 'u1', state: 'due', note: 'skipped:no_subscriptions' });
     expect(fetchFn).not.toHaveBeenCalled();
@@ -264,32 +274,33 @@ describe('проход расписания', () => {
   it('исчезнувшая подписка (410) удаляется, отказ (429) записывается в last_error; ни одной доставки — failed с отметкой дня', async () => {
     const { mem } = await dataFor();
     const br1 = await fakeBrowser(), br2 = await fakeBrowser();
-    mem.pushSubs.push(br1.sub({ id: 'gone', endpoint: 'https://push.example/gone' }), br2.sub({ id: 'busy', endpoint: 'https://push.example/busy' }));
+    await addSubs(mem, br1.sub({ id: 'gone', endpoint: 'https://push.example/gone' }), br2.sub({ id: 'busy', endpoint: 'https://push.example/busy' }));
     await mem.store.savePushAt('u1', '07:41', null, '2026-11-01T00:00:00.000Z');
     const fetchFn = vi.fn(async (url: string) => new Response(url.endsWith('gone') ? 'unsubscribed' : 'too many', { status: url.endsWith('gone') ? 410 : 429 }));
     const r = await runPush(env, mem.store, { now: () => at('07:50').toISOString(), fetchFn: fetchFn as unknown as typeof fetch });
     expect(r).toMatchObject({ checked: 1, sent: 0, skipped: 0, failed: 1 });
     expect(r.users[0].note).toMatch(/^error:/);
-    expect(mem.pushSubs.map(s => s.id)).toEqual(['busy']);
-    expect(mem.pushSubs[0].lastError).toBe('429 too many');
-    expect(mem.pushSettings.get('u1')).toMatchObject({ sentOn: TODAY, sentAt: null });
+    expect(mem.rows('SELECT id FROM push_subscriptions')).toEqual([{ id: 'busy' }]);
+    expect((await subsOf(mem))[0].lastError).toBe('429 too many');
+    expect(pushRow(mem)).toMatchObject({ sentOn: TODAY, sentAt: null });
     // следующий день: одно устройство принимает — sent (без дроби), ошибка снята
     const ok = pushOk();
     const r2 = await runPush(env, mem.store, { now: () => at('07:50', '2026-11-13').toISOString(), fetchFn: ok });
     expect(r2.users[0].note).toBe('sent');
-    expect(mem.pushSubs[0].lastError).toBeNull();
+    expect((await subsOf(mem))[0].lastError).toBeNull();
   });
   it('sendPushNow: напоминание уходит сразу, день не отмечается; pushToUser отдаёт исход по устройствам', async () => {
     const { mem } = await dataFor();
     const br = await fakeBrowser();
-    mem.pushSubs.push(br.sub({ id: 's1' }));
+    await addSubs(mem, br.sub({ id: 's1' }));
     const fetchFn = pushOk();
     const r = await sendPushNow(env, mem.store, user(), profile(), { now: () => at('12:00').toISOString(), fetchFn });
     expect(r.delivered).toBe(1);
     expect(r.devices).toEqual([{ id: 's1', ok: true, status: 201, gone: false, detail: null }]);
     expect(r.reminder.title).toBe('Offerly: Занятие · Артикли');
-    expect(mem.pushSettings.get('u1')).toBeUndefined();
-    expect(mem.pushes).toHaveLength(0);
+    // ни настройки, ни отметки дня: строки push_settings нет
+    expect(await mem.store.getPushSetting('u1')).toBeNull();
+    expect(mem.rows('SELECT user_id FROM push_settings')).toEqual([]);
     const k = await generateVapidKeys();
     const out = await pushToUser(k, env, mem.store, user(), r.reminder, { fetchFn: vi.fn(async () => new Response('x', { status: 400 })) });
     expect(out).toEqual([{ id: 's1', ok: false, status: 400, gone: false, detail: '400 x' }]);
@@ -329,20 +340,21 @@ describe('подписка и устройства', () => {
 
 describe('API', () => {
   const appEnv = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1', APP_URL: 'https://offerly-c8b.pages.dev' } as unknown as Env;
-  async function login(mem: ReturnType<typeof memoryStore>, app: ReturnType<typeof createApp>) {
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, appEnv);
+  async function login(mem: Mem, app: ReturnType<typeof createApp>) {
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, { ...appEnv, DB: mem.DB });
     const r1 = await call('/auth/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com' }) });
     const { code } = await r1.json() as any;
     const r2 = await call('/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com', code }) });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
     const json = (path: string, method: string, body: unknown) => call(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    return { call, cookie, json, uid: mem.users[mem.users.length - 1].id };
+    return { call, cookie, json, uid: (await mem.store.findUserByEmail('y@example.com'))!.id };
   }
   it('без cookie — 401 на всех маршрутах; GET отдаёт открытый ключ VAPID (создан и сохранён), состояние off, устройств нет', async () => {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const app = createApp('test');
+    const env = { ...appEnv, DB: mem.DB } as Env;
     for (const [path, method] of [['/push', 'GET'], ['/push', 'PUT'], ['/push/subscribe', 'POST'], ['/push/subscribe', 'DELETE'], ['/push/send', 'POST']] as const) {
-      expect((await app.request(`https://offerly.test/api${path}`, { method, headers: { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }, appEnv)).status).toBe(401);
+      expect((await app.request(`https://offerly.test/api${path}`, { method, headers: { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }, env)).status).toBe(401);
     }
     const { call, cookie } = await login(mem, app);
     const g = await call('/push', { headers: { cookie } });
@@ -351,15 +363,16 @@ describe('API', () => {
     expect(j).toMatchObject({ ok: true, enabled: false, pushAt: null, state: 'off', next: null, subscriptions: [], keySource: 'db', defaultAt: '07:30', stepMinutes: 15 });
     expect(b64url.decode(j.publicKey).length).toBe(65);
     expect(JSON.stringify(j)).not.toContain('privateKey');
-    expect(JSON.parse(mem.settings.get(VAPID_SETTING_KEY)!).publicKey).toBe(j.publicKey);
+    expect(JSON.parse((await mem.store.getSetting(VAPID_SETTING_KEY))!).publicKey).toBe(j.publicKey);
     // health показывает, откуда ключи
-    const h: any = await (await app.request('https://offerly.test/api/health', {}, { ...appEnv, DB: { prepare: () => ({ first: async () => 1 }) } } as any)).json();
+    const h: any = await (await app.request('https://offerly.test/api/health', {}, env)).json();
+    expect(h.db).toBe('ok');
     expect(h.push).toBe('db');
-    expect(((await (await app.request('https://offerly.test/api/health', {}, { ...appEnv, VAPID_PRIVATE_KEY: 'x' } as any)).json()) as any).push).toBe('env');
+    expect(((await (await app.request('https://offerly.test/api/health', {}, { ...env, VAPID_PRIVATE_KEY: 'x' } as any)).json()) as any).push).toBe('env');
   });
   it('подписка включает напоминание на время письма (или по умолчанию), повторная подписка того же браузера не плодит строк, своё время — PUT, отписка последнего устройства выключает', async () => {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const app = createApp('test');
     const { call, cookie, json, uid } = await login(mem, app);
     await mem.store.saveNotifyAt(uid, '07:41', null, '2026-11-01T00:00:00.000Z');
     const br = await fakeBrowser();
@@ -379,8 +392,7 @@ describe('API', () => {
     expect(JSON.stringify(j)).not.toContain(s.endpoint);
     const again = await json('/push/subscribe', 'POST', { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } });
     expect(((await again.json()) as any).subscriptions).toHaveLength(1);
-    expect(mem.pushSubs).toHaveLength(1);
-    expect(mem.pushSubs[0].id).toBe(j.subscriptions[0].id);
+    expect(mem.rows('SELECT id FROM push_subscriptions')).toEqual([{ id: j.subscriptions[0].id }]);
     // второе устройство с явным временем — время меняется
     const s2 = (await fakeBrowser()).sub();
     const two: any = await (await json('/push/subscribe', 'POST', { endpoint: s2.endpoint, keys: { p256dh: s2.p256dh, auth: s2.auth }, pushAt: '8:15' })).json();
@@ -403,16 +415,16 @@ describe('API', () => {
     const d2: any = await (await json('/push/subscribe', 'DELETE', { endpoint: s2.endpoint })).json();
     expect(d2).toMatchObject({ removed: true, enabled: false, pushAt: null, subscriptions: [] });
     // без времени письма подписка включает время по умолчанию
-    const mem2 = memoryStore();
-    const app2 = createApp('test', () => mem2.store);
+    const mem2 = sqlStore();
+    const app2 = createApp('test');
     const l2 = await login(mem2, app2);
     const def: any = await (await l2.json('/push/subscribe', 'POST', { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } })).json();
     expect(def.pushAt).toBe('07:30');
     expect(call).toBeDefined();
   });
   it('POST /push/send: устройств нет — 404; доставка — ok с исходом по устройствам; все отказали — 502', async () => {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const app = createApp('test');
     const { call, cookie, json } = await login(mem, app);
     const none = await call('/push/send', { method: 'POST', headers: { cookie } });
     expect(none.status).toBe(404);
@@ -434,7 +446,7 @@ describe('API', () => {
     const bad = await call('/push/send', { method: 'POST', headers: { cookie } });
     expect(bad.status).toBe(502);
     expect(await bad.json()).toMatchObject({ ok: false, error: 'push_failed' });
-    expect(mem.pushSubs[0].lastError).toBe('403 nope');
+    expect(mem.rows('SELECT last_error FROM push_subscriptions')).toEqual([{ lastError: '403 nope' }]);
   });
 });
 

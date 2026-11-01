@@ -5,7 +5,7 @@ import {
 } from '../functions/_lib/assessment';
 import { LEVELS, TOPICS, type Item, type Kind, type Level } from '../functions/_lib/items';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { sqlStore } from './helpers/sqliteD1';
 
 const ENV = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly' } as unknown as Env;
 let seq = 0;
@@ -26,12 +26,23 @@ export function makeItem(kind: Kind, level: Level, topic = TOPICS[seq % TOPICS.l
   return { ...base, prompt: `Write a short reply to a reviewer about calculation ${n} in 60–80 words.`, options: null, rubric: ['Отвечает прямо', 'Объясняет метод', 'Нейтральный тон'], answer: SHORT };
 }
 
-/** Полный банк: по три mcq и исправления на каждом уровне, по одному чтению и письму. */
-function fillBank(items: Item[]) {
+/** Полный банк в базе: по три mcq и исправления на каждом уровне, по одному чтению и письму. Массив остаётся у теста — в нём эталоны. */
+async function fillBank(mem: ReturnType<typeof sqlStore>) {
+  const items: Item[] = [];
   for (const l of LEVELS) {
     for (let i = 0; i < 3; i++) { items.push(makeItem('mcq', l)); items.push(makeItem('correction', l)); }
     items.push(makeItem('reading', l)); items.push(makeItem('writing', l));
   }
+  await mem.store.insertItems(items);
+  return items;
+}
+/** Попытки в порядке записи — по всем тестам пользователя, в порядке вставки. */
+const attemptRows = (mem: ReturnType<typeof sqlStore>) => mem.rows('SELECT id, item_id, level FROM attempts ORDER BY rowid');
+/** Хранилище D1 с кандидатами в порядке записи: SQL отдаёт их ORDER BY RANDOM(), а тема задания влияет на оси и итоговый уровень,
+ *  поэтому ход, где проверяется уровень, фиксирует порядок (выбор остаётся за rng из opts, как в pickItem). */
+function ordered(mem: ReturnType<typeof sqlStore>): typeof mem.store {
+  const seqOf = (i: Item) => Number(i.id.slice(2));
+  return { ...mem.store, randomItems: async (kind, level, limit) => (await mem.store.randomItems(kind, level, 200)).sort((x, y) => seqOf(x) - seqOf(y)).slice(0, limit) };
 }
 
 const DOMAIN = { specialty: null, industry: null, targetRole: null, keywords: [] };
@@ -131,9 +142,9 @@ describe('что видит ученик', () => {
 
 describe('выбор задания из банка', () => {
   it('берёт нужный уровень, не повторяет виденное и избегает недавних тем; при пустом уровне — соседний', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const a = makeItem('mcq', 'B2', 'articles'), b = makeItem('mcq', 'B2', 'tenses'), c = makeItem('mcq', 'B1', 'passive');
-    mem.items.push(a, b, c, makeItem('mcq', 'B2', 'modals', 'rejected'));
+    await mem.store.insertItems([a, b, c, makeItem('mcq', 'B2', 'modals', 'rejected')]);
     const pick = (lvl: Level, used: string[], recent: string[]) => pickItem(mem.store, 'mcq', lvl, new Set(used), recent, rng).then(i => i?.id ?? null);
     expect(['it' + a.id.slice(2), b.id]).toContain(await pick('B2', [], []));
     expect(await pick('B2', [a.id], [])).toBe(b.id);
@@ -146,46 +157,47 @@ describe('выбор задания из банка', () => {
 
 describe('ход теста целиком', () => {
   it('14 заданий: уровень ходит за ответами, после последнего тест завершён с уровнем', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
+    const mem = sqlStore(); mem.addUser('u1'); const items = await fillBank(mem); const store = ordered(mem);
     const ids = (() => { let n = 0; return () => `id${++n}`; })();
     const opts = { rng, id: ids, now: () => '2026-10-30T10:00:00Z', generate: false };
-    let v = await startOrResume(ENV, mem.store, 'u1', DOMAIN, opts);
+    let v = await startOrResume(ENV, store, 'u1', DOMAIN, opts);
     expect(v.status).toBe('active'); expect(v.total).toBe(14); expect(v.answered).toBe(0);
     expect(v.current?.kind).toBe('mcq'); expect(v.current?.position).toBe(1);
-    expect(mem.attempts[0].level).toBe('B1');
+    expect(attemptRows(mem)[0].level).toBe('B1');
 
     // первые два верно → B2, C1; третье (исправление) неверно → B2
-    const key = (attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
-    v = await answer(ENV, mem.store, 'u1', v.current!.attemptId, key(v.current!.attemptId).answer, DOMAIN, opts);
-    expect(mem.attempts[1].level).toBe('B2');
-    v = await answer(ENV, mem.store, 'u1', v.current!.attemptId, 'C', DOMAIN, opts);
-    expect(mem.attempts[2].level).toBe('C1'); expect(v.current?.kind).toBe('correction');
-    v = await answer(ENV, mem.store, 'u1', v.current!.attemptId, 'This answer is wrong on purpose.', DOMAIN, opts);
-    expect(mem.attempts[3].level).toBe('B2'); expect(v.answered).toBe(3);
+    const key = (attId: string) => { const [t] = mem.rows('SELECT item_id FROM attempts WHERE id = ?', attId); return items.find(i => i.id === t.itemId)!; };
+    v = await answer(ENV, store, 'u1', v.current!.attemptId, key(v.current!.attemptId).answer, DOMAIN, opts);
+    expect(attemptRows(mem)[1].level).toBe('B2');
+    v = await answer(ENV, store, 'u1', v.current!.attemptId, 'C', DOMAIN, opts);
+    expect(attemptRows(mem)[2].level).toBe('C1'); expect(v.current?.kind).toBe('correction');
+    v = await answer(ENV, store, 'u1', v.current!.attemptId, 'This answer is wrong on purpose.', DOMAIN, opts);
+    expect(attemptRows(mem)[3].level).toBe('B2'); expect(v.answered).toBe(3);
 
     // остальные адаптивные — всё верно
-    while (v.answered < ADAPTIVE_COUNT) v = await answer(ENV, mem.store, 'u1', v.current!.attemptId, key(v.current!.attemptId).answer, DOMAIN, opts);
-    expect(v.current?.kind).toBe('reading'); expect(mem.attempts[12].level).toBe('C1');
-    v = await answer(ENV, mem.store, 'u1', v.current!.attemptId, ['B', 'A'], DOMAIN, opts);
+    while (v.answered < ADAPTIVE_COUNT) v = await answer(ENV, store, 'u1', v.current!.attemptId, key(v.current!.attemptId).answer, DOMAIN, opts);
+    expect(v.current?.kind).toBe('reading'); expect(attemptRows(mem)[12].level).toBe('C1');
+    v = await answer(ENV, store, 'u1', v.current!.attemptId, ['B', 'A'], DOMAIN, opts);
     expect(v.current?.kind).toBe('writing'); expect(v.current && 'words' in v.current).toBe(true);
-    v = await answer(ENV, mem.store, 'u1', v.current!.attemptId, SHORT, DOMAIN, opts);
+    v = await answer(ENV, store, 'u1', v.current!.attemptId, SHORT, DOMAIN, opts);
     expect(v.status).toBe('finished'); expect(v.current).toBeNull(); expect(v.level).toBe('C1'); expect(v.levelLabel).toBe('продвинутый');
     expect(v.summary).toEqual({ adaptiveTotal: 12, adaptiveCorrect: 11, readingScore: 50, writingWords: 64 });
-    expect(new Set(mem.attempts.map(a => a.itemId)).size).toBe(14); // ни одного повтора
+    expect(new Set(attemptRows(mem).map(a => a.itemId)).size).toBe(14); // ни одного повтора
 
     // повторный старт — новый тест, задания прежнего не показываются
-    const again = await startOrResume(ENV, mem.store, 'u1', DOMAIN, opts);
+    const again = await startOrResume(ENV, store, 'u1', DOMAIN, opts);
     expect(again.id).not.toBe(v.id); expect(again.answered).toBe(0);
-    expect(mem.attempts.slice(0, 14).map(a => a.itemId)).not.toContain(mem.attempts[14].itemId);
+    const all = attemptRows(mem); expect(all).toHaveLength(15);
+    expect(all.slice(0, 14).map(a => a.itemId)).not.toContain(all[14].itemId);
   });
 
   it('прерывание и продолжение: повторный start возвращает то же задание, ответ на чужой attemptId отклоняется', async () => {
-    const mem = memoryStore(); fillBank(mem.items);
+    const mem = sqlStore(); mem.addUser('u1'); await fillBank(mem);
     const opts = { rng, generate: false };
     const v1 = await startOrResume(ENV, mem.store, 'u1', DOMAIN, opts);
     const v2 = await startOrResume(ENV, mem.store, 'u1', DOMAIN, opts);
     expect(v2.id).toBe(v1.id); expect(v2.current?.attemptId).toBe(v1.current?.attemptId);
-    expect(mem.attempts).toHaveLength(1);
+    expect(mem.rows('SELECT id FROM attempts')).toHaveLength(1);
     const state = await current(mem.store, 'u1');
     expect(state?.current?.attemptId).toBe(v1.current?.attemptId);
     await expect(answer(ENV, mem.store, 'u1', 'nope', 'A', DOMAIN, opts)).rejects.toMatchObject({ code: 'assessment_stale' });
@@ -196,7 +208,7 @@ describe('ход теста целиком', () => {
   });
 
   it('пустой банк без генерации — bank_empty; с генерацией — модель пишет задание через конвейер проверки', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore(); mem.addUser('u1');
     await expect(startOrResume(ENV, mem.store, 'u1', DOMAIN, { generate: false })).rejects.toMatchObject({ code: 'bank_empty' });
     // генератор отдаёт один mcq, экзаменатор подтверждает
     const chatFn = async (_env: unknown, msgs: { content: string }[]) => {
@@ -206,15 +218,15 @@ describe('ход теста целиком', () => {
     };
     const v = await startOrResume(ENV, mem.store, 'u1', DOMAIN, { chatFn: chatFn as any, rng });
     expect(v.current?.kind).toBe('mcq');
-    expect(mem.items.filter(i => i.status === 'verified')).toHaveLength(1);
+    expect(mem.rows("SELECT id FROM items WHERE status = 'verified'")).toHaveLength(1);
   });
 });
 
 describe('API теста', () => {
   async function login() {
-    const mem = memoryStore(); fillBank(mem.items);
-    const env = { ...ENV, DEV_ECHO_CODE: '1' } as Env;
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore(); await fillBank(mem);
+    const env = { ...ENV, DB: mem.DB, DEV_ECHO_CODE: '1' } as Env;
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
       call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
@@ -225,9 +237,10 @@ describe('API теста', () => {
   }
 
   it('без входа — 401', async () => {
-    const app = createApp('test', () => memoryStore().store);
-    expect((await app.request('https://offerly.test/api/assessment', {}, ENV)).status).toBe(401);
-    expect((await app.request('https://offerly.test/api/assessment/start', { method: 'POST' }, ENV)).status).toBe(401);
+    const app = createApp('test');
+    const env = { ...ENV, DB: sqlStore().DB } as Env;
+    expect((await app.request('https://offerly.test/api/assessment', {}, env)).status).toBe(401);
+    expect((await app.request('https://offerly.test/api/assessment/start', { method: 'POST' }, env)).status).toBe(401);
   });
 
   it('start → answer ×14 → finished; состояние по GET; ключи наружу не уходят', async () => {
@@ -253,7 +266,8 @@ describe('API теста', () => {
     }
     expect(r.assessment.status).toBe('finished'); expect(r.assessment.level).toBe('A2');
     expect(r.assessment.summary).toMatchObject({ adaptiveTotal: 12, adaptiveCorrect: 0, readingScore: 100 });
-    expect(mem.assessments[0].status).toBe('finished');
+    const [uid] = mem.rows('SELECT id FROM users');
+    expect(mem.rows('SELECT status FROM assessments WHERE user_id = ?', uid.id)).toEqual([{ status: 'finished' }]);
     const after = await post('/assessment/answer', { attemptId: 'x', answer: 'A' });
     expect(after.status).toBe(404);
     expect(((await (await call('/assessment')).json()) as any).assessment.level).toBe('A2');

@@ -1,5 +1,11 @@
 # Изменения
 
+## 0.25.15 — 2026-11-01
+- Третья, последняя партия API-тестов Vitest переведена с `memoryStore` на настоящий SQL: `assessment`, `checkpoint`, `lesson`, `push`, `rehearsal`, `scoring`. Банк заданий засевается через `insertItems`, эталоны для верных ответов тест держит у себя и находит по `item_id` из таблицы `attempts`; программа — через `replacePlannedDays`, уроки и шаги — через `createLesson`/`insertStep`, подписки — через `upsertPushSubscription`. API собирается `createApp('test')` с `env.DB`; проверка `/api/health` в тесте push теперь идёт по настоящей базе и требует `db: ok`.
+- `tests/helpers/memoryStore.ts` удалён: у API-тестов, стенда Playwright и прода одно хранилище — SQL миграций. Пункт долга «два хранилища» из обзора 31.10 закрыт.
+- Что выявил переход (продовый код не менялся): SQL выбирает задания `ORDER BY RANDOM()`, память — по порядку вставки; тест «14 заданий» зависел от порядка тем и падал примерно в 2 из 5 прогонов — для него кандидаты упорядочиваются обёрткой поверх настоящего `randomItems`. Журнала напоминаний в SQL нет — проверки идут по строке `push_settings` (`sent_on`, `sent_at`, `note`).
+- Тесты: правило в `tests/architecture.test.ts` — `memoryStore` не существует и ни один тест на него не ссылается, все 22 API-файла импортируют `sqlStore`. Тестов 544. Версия 0.25.15 (patch).
+
 ## 0.25.14 — 2026-11-01
 - Вторая партия API-тестов Vitest переведена с `memoryStore` на настоящий SQL: `achievements`, `cards`, `dashboard`, `digest`, `program`, `seed`, `settings`. Данные засеваются через методы хранилищ D1 (`insertCards`, `createLesson`, `insertStep`, `insertItems`, `replacePlannedDays`, `insertUser`, `insertSession`), проверки идут запросами к таблицам (`app_settings`, `provider_keys`, `profiles`, `achievements`, `error_cards`, `program_days`); API собирается `createApp(...)` с `env.DB`, как в проде. Тест `seed` больше не держит свою копию `freshDb`.
 - `sqlStore()` получил два помощника засева: `putAssessment` — срез с осями и баллом так же, как пишет оценка (`createAssessment` + `updateAssessment`), и `putProfile` — профиль целиком одной строкой (у хранилища профиля только частичные записи). Письмо дня проверяется по колонкам профиля `digest_sent_on`, `digest_sent_at`, `digest_note` вместо отдельного журнала памяти. Расхождений с продовым SQL партия не выявила; продовый код и данные не менялись.
