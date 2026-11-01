@@ -1,6 +1,6 @@
 [package]
 name = "offerly"
-version = "0.25.4"
+version = "0.25.5"
 description = "Offerly — тренер подготовки к собеседованию на английском: приложение для Windows"
 authors = ["Юрий Самусенко"]
 edition = "2021"

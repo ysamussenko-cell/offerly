@@ -44,7 +44,7 @@ jobs:
           exit $CODE
       - run: npm run build
 
-      # Сценарии Playwright (e2e/*.e2e.ts) на собранном dist: вход по коду, главный экран, занятие, тест, настройки, телефон, /install.
+      # Сценарии Playwright (e2e/*.e2e.ts) на собранном dist: вход по коду, главный экран, занятие, тест, репетиция, срез, настройки, телефон, /install.
       # Браузер кэшируется по версии playwright из lock-файла; падение сценариев останавливает деплой.
       - name: Cache Playwright Chromium
         id: pw-cache

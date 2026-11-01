@@ -1,5 +1,5 @@
 /** Стенд для сценариев Playwright: статический dist плюс API на том же порту.
- *  /api/* идёт в createApp с хранилищем в памяти (memoryStore) — без D1, без модели и без почты:
+ *  /api/* идёт в createApp с хранилищем в памяти (memoryStore) — без D1, без модели (см. StandAi) и без почты:
  *  код входа возвращается в ответе (DEV_ECHO_CODE), задания берутся из банка, который сценарий засеивает
  *  через служебный маршрут /__e2e/seed. Любой другой путь без расширения отдаёт index.html — как Pages. */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -22,11 +22,41 @@ export interface Stand {
   url: string;
   port: number;
   memory: ReturnType<typeof memoryStore>;
+  ai: StandAi;
   close(): Promise<void>;
 }
 
-/** Модель на стенде недоступна: любой вызов падает с понятной ошибкой — сценарии не должны от неё зависеть. */
-const noAi = { run: async () => { throw new Error('на стенде e2e модель отключена'); } };
+/** Модель стенда. По умолчанию недоступна: любой вызов падает с понятной ошибкой — сценарии не зависят от неё,
+ *  а экраны показывают путь сбоя (встроенный сценарий, «Разобрать снова», «Оценить письмо снова»).
+ *  Сценарий может положить заготовленный ответ экзаменатора: reply(match, json) — он уйдёт первому вызову, у которого
+ *  системная подсказка содержит match, один раз. Это ответ «модели», а не эталон: эталоны и рубрики остаются в банке,
+ *  и сервер проверяет ответ так же, как настоящий (цитаты, которых нет в тексте ученика, отбрасываются). */
+export interface StandAi {
+  reply(match: string, body: unknown): void;
+  /** Все вызовы модели: системная подсказка, запрос и чем кончился вызов. */
+  calls: { system: string; user: string; answered: boolean }[];
+  /** Заготовки, которые ещё никто не забрал. */
+  pending(): number;
+}
+
+function standAi(): StandAi & { run(model: string, input: { messages?: { role: string; content: string }[] }): Promise<{ response: string }> } {
+  const queue: { match: string; body: string }[] = [];
+  const calls: StandAi['calls'] = [];
+  return {
+    calls,
+    reply(match, body) { queue.push({ match, body: typeof body === 'string' ? body : JSON.stringify(body) }); },
+    pending: () => queue.length,
+    async run(_model, input) {
+      const msgs = input?.messages ?? [];
+      const system = msgs.filter(m => m.role === 'system').map(m => m.content).join('\n');
+      const user = msgs.filter(m => m.role === 'user').map(m => m.content).join('\n');
+      const i = queue.findIndex(q => system.includes(q.match));
+      calls.push({ system, user, answered: i >= 0 });
+      if (i < 0) throw new Error('на стенде e2e модель отключена');
+      return { response: queue.splice(i, 1)[0].body };
+    },
+  };
+}
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -60,8 +90,9 @@ function json(res: ServerResponse, status: number, body: unknown) {
 export async function startStand(opts: { dist?: string; port?: number } = {}): Promise<Stand> {
   const dist = opts.dist ?? join(process.cwd(), 'dist');
   const memory = memoryStore();
+  const ai = standAi();
   // RELEASE_URL задаётся после старта: адрес стенда, который отвечает 404 — страница установки показывает «готовится» без похода на GitHub.
-  const env = { DB: null, AI: noAi, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env & { RELEASE_URL?: string };
+  const env = { DB: null, AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env & { RELEASE_URL?: string };
   const app = createApp(E2E_VERSION, () => memory.store);
   const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
   const index = await readFile(join(dist, 'index.html'));
@@ -99,7 +130,7 @@ export async function startStand(opts: { dist?: string; port?: number } = {}): P
   const port = (server.address() as AddressInfo).port;
   env.RELEASE_URL = `http://127.0.0.1:${port}/__e2e/no-release.json`;
   return {
-    url: `http://127.0.0.1:${port}`, port, memory,
+    url: `http://127.0.0.1:${port}`, port, memory, ai,
     close: () => new Promise<void>((resolve, reject) => server.close(e => (e ? reject(e) : resolve()))),
   };
 }
