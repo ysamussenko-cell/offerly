@@ -2,9 +2,16 @@
   "current_task": null,
   "last_completed": "Постоянно / из обзора 31.10: API-тесты на настоящем SQL — третья, последняя партия (0.25.15). Переведены assessment, checkpoint, lesson, push, rehearsal, scoring; tests/helpers/memoryStore.ts удалён, правило в architecture.test: memoryStore не существует, все 22 API-файла на sqlStore. Найдено: SQL randomItems — ORDER BY RANDOM(), тест «14 заданий» зависел от порядка тем (обёртка ordered() в assessment.test); журнала push в SQL нет — проверки по push_settings. Тестов 544. Следующий архитектурный обзор — около 07.11.",
   "last_deploy": {
-    "status": "pending",
+    "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "version": "0.25.15"
+    "commit": "464e49c",
+    "run": 41306062867,
+    "version": "0.25.15",
+    "health": "ok:true version 0.25.15 db:ok ai:ok mail:ok push:db — по аннотации health в run 41306062867",
+    "seed": "миграций нет",
+    "worker": "offerly-digest задеплоен, worker 0.25.15 db:ok",
+    "desktop": "workflow Desktop run 41306062988 запущен вместе с деплоем",
+    "smoke": "run завершён успешно (все шаги зелёные)"
   },
   "defects": [],
   "pending_from_yuriy": [
