@@ -1,17 +1,17 @@
 {
   "current_task": null,
-  "last_completed": "Постоянно / из обзора 31.10: стенд Playwright на настоящем SQL (0.25.12). e2e/server.ts — createApp с d1AllStores поверх node:sqlite со всеми миграциями; сценарии проверяют базу через stand.rows(sql, …) (колонки camelCase); засев через методы хранилищ. Переход вскрыл расхождение memoryStore: createAssessment в D1 не пишет оси и балл — засев среза теперь create+update, как в проде (продовый код не менялся). sqliteD1.batch синхронный — параллельные пакеты не сталкиваются. Тесты 541, e2e 26/26 локально и в Actions. Из долга обзора остались: перевод API-тестов Vitest с memoryStore на sqliteD1 (по файлам), вынос подсказок (PROMPTS) при следующем росте. Следующий архитектурный обзор — около 07.11.",
+  "last_completed": "Постоянно / из обзора 31.10: API-тесты Vitest на настоящем SQL — первая партия (0.25.13). Помощник sqlStore() в tests/helpers/sqliteD1.ts (d1AllStores поверх node:sqlite, rows в camelCase — общий rowsOf со стендом e2e, addUser). Переведены auth, api, onboarding, items, voice, desktop, errors, release, smoke; API собирается createApp('test') с env.DB. Храповик в tests/architecture.test.ts: список файлов на memoryStore только сокращается — осталось 13 (achievements, assessment, cards, checkpoint, dashboard, digest, lesson, program, push, rehearsal, scoring, seed, settings; самые тяжёлые — lesson, checkpoint, push, scoring с засевом items/attempts). Тесты 543, e2e 26/26. Следующий архитектурный обзор — около 07.11.",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "1d637b0",
-    "run": 41292206772,
-    "version": "0.25.12",
-    "health": "ok:true version 0.25.12 db:ok ai:ok mail:ok push:db; extract/analysis/voice ok — по аннотациям smoke в run 41292206772; WebFetch из плановой сессии снова PROVENANCE_REQUIRED",
+    "commit": "5a1c1a5",
+    "run": 41296467583,
+    "version": "0.25.13",
+    "health": "ok:true version 0.25.13 db:ok ai:ok mail:ok push:db — по аннотации health в run 41296467583; WebFetch из плановой сессии снова PROVENANCE_REQUIRED",
     "seed": "миграций нет",
-    "worker": "offerly-digest 0.25.12 (аннотация digest)",
-    "desktop": "workflow Desktop run 41292206758 запущен вместе с деплоем",
-    "smoke": "все шаги зелёные; e2e 4 файла / 26 сценариев на SQL-стенде"
+    "worker": "offerly-digest задеплоен (аннотация в run)",
+    "desktop": "workflow Desktop run 41296467675 запущен вместе с деплоем",
+    "smoke": "run завершён успешно (все шаги зелёные); e2e 26/26 локально"
   },
   "defects": [],
   "pending_from_yuriy": [
