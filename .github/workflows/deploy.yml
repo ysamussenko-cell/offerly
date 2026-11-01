@@ -145,136 +145,18 @@ jobs:
             echo "::notice title=digest secret::RESEND_API_KEY не задан — Worker отметит дни skipped:mail_not_configured"
           fi
 
-      # GitHub показывает не больше 10 аннотаций notice на шаг — проверки разнесены по трём шагам.
+      # Дымовые проверки живого адреса — scripts/smoke.mjs (их можно гонять и локально против стенда: npm run smoke -- <адрес>).
+      # Скрипт сам печатает аннотации; группы разнесены по шагам, потому что GitHub показывает не больше 10 notice на шаг.
       - name: Health check
-        run: |
-          sleep 20
-          P="${{ steps.deploy.outputs.prod }}"
-          curl -fsS "$P/api/health" | tee health.json
-          echo "::notice title=health::$(tr -d '\n' < health.json)"
-          node -e 'const h=require("./health.json"); if(!h.ok||h.db!=="ok"||h.ai!=="ok"){console.error("health not ok", h); process.exit(1)}'
+        run: node scripts/smoke.mjs "${{ steps.deploy.outputs.prod }}" --group health --wait 20
 
       - name: Smoke test
-        run: |
-          P="${{ steps.deploy.outputs.prod }}"
-          ME=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/me")
-          REQ=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"email":"bad"}' "$P/api/auth/request")
-          echo "::notice title=auth::GET /api/me без cookie → $ME (ждём 401); POST /api/auth/request с плохим адресом → $REQ (ждём 400)"
-          [ "$ME" = "401" ] && [ "$REQ" = "400" ] || { echo "::error title=auth::неожиданные коды ответа"; exit 1; }
-          PROF=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/profile")
-          RES=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F 'file=@health.json;filename=cv.txt' "$P/api/resume")
-          echo "::notice title=resume::GET /api/profile без cookie → $PROF (ждём 401); POST /api/resume без cookie → $RES (ждём 401)"
-          [ "$PROF" = "401" ] && [ "$RES" = "401" ] || { echo "::error title=resume::неожиданные коды ответа"; exit 1; }
-          ONB=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"targetRole":"x"}' "$P/api/onboarding")
-          echo "::notice title=onboarding::PUT /api/onboarding без cookie → $ONB (ждём 401)"
-          [ "$ONB" = "401" ] || { echo "::error title=onboarding::неожиданный код ответа"; exit 1; }
-          TOP=$(curl -s -o topics.json -w '%{http_code}' "$P/api/items/topics")
-          NTOP=$(node -e 'const t=require("./topics.json"); console.log((t.topics||[]).length+" тем, "+(t.kinds||[]).length+" вида, уровни "+(t.levels||[]).join("/"))')
-          STATS=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/items/stats")
-          GEN=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"kind":"mcq","level":"B1","topic":"articles"}' "$P/api/items/generate")
-          echo "::notice title=items::GET /api/items/topics → $TOP ($NTOP); GET /api/items/stats без cookie → $STATS (ждём 401); POST /api/items/generate без cookie → $GEN (ждём 401)"
-          [ "$TOP" = "200" ] && [ "$STATS" = "401" ] && [ "$GEN" = "401" ] || { echo "::error title=items::неожиданные коды ответа"; exit 1; }
-          ASG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/assessment")
-          AST=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/assessment/start")
-          ASA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"attemptId":"x","answer":"A"}' "$P/api/assessment/answer")
-          ASS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/assessment/score")
-          echo "::notice title=assessment::GET /api/assessment без cookie → $ASG; POST /api/assessment/start → $AST; POST /api/assessment/answer → $ASA; POST /api/assessment/score → $ASS (ждём 401 везде)"
-          [ "$ASG" = "401" ] && [ "$AST" = "401" ] && [ "$ASA" = "401" ] || { echo "::error title=assessment::неожиданные коды ответа"; exit 1; }
-          CRD=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/cards")
-          echo "::notice title=cards::GET /api/cards без cookie → $CRD (ждём 401)"
-          [ "$CRD" = "401" ] || { echo "::error title=cards::неожиданный код ответа"; exit 1; }
-          PRG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/program")
-          PRGEN=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/program/generate")
-          PRSW=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"a":"x","b":"y"}' "$P/api/program/swap")
-          echo "::notice title=program::GET /api/program без cookie → $PRG; POST /api/program/generate → $PRGEN; POST /api/program/swap → $PRSW (ждём 401 везде)"
-          [ "$PRG" = "401" ] && [ "$PRGEN" = "401" ] && [ "$PRSW" = "401" ] || { echo "::error title=program::неожиданные коды ответа"; exit 1; }
-          LSN=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/lesson")
-          LST=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/lesson/start")
-          LSA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"stepId":"x","answer":"A"}' "$P/api/lesson/answer")
-          echo "::notice title=lesson::GET /api/lesson без cookie → $LSN; POST /api/lesson/start → $LST; POST /api/lesson/answer → $LSA (ждём 401 везде)"
-          [ "$LSN" = "401" ] && [ "$LST" = "401" ] && [ "$LSA" = "401" ] || { echo "::error title=lesson::неожиданные коды ответа"; exit 1; }
-          LSB=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"accept":true}' "$P/api/lesson/bonus")
-          ACH=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/achievements")
-          ACS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/achievements/seen")
-          echo "::notice title=achievements::POST /api/lesson/bonus без cookie → $LSB; GET /api/achievements → $ACH; POST /api/achievements/seen → $ACS (ждём 401 везде)"
-          [ "$LSB" = "401" ] && [ "$ACH" = "401" ] && [ "$ACS" = "401" ] || { echo "::error title=achievements::неожиданные коды ответа"; exit 1; }
-          DSH=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/dashboard")
-          DSG=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"minutes":100}' "$P/api/dashboard/goal")
-          echo "::notice title=dashboard::GET /api/dashboard без cookie → $DSH; PUT /api/dashboard/goal → $DSG (ждём 401 везде)"
-          [ "$DSH" = "401" ] && [ "$DSG" = "401" ] || { echo "::error title=dashboard::неожиданные коды ответа"; exit 1; }
+        run: node scripts/smoke.mjs "${{ steps.deploy.outputs.prod }}" --group smoke
 
+      # extract/ai_chat/analysis (?deep=2), PWA, репетиция, голос, срез, письмо (с состоянием cron-Worker), push, настройки
       - name: Deep check (extract, model, analysis)
-        run: |
-          P="${{ steps.deploy.outputs.prod }}"
-          curl -fsS "$P/api/health?deep=2" > deep.json
-          echo "::notice title=extract::$(tr -d '\n' < deep.json)"
-          node -e 'const h=require("./deep.json"); if(h.extract!=="ok"){console.error("extract self-test failed", h); process.exit(1)}'
-          node -e 'const h=require("./deep.json"); if(h.ai_chat!=="ok"){console.log("::warning title=ai_chat::"+h.ai_chat)}; if(!String(h.analysis).startsWith("ok")){console.log("::warning title=analysis::"+h.analysis)}'
-          SW=$(curl -s -o /dev/null -w '%{http_code}' "$P/sw.js"); MF=$(curl -s -o /dev/null -w '%{http_code}' "$P/manifest.webmanifest")
-          THEME=$(curl -fsS "$P/" | grep -c 'data-theme' || true)
-          echo "::notice title=pwa::GET /sw.js → $SW; GET /manifest.webmanifest → $MF (ждём 200); скрипт темы в index.html: $THEME"
-          [ "$SW" = "200" ] && [ "$MF" = "200" ] || { echo "::error title=pwa::service worker или манифест не отдаются"; exit 1; }
-          # репетиция интервью (4.1) — здесь, а не в Smoke test: там уже 10 аннотаций notice (предел GitHub на шаг)
-          RHG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/rehearsal")
-          RHS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/start")
-          RHA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"turnId":"x","answer":"A"}' "$P/api/rehearsal/answer")
-          RHR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/review")
-          RHB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/rehearsal/abandon")
-          echo "::notice title=rehearsal::GET /api/rehearsal без cookie → $RHG; POST /api/rehearsal/start → $RHS; POST /api/rehearsal/answer → $RHA; POST /api/rehearsal/review → $RHR; POST /api/rehearsal/abandon → $RHB (ждём 401 везде)"
-          [ "$RHG" = "401" ] && [ "$RHS" = "401" ] && [ "$RHA" = "401" ] && [ "$RHR" = "401" ] && [ "$RHB" = "401" ] || { echo "::error title=rehearsal::неожиданные коды ответа"; exit 1; }
-          # голос (4.2): маршруты без cookie → 401; голосовой контур (MeloTTS → Whisper) уже прогнан в deep=2 — строка voice
-          VT=$(curl -s -o /dev/null -w '%{http_code}' -X POST -F 'audio=@health.json;type=audio/wav;filename=a.wav' "$P/api/voice/transcribe")
-          VS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"text":"hello"}' "$P/api/voice/speak")
-          VM=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/voice/meta")
-          VOICE=$(node -e 'const h=require("./deep.json"); console.log(String(h.voice))')
-          echo "::notice title=voice::POST /api/voice/transcribe без cookie → $VT; POST /api/voice/speak → $VS; GET /api/voice/meta → $VM (ждём 401 везде); контур: $VOICE"
-          [ "$VT" = "401" ] && [ "$VS" = "401" ] && [ "$VM" = "401" ] || { echo "::error title=voice::неожиданные коды ответа"; exit 1; }
-          case "$VOICE" in ok:*) ;; *) echo "::warning title=voice::голосовой контур не подтверждён: $VOICE";; esac
-          # контрольный срез (4.3): маршруты без cookie → 401
-          CPG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/checkpoint")
-          CPS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/start")
-          CPA=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"attemptId":"x","answer":"A"}' "$P/api/checkpoint/answer")
-          CPR=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/score")
-          CPB=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/checkpoint/abandon")
-          echo "::notice title=checkpoint::GET /api/checkpoint без cookie → $CPG; POST /api/checkpoint/start → $CPS; POST /api/checkpoint/answer → $CPA; POST /api/checkpoint/score → $CPR; POST /api/checkpoint/abandon → $CPB (ждём 401 везде)"
-          [ "$CPG" = "401" ] && [ "$CPS" = "401" ] && [ "$CPA" = "401" ] && [ "$CPR" = "401" ] && [ "$CPB" = "401" ] || { echo "::error title=checkpoint::неожиданные коды ответа"; exit 1; }
-          # ежедневное письмо (4.4): маршруты без cookie → 401; состояние cron-Worker (без адресов: сколько ждут письма и в каком состоянии)
-          DGG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/digest")
-          DGP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"notifyAt":"07:00"}' "$P/api/digest")
-          DGS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/digest/send")
-          W="${{ steps.digest.outputs.url }}"
-          if [ -n "$W" ]; then WS=$(curl -s --max-time 20 "$W/" | tr -d '\n' | head -c 600); else WS="worker без адреса workers.dev или не задеплоен — см. digest deploy"; fi
-          echo "::notice title=digest::GET /api/digest без cookie → $DGG; PUT /api/digest → $DGP; POST /api/digest/send → $DGS (ждём 401 везде); worker: $WS"
-          [ "$DGG" = "401" ] && [ "$DGP" = "401" ] && [ "$DGS" = "401" ] || { echo "::error title=digest::неожиданные коды ответа"; exit 1; }
-          case "$WS" in *'"ok":true'*) ;; *) echo "::warning title=digest::состояние Worker не подтверждено: $WS";; esac
-          # Web Push (4.5): маршруты без cookie → 401; скрипт обработчиков подключён в sw.js; откуда ключи VAPID (health.push: env | db | pending)
-          PSG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/push")
-          PSP=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"pushAt":"07:00"}' "$P/api/push")
-          PSS=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"endpoint":"https://x","keys":{}}' "$P/api/push/subscribe")
-          PSD=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H 'content-type: application/json' -d '{"endpoint":"https://x"}' "$P/api/push/subscribe")
-          PSN=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/push/send")
-          PSW=$(curl -s -o /dev/null -w '%{http_code}' "$P/push-sw.js"); PSI=$(curl -fsS "$P/sw.js" | grep -c 'push-sw.js' || true)
-          PSH=$(node -e 'const h=require("./deep.json"); console.log(String(h.push))')
-          echo "::notice title=push::GET /api/push без cookie → $PSG; PUT /api/push → $PSP; POST /api/push/subscribe → $PSS; DELETE → $PSD; POST /api/push/send → $PSN (ждём 401 везде); GET /push-sw.js → $PSW, подключён в sw.js: $PSI; ключи VAPID: $PSH"
-          [ "$PSG" = "401" ] && [ "$PSP" = "401" ] && [ "$PSS" = "401" ] && [ "$PSD" = "401" ] && [ "$PSN" = "401" ] && [ "$PSW" = "200" ] && [ "$PSI" != "0" ] || { echo "::error title=push::неожиданные коды ответа или скрипт push не подключён"; exit 1; }
-          # Настройки (4.6): ключ провайдера, уведомления, экспорт — без cookie везде 401 (ключ и экспорт не должны течь без сессии)
-          STG=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/settings")
-          STK=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"provider":"groq","apiKey":"gsk_0123456789"}' "$P/api/settings/key")
-          STC=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$P/api/settings/key/check")
-          STD=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$P/api/settings/key")
-          STN=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: application/json' -d '{"at":"07:00","mail":true}' "$P/api/settings/notifications")
-          STE=$(curl -s -o /dev/null -w '%{http_code}' "$P/api/export")
-          echo "::notice title=settings::GET /api/settings без cookie → $STG; PUT /api/settings/key → $STK; POST /api/settings/key/check → $STC; DELETE → $STD; PUT /api/settings/notifications → $STN; GET /api/export → $STE (ждём 401 везде)"
-          [ "$STG" = "401" ] && [ "$STK" = "401" ] && [ "$STC" = "401" ] && [ "$STD" = "401" ] && [ "$STN" = "401" ] && [ "$STE" = "401" ] || { echo "::error title=settings::неожиданные коды ответа"; exit 1; }
+        run: node scripts/smoke.mjs "${{ steps.deploy.outputs.prod }}" --group deep --worker "${{ steps.digest.outputs.url }}"
 
-      # Страница установки (5.1): /install отдаётся оболочкой SPA (Pages без 404.html подставляет index.html), /api/release открыт без cookie
-      # и отвечает 200 с полем available даже без релизов (404 от GitHub → available:false, reason:none).
+      # Страница установки (5.1): /install — оболочка SPA, /api/release открыт без cookie и отвечает 200 даже без релизов.
       - name: Install page check
-        run: |
-          P="${{ steps.deploy.outputs.prod }}"
-          INS=$(curl -s -o install.html -w '%{http_code}' "$P/install"); ROOT=$(grep -c 'id="root"' install.html || true)
-          REL=$(curl -s -o release.json -w '%{http_code}' "$P/api/release")
-          RELS=$(node -e 'const r=require("./release.json"); console.log(r.available ? "установщик "+r.version+" → "+r.windows.name : "без установщика: "+r.reason+(r.detail?" ("+r.detail+")":""))' 2>/dev/null || echo "ответ не JSON")
-          CC=$(curl -s -D - -o /dev/null "$P/api/release" | grep -i '^cache-control' | tr -d '\r\n')
-          echo "::notice title=install::GET /install → $INS (оболочка SPA: $ROOT); GET /api/release → $REL, $RELS; $CC"
-          [ "$INS" = "200" ] && [ "$ROOT" != "0" ] && [ "$REL" = "200" ] || { echo "::error title=install::страница установки или /api/release не отвечают"; exit 1; }
+        run: node scripts/smoke.mjs "${{ steps.deploy.outputs.prod }}" --group install

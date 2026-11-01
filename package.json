@@ -1,6 +1,6 @@
 {
   "name": "offerly",
-  "version": "0.25.6",
+  "version": "0.25.7",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,8 @@
     "tauri": "cd desktop && tauri",
     "e2e": "vitest run -c vitest.e2e.config.ts",
     "e2e:stand": "vite-node e2e/stand.ts",
-    "lint:e2e": "tsc -p tsconfig.e2e.json"
+    "lint:e2e": "tsc -p tsconfig.e2e.json",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0",
