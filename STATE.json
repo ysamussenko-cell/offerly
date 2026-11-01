@@ -1,17 +1,17 @@
 {
   "current_task": null,
-  "last_completed": "Постоянно / замечено после 0.25.7: даты по-русски в причине дня среза программы и вердикте сравнения после среза («от 29 октября 2026» вместо «от 2026-10-29»), общий модуль functions/_lib/dates.ts (longDateRu, дата ISO-метки по UTC), письмо дня пользуется им же (0.25.8). Уже составленные программы хранят прежний текст причины до следующей сборки — данные не правились. Тесты: dates (2), program, checkpoint, digest; всего 525. Все пункты дорожной карты закрыты; следующий архитектурный обзор — около 07.11.",
+  "last_completed": "Постоянно / замечено после 0.25.8: дата прохождения теста уровня и среза считалась по UTC — карточки из ошибок, законченных после местной полуночи (до 5:00 по Алматы), получали срок от вчерашней даты UTC и всплывали в тот же день, карточка «Контрольный срез» не показывала «Срез пройден». Теперь RunOpts.tz в assessment.ts (пояс передают маршруты и checkpoint.ts), finishedToday в GET /api/checkpoint, даты на экранах по местному времени (localDateOf/longDateAt/longDateTimeAt в src/text.ts; напоминание — «13 ноября 2026, 00:30» вместо «… UTC»). Данные не правились. Тесты 527, e2e 26 локально. Все пункты дорожной карты закрыты; следующий архитектурный обзор — около 07.11.",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "cbf19b7",
-    "run": 41275948252,
-    "version": "0.25.8",
-    "health": "ok:true db:ok ai:ok mail:ok push:pending — по аннотациям scripts/smoke.mjs (extract:ok ai_chat:ok analysis:ok voice:ok); WebFetch живого адреса из плановой сессии снова не прошёл (PROVENANCE_REQUIRED)",
-    "seed": "миграций в этом релизе нет",
-    "worker": "offerly-digest 0.25.8 задеплоен, расписание */15 * * * *, states sent:1",
-    "desktop": "workflow Desktop run 41275948208 запущен вместе с деплоем",
-    "smoke": "все шаги зелёные: health, smoke, deep, install (установщик 0.25.7 на /api/release до сборки Desktop)"
+    "commit": "c0b8d45",
+    "run": 41279900189,
+    "version": "0.25.9",
+    "health": "ok:true version 0.25.9 db:ok ai:ok mail:ok push:pending — по аннотациям smoke в run 41279900189; WebFetch живого адреса из плановой сессии снова не прошёл (PROVENANCE_REQUIRED)",
+    "seed": "миграций в этом релизе нет; seed/first_user.sql применён без изменений (14 карточек)",
+    "worker": "offerly-digest 0.25.9 задеплоен, расписание */15 * * * *",
+    "desktop": "workflow Desktop run 41279900178 запущен вместе с деплоем",
+    "smoke": "все шаги зелёные: health, smoke, deep, install"
   },
   "defects": [],
   "pending_from_yuriy": [
