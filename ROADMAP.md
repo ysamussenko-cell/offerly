@@ -53,3 +53,4 @@
   - [x] Из обзора: версия в одном месте — API и Worker читают `package.json` (`functions/_lib/version.ts`), npm/Tauri/Cargo поднимает `npm run release:version -- patch|minor` (0.25.11)
   - [x] Из обзора: стенд Playwright на настоящем SQL — `createApp` с хранилищами D1 поверх `node:sqlite` (`tests/helpers/sqliteD1.ts`), проверки сценариев запросами `stand.rows`; `memoryStore` в `e2e/` не используется (0.25.12)
   - [x] Из обзора: API-тесты Vitest на `sqlStore` (SQL миграций) — первая партия из девяти файлов, храповик в тесте архитектуры (0.25.13); осталось 13 файлов
+  - [x] Из обзора: API-тесты на `sqlStore` — вторая партия из семи файлов (achievements, cards, dashboard, digest, program, seed, settings), помощники `putAssessment`/`putProfile` (0.25.14); осталось 6 файлов

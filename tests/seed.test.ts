@@ -1,21 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { BASELINE, CARDS, FIRST_USER, baselineScore, renderSeedSql, seedStatements, validateSeed } from '../functions/_lib/seed';
 import { scoreToLevel, LEVEL_THRESHOLD, BAND } from '../functions/_lib/scoring';
 import { cardTopicById } from '../functions/_lib/cards';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
+import { freshDb, sqlStore } from './helpers/sqliteD1';
 
-// node:sqlite — встроенный модуль Node 22, но Vite его не знает как builtin; берём напрямую у процесса.
-const { DatabaseSync: Sqlite } = (process as any).getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
-
-/** База в памяти с полным набором миграций — как D1 после `wrangler d1 migrations apply`. */
-function freshDb(): DatabaseSync {
-  const db: DatabaseSync = new Sqlite(':memory:');
-  for (const f of readdirSync('migrations').filter(f => f.endsWith('.sql')).sort()) db.exec(readFileSync(`migrations/${f}`, 'utf-8'));
-  return db;
-}
 const applySeed = (db: DatabaseSync) => { for (const s of seedStatements()) db.exec(s); };
 const count = (db: DatabaseSync, sql: string) => Number((db.prepare(sql).get() as any).n);
 
@@ -131,23 +121,23 @@ describe('seed первого пользователя — применение 
 
 describe('исходный срез и журнал в API', () => {
   async function loggedIn() {
-    const mem = memoryStore();
-    const env = { DB: null, AI: { run: async () => ({ response: 'hi' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const env = { DB: mem.DB, AI: { run: async () => ({ response: 'hi' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) => call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
     const j1: any = await (await post('/auth/request', { email: FIRST_USER.email })).json();
     const r2 = await post('/auth/verify', { email: FIRST_USER.email, code: j1.code });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
     const h = { cookie };
-    const user = mem.users[0];
+    const user = (await mem.store.findUserByEmail(FIRST_USER.email))!;
     return { mem, user, get: (p: string) => call(p, { headers: h }), post: (p: string, b: unknown) => post(p, b, h) };
   }
 
   it('GET /api/assessment отдаёт срез как завершённый с осями, без сводки попыток; пересчёт среза отклоняется', async () => {
     const { mem, user, get, post } = await loggedIn();
     const s = baselineScore();
-    mem.assessments.push({ id: BASELINE.id, userId: user.id, kind: 'baseline', status: 'finished', startedAt: BASELINE.startedAt, finishedAt: BASELINE.startedAt, level: s.level, currentLevel: s.level, updatedAt: BASELINE.startedAt, axes: s.axes, overall: s.overall, scoredAt: BASELINE.startedAt, scoringNote: BASELINE.note, adaptiveCount: 12, programDayId: null });
+    await mem.putAssessment({ id: BASELINE.id, userId: user.id, kind: 'baseline', status: 'finished', startedAt: BASELINE.startedAt, finishedAt: BASELINE.startedAt, level: s.level, currentLevel: s.level, updatedAt: BASELINE.startedAt, axes: s.axes, overall: s.overall, scoredAt: BASELINE.startedAt, scoringNote: BASELINE.note, adaptiveCount: 12, programDayId: null });
     const j: any = await (await get('/assessment')).json();
     expect(j.assessment.kind).toBe('baseline');
     expect(j.assessment.status).toBe('finished');
@@ -160,22 +150,24 @@ describe('исходный срез и журнал в API', () => {
     const r = await post('/assessment/score', {});
     expect(r.status).toBe(404);
     expect(((await r.json()) as any).detail).toContain('не пересчитывается');
-    expect(mem.assessments[0].overall).toBe(s.overall); // срез не тронут
+    expect(mem.rows('SELECT overall FROM assessments')).toEqual([{ overall: s.overall }]); // срез не тронут
   });
 
   it('GET /api/cards: без cookie 401; с cookie — карточки с подписью темы, к повтору первыми', async () => {
     const { mem, user, get } = await loggedIn();
     expect((await get('/cards')).status).toBe(200);
     const base = { userId: user.id, rule: 'r', example: 'e', correction: 'c', source: 'seed', origin: null, stability: 1, difficulty: 5, reps: 0, lapses: 0, streak: 0, reviewedAt: null, createdAt: '2026-10-30T00:00:00.000Z' };
-    mem.cards.push({ ...base, id: 'c2', topic: 'task-response', due: '2026-11-02', retired: false });
-    mem.cards.push({ ...base, id: 'c3', topic: 'articles', due: '2026-10-30', retired: true });
-    mem.cards.push({ ...base, id: 'c1', topic: 'conjunctions', due: '2026-10-30', retired: false });
+    await mem.store.insertCards([
+      { ...base, id: 'c2', topic: 'task-response', due: '2026-11-02', retired: false },
+      { ...base, id: 'c3', topic: 'articles', due: '2026-10-30', retired: true },
+      { ...base, id: 'c1', topic: 'conjunctions', due: '2026-10-30', retired: false },
+    ]);
     const j: any = await (await get('/cards')).json();
     expect(j.cards.map((c: any) => c.id)).toEqual(['c1', 'c2', 'c3']);
     expect(j.cards[1].topicLabel).toBe('Ответ на вопрос задания');
     expect(j.cards[0].topicLabel).toBe('Союзы и инверсия');
     expect(j.topics.some((t: any) => t.id === 'task-response')).toBe(true);
-    const app = createApp('test', () => mem.store);
-    expect((await app.request('https://offerly.test/api/cards', {}, { DB: null } as unknown as Env)).status).toBe(401);
+    const app = createApp('test');
+    expect((await app.request('https://offerly.test/api/cards', {}, { DB: mem.DB } as unknown as Env)).status).toBe(401);
   });
 });

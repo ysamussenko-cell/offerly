@@ -5,10 +5,13 @@ import {
 } from '../functions/_lib/settings';
 import { chat, stripToJson, PROVIDERS, type Env as ProviderEnv } from '../functions/_lib/providers';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 
 const NOW = '2026-11-12T03:00:00.000Z';
+/** Значение служебной записи app_settings или undefined. */
+const setting = (mem: ReturnType<typeof sqlStore>, key: string) => mem.rows<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', key)[0]?.value;
+/** Хранилище с пользователями u1 и u2 — ключи провайдера ссылаются на users. */
+const withUsers = () => { const mem = sqlStore(); mem.addUser('u1'); mem.addUser('u2'); return mem; };
 const okJson = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const openaiReply = (content: string) => okJson({ choices: [{ message: { content } }] });
 const anthropicReply = (text: string) => okJson({ content: [{ type: 'text', text }] });
@@ -46,16 +49,16 @@ describe('ключ провайдера: проверка тела', () => {
 
 describe('шифрование ключа', () => {
   it('мастер-ключ из секрета окружения даёт один и тот же ключ, из базы — создаётся один раз и переживает перезапуск', async () => {
-    const mem = memoryStore();
+    const mem = withUsers();
     const a = await masterKey({ KEYS_SECRET: 'тайна' }, mem.store, NOW);
     expect(a.source).toBe('env');
-    expect(mem.settings.size).toBe(0);
+    expect(mem.rows('SELECT key FROM app_settings')).toEqual([]);
     const b = await masterKey({}, mem.store, NOW);
     expect(b.source).toBe('db');
-    const stored = mem.settings.get(KEYRING_SETTING_KEY)!;
+    const stored = setting(mem, KEYRING_SETTING_KEY)!;
     expect(stored).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const c = await masterKey({}, mem.store, NOW);
-    expect(mem.settings.get(KEYRING_SETTING_KEY)).toBe(stored);
+    expect(setting(mem, KEYRING_SETTING_KEY)).toBe(stored);
     // шифртекст от первого вызова читается ключом второго — тот же мастер-ключ
     const enc = await encryptSecret(b.key, 'gsk_secret', 'u1');
     expect(await decryptSecret(c.key, enc, 'u1')).toBe('gsk_secret');
@@ -63,7 +66,7 @@ describe('шифрование ключа', () => {
     expect(await decryptSecret(a.key, enc, 'u1')).toBeNull();
   });
   it('шифртекст формата v1.<iv>.<ct>, разные при каждом вызове, привязан к пользователю, повреждённый — null', async () => {
-    const mem = memoryStore();
+    const mem = withUsers();
     const { key } = await masterKey({ KEYS_SECRET: 's' }, mem.store, NOW);
     const e1 = await encryptSecret(key, 'sk-ant-abc', 'u1');
     const e2 = await encryptSecret(key, 'sk-ant-abc', 'u1');
@@ -76,18 +79,18 @@ describe('шифрование ключа', () => {
     expect(e1).not.toContain('sk-ant');
   });
   it('повреждённый keyring — key_unreadable', async () => {
-    const mem = memoryStore();
-    mem.settings.set(KEYRING_SETTING_KEY, 'short');
+    const mem = withUsers();
+    mem.db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)').run(KEYRING_SETTING_KEY, 'short', NOW);
     await expect(masterKey({}, mem.store, NOW)).rejects.toMatchObject({ code: 'key_unreadable' });
   });
 });
 
 describe('сохранение и чтение ключа', () => {
   it('saveKey шифрует, userProvider расшифровывает; в базе открытого ключа нет; смена мастер-ключа — null', async () => {
-    const mem = memoryStore();
+    const mem = withUsers();
     const row = await saveKey({ KEYS_SECRET: 'one' }, mem.store, 'u1', { provider: 'groq', apiKey: 'gsk_0123456789', model: null }, NOW);
     expect(row).toMatchObject({ userId: 'u1', provider: 'groq', model: null, keyHint: '…6789', checkedAt: null, checkNote: null, createdAt: NOW, updatedAt: NOW });
-    expect(JSON.stringify([...mem.providerKeys.values()])).not.toContain('gsk_0123456789');
+    expect(JSON.stringify(mem.rows('SELECT * FROM provider_keys'))).not.toContain('gsk_0123456789');
     expect(await userProvider({ KEYS_SECRET: 'one' }, mem.store, 'u1')).toEqual({ provider: 'groq', apiKey: 'gsk_0123456789', model: null, fallback: true });
     expect(await userProvider({ KEYS_SECRET: 'two' }, mem.store, 'u1')).toBeNull();
     expect(await userProvider({ KEYS_SECRET: 'one' }, mem.store, 'u2')).toBeNull();
@@ -95,10 +98,10 @@ describe('сохранение и чтение ключа', () => {
     const later = '2026-11-13T03:00:00.000Z';
     const row2 = await saveKey({ KEYS_SECRET: 'one' }, mem.store, 'u1', { provider: 'anthropic', apiKey: 'sk-ant-xyz12345', model: 'claude-sonnet-4-5' }, later);
     expect(row2).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-4-5', keyHint: '…2345', createdAt: NOW, updatedAt: later });
-    expect(mem.providerKeys.size).toBe(1);
+    expect(mem.rows('SELECT user_id FROM provider_keys')).toEqual([{ userId: 'u1' }]);
   });
   it('publicKey — без шифртекста, с именем провайдера и моделью по умолчанию', async () => {
-    const mem = memoryStore();
+    const mem = withUsers();
     const row = await saveKey({ KEYS_SECRET: 'one' }, mem.store, 'u1', { provider: 'groq', apiKey: 'gsk_0123456789', model: null }, NOW);
     const pub = publicKey(row, true)!;
     expect(pub).toMatchObject({ provider: 'groq', short: 'Groq', model: 'openai/gpt-oss-120b', custom: false, hint: '…6789', readable: true });
@@ -106,7 +109,7 @@ describe('сохранение и чтение ключа', () => {
     expect(publicKey(null, false)).toBeNull();
   });
   it('checkKey: ответ модели → ok и checked_at; отказ провайдера → error без отката на встроенную; без ключа — key_none', async () => {
-    const mem = memoryStore();
+    const mem = withUsers();
     const aiRun = vi.fn(async () => ({ response: 'ok' }));
     const env = { KEYS_SECRET: 'one', AI: { run: aiRun }, DB: null, APP_NAME: 'Offerly' } as unknown as Env;
     await expect(checkKey(env, mem.store, 'u1', NOW)).rejects.toMatchObject({ code: 'key_none' });
@@ -129,7 +132,7 @@ describe('сохранение и чтение ключа', () => {
     expect(aiRun).not.toHaveBeenCalled();
   });
   it('checkKey при смене мастер-ключа — key_unreadable', async () => {
-    const mem = memoryStore();
+    const mem = withUsers();
     await saveKey({ KEYS_SECRET: 'one' }, mem.store, 'u1', { provider: 'groq', apiKey: 'gsk_0123456789', model: null }, NOW);
     const env = { KEYS_SECRET: 'two', AI: null, DB: null, APP_NAME: 'Offerly' } as unknown as Env;
     await expect(checkKey(env, mem.store, 'u1', NOW)).rejects.toMatchObject({ code: 'key_unreadable' });
@@ -222,10 +225,10 @@ describe('хранилище D1', () => {
 
 describe('экспорт', () => {
   it('собирает все данные пользователя без ключа, без адресов push и без сессий; имя файла по дате', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const user = { id: 'u1', email: 'y@example.com', name: null, locale: 'ru', tz: 'Asia/Almaty' };
-    mem.users.push({ ...user, createdAt: NOW } as any);
-    mem.sessions.push({ id: 'sess-secret', userId: 'u1', createdAt: NOW, expiresAt: '2027-01-01T00:00:00.000Z' } as any);
+    mem.addUser('u1', user.email, user.tz);
+    await mem.store.insertSession({ id: 'sess-secret', userId: 'u1', createdAt: NOW, expiresAt: '2027-01-01T00:00:00.000Z' } as any);
     await saveKey({ KEYS_SECRET: 'one' }, mem.store, 'u1', { provider: 'groq', apiKey: 'gsk_0123456789', model: null }, NOW);
     await mem.store.upsertPushSubscription({ id: 's1', userId: 'u1', endpoint: 'https://push.example/secret-endpoint', p256dh: 'P256', auth: 'AUTHSECRET', userAgent: 'Chrome', createdAt: NOW, lastSentAt: null, lastError: null });
     await mem.store.createAssessment({ id: 'a1', userId: 'u1', kind: 'baseline', status: 'finished', startedAt: NOW, finishedAt: NOW, level: 'B1', currentLevel: 'B1', updatedAt: NOW, axes: null, overall: 53, scoredAt: null, scoringNote: null, adaptiveCount: 12, programDayId: null });
@@ -243,29 +246,29 @@ describe('экспорт', () => {
 
 describe('маршруты /api/settings и /api/export', () => {
   const appEnv = { DB: null, AI: { run: async () => ({ response: 'ok' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1', KEYS_SECRET: 'one' } as unknown as Env;
-  async function login(mem: ReturnType<typeof memoryStore>, env: Env = appEnv) {
-    const app = createApp('0.21.0', () => mem.store);
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
+  async function login(mem: ReturnType<typeof sqlStore>, env: Env = appEnv) {
+    const app = createApp('0.21.0');
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, { ...env, DB: mem.DB });
     const r1 = await call('/auth/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com' }) });
     const { code } = await r1.json() as any;
     const r2 = await call('/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com', code }) });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
     const json = (path: string, method: string, body: unknown) => call(path, { method, headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const get = (path: string) => call(path, { headers: { cookie } });
-    return { app, call, cookie, json, get, uid: mem.users[mem.users.length - 1].id };
+    return { app, call, cookie, json, get, uid: mem.rows<{ id: string }>('SELECT id FROM users WHERE email = ?', 'y@example.com')[0].id };
   }
 
   it('без cookie — 401 на всех маршрутах', async () => {
-    const mem = memoryStore();
-    const app = createApp('0.21.0', () => mem.store);
+    const mem = sqlStore();
+    const app = createApp('0.21.0');
     for (const [path, method] of [['/settings', 'GET'], ['/settings/key', 'PUT'], ['/settings/key/check', 'POST'], ['/settings/key', 'DELETE'], ['/settings/notifications', 'PUT'], ['/export', 'GET']] as const) {
-      const r = await app.request(`https://offerly.test/api${path}`, { method }, appEnv);
+      const r = await app.request(`https://offerly.test/api${path}`, { method }, { ...appEnv, DB: mem.DB });
       expect(r.status, `${method} ${path}`).toBe(401);
     }
   });
 
   it('GET /settings без ключа: провайдеры, встроенная модель, уведомления выключены, счётчики нули', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const { get } = await login(mem);
     const j: any = await (await get('/settings')).json();
     expect(j.ok).toBe(true);
@@ -280,7 +283,7 @@ describe('маршруты /api/settings и /api/export', () => {
   });
 
   it('PUT /settings/key сохраняет шифрованно и показывает подсказку; после этого модель зовётся через провайдера; DELETE возвращает встроенную', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const { json, get, uid } = await login(mem);
     const bad = await json('/settings/key', 'PUT', { provider: 'groq', apiKey: 'sk-wrong-prefix' });
     expect(bad.status).toBe(400); expect(await bad.json()).toEqual({ ok: false, error: 'key_invalid', reason: 'prefix' });
@@ -289,7 +292,7 @@ describe('маршруты /api/settings и /api/export', () => {
     const j: any = await r.json();
     expect(j.provider.key).toMatchObject({ provider: 'groq', short: 'Groq', hint: '…6789', readable: true, custom: false, checkedAt: null });
     expect(JSON.stringify(j)).not.toContain('gsk_0123456789');
-    expect(mem.providerKeys.get(uid)!.keyEnc).toMatch(/^v1\./);
+    expect(mem.rows('SELECT key_enc FROM provider_keys WHERE user_id = ?', uid)[0].keyEnc).toMatch(/^v1\./);
     // /ai/ping без провайдера в теле → встроенная; а защищённый маршрут с моделью (разбор резюме) пойдёт через Groq
     const fetchMock = vi.fn(async () => openaiReply(JSON.stringify({ specialty: 'инженер', industry: 'энергетика', years: 15, target_role: null, keywords: ['boiler'], summary: 'Вы инженер.' })));
     vi.stubGlobal('fetch', fetchMock);
@@ -305,7 +308,7 @@ describe('маршруты /api/settings и /api/export', () => {
   });
 
   it('POST /settings/key/check: без ключа 404, успех → checkedAt, отказ провайдера → 502 с деталью; ключ под другим мастер-ключом → 409', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const { json } = await login(mem);
     expect((await json('/settings/key/check', 'POST', {})).status).toBe(404);
     await json('/settings/key', 'PUT', { provider: 'anthropic', apiKey: 'sk-ant-0123456789' });
@@ -325,28 +328,28 @@ describe('маршруты /api/settings и /api/export', () => {
   });
 
   it('PUT /settings/notifications ставит одно время обоим каналам; push без устройств — 404; снятая галочка выключает канал', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const { json, get, uid } = await login(mem);
     expect((await json('/settings/notifications', 'PUT', { at: '7:5', mail: true })).status).toBe(400);
     expect((await json('/settings/notifications', 'PUT', { at: '08:00', mail: true, push: true })).status).toBe(404);
     const r: any = await (await json('/settings/notifications', 'PUT', { at: '08:00', mail: true, push: false })).json();
     expect(r.notifications.mail).toMatchObject({ at: '08:00', enabled: true });
     expect(r.notifications.push).toMatchObject({ at: null, enabled: false });
-    expect(mem.profiles.get(uid)!.notifyAt).toBe('08:00');
+    expect(mem.rows('SELECT notify_at FROM profiles WHERE user_id = ?', uid)[0].notifyAt).toBe('08:00');
     await mem.store.upsertPushSubscription({ id: 's1', userId: uid, endpoint: 'https://push.example/1', p256dh: 'p', auth: 'a', userAgent: null, createdAt: NOW, lastSentAt: null, lastError: null });
     const r2: any = await (await json('/settings/notifications', 'PUT', { at: '06:30', mail: true, push: true })).json();
     expect(r2.notifications.mail.at).toBe('06:30'); expect(r2.notifications.push).toMatchObject({ at: '06:30', enabled: true, devices: 1 });
-    expect(mem.pushSettings.get(uid)!.pushAt).toBe('06:30');
+    expect(mem.rows('SELECT push_at FROM push_settings WHERE user_id = ?', uid)[0].pushAt).toBe('06:30');
     // карточки письма и напоминания видят то же
     expect(((await (await get('/digest?preview=0')).json()) as any).notifyAt).toBe('06:30');
     expect(((await (await get('/push')).json()) as any).pushAt).toBe('06:30');
     const r3: any = await (await json('/settings/notifications', 'PUT', { mail: false, push: false })).json();
     expect(r3.notifications.mail.enabled).toBe(false); expect(r3.notifications.push.enabled).toBe(false);
-    expect(mem.profiles.get(uid)!.notifyAt).toBeNull(); expect(mem.pushSettings.get(uid)!.pushAt).toBeNull();
+    expect(mem.rows('SELECT notify_at, push_at FROM profiles JOIN push_settings USING (user_id) WHERE user_id = ?', uid)).toEqual([{ notifyAt: null, pushAt: null }]);
   });
 
   it('GET /export отдаёт JSON-файл с заголовком вложения, версией и без ключа', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const { json, get } = await login(mem);
     await json('/settings/key', 'PUT', { provider: 'groq', apiKey: 'gsk_0123456789' });
     const r = await get('/export');

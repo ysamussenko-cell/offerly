@@ -175,14 +175,14 @@ describe('тесты и версии', () => {
     for (const f of readdirSync('e2e').filter(f => f.endsWith('.ts'))) expect(readFileSync(`e2e/${f}`, 'utf-8'), `e2e/${f}`).not.toMatch(/memoryStore/);
   });
 
-  it('API-тесты переходят с memoryStore на настоящий SQL (sqlStore): список оставшихся файлов только сокращается (с 0.25.13)', () => {
+  it('API-тесты переходят с memoryStore на настоящий SQL (sqlStore): список оставшихся файлов только сокращается (с 0.25.13, вторая партия — 0.25.14)', () => {
     // Файлы, которые ещё держатся за memoryStore. Перевели файл — убрать из списка; новый файл на memoryStore не пройдёт.
-    const LEFT = ['achievements', 'assessment', 'cards', 'checkpoint', 'dashboard', 'digest', 'lesson', 'program', 'push', 'rehearsal', 'scoring', 'seed', 'settings'];
+    const LEFT = ['assessment', 'checkpoint', 'lesson', 'push', 'rehearsal', 'scoring'];
     const users = readdirSync('tests').filter(f => f.endsWith('.test.ts'))
       .filter(f => /from '\.\/helpers\/memoryStore'/.test(readFileSync(`tests/${f}`, 'utf-8')))
       .map(f => f.replace('.test.ts', ''));
     expect(users.sort()).toEqual([...LEFT].sort());
-    for (const f of ['auth', 'api', 'onboarding', 'items', 'voice', 'desktop', 'errors', 'release', 'smoke'])
+    for (const f of ['auth', 'api', 'onboarding', 'items', 'voice', 'desktop', 'errors', 'release', 'smoke', 'achievements', 'cards', 'dashboard', 'digest', 'program', 'seed', 'settings'])
       expect(readFileSync(`tests/${f}.test.ts`, 'utf-8'), f).toMatch(/import \{[^}]*sqlStore[^}]*\} from '\.\/helpers\/sqliteD1'/);
   });
 

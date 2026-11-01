@@ -13,8 +13,7 @@ import type { ErrorCard } from '../functions/_lib/cards';
 import { seedStatements, FIRST_USER } from '../functions/_lib/seed';
 import { createApp, type Env } from '../functions/_lib/app';
 import worker, { makeStore, status, VERSION } from '../workers/digest/index';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 import { readFileSync } from 'node:fs';
 
 const TZ = 'Asia/Almaty'; // UTC+5
@@ -91,20 +90,24 @@ describe('время письма', () => {
   });
 });
 
-function seeded(over: { days?: ProgramDay[]; lessons?: Lesson[]; cards?: ErrorCard[]; profile?: Partial<Profile>; assessment?: Assessment | null } = {}) {
-  const mem = memoryStore();
-  mem.users.push(user());
-  mem.profiles.set('u1', profile(over.profile));
-  if (over.assessment !== null) mem.assessments.push(over.assessment ?? assessment());
-  mem.programDays.push(...(over.days ?? [day('2026-11-11'), day(TODAY, { topic: 'conjunctions', writing: 'explain', reason: 'слабая ось связности' }), day('2026-11-13')]));
-  mem.lessons.push(...(over.lessons ?? [lesson('2026-11-11', 80)]));
-  mem.cards.push(...(over.cards ?? [card('2026-11-10'), card(TODAY), card('2026-11-20'), card(null, 1)]));
+/** Пользователь u1 с профилем, срезом, программой, занятием и карточками — в SQLite со всеми миграциями. */
+async function seeded(over: { days?: ProgramDay[]; lessons?: Lesson[]; cards?: ErrorCard[]; profile?: Partial<Profile>; assessment?: Assessment | null } = {}) {
+  const mem = sqlStore();
+  await mem.store.insertUser(user());
+  mem.putProfile(profile(over.profile));
+  if (over.assessment !== null) await mem.putAssessment(over.assessment ?? assessment());
+  await mem.store.replacePlannedDays('u1', '2026-11-01', over.days ?? [day('2026-11-11'), day(TODAY, { topic: 'conjunctions', writing: 'explain', reason: 'слабая ось связности' }), day('2026-11-13')]);
+  for (const l of over.lessons ?? [lesson('2026-11-11', 80)]) await mem.store.createLesson(l);
+  await mem.store.insertCards(over.cards ?? [card('2026-11-10'), card(TODAY), card('2026-11-20'), card(null, 1)]);
   return mem;
 }
+/** Отметка письма в профиле: день, момент отправки и итог (digest_sent_on, digest_sent_at, digest_note). */
+const marks = (mem: ReturnType<typeof sqlStore>, userId = 'u1') =>
+  mem.rows<{ sentOn: string | null; sentAt: string | null; note: string | null }>('SELECT digest_sent_on AS sent_on, digest_sent_at AS sent_at, digest_note AS note FROM profiles WHERE user_id = ?', userId)[0];
 
 describe('текст письма', () => {
   it('собирается из программы, карточек и главного экрана: занятие дня, карточки к повтору, готовность, серия, неделя, собеседование', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const now = () => at('07:45').toISOString();
     const data = await collectDigest(mem.store, user(), profile(), { now });
     expect(data.today).toBe(TODAY);
@@ -135,7 +138,7 @@ describe('текст письма', () => {
     expect(mail.text).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
   });
   it('без программы, без теста, без карточек и без имени — честные формулировки', async () => {
-    const mem = seeded({ days: [], lessons: [], cards: [], assessment: null, profile: { interviewDate: null } });
+    const mem = await seeded({ days: [], lessons: [], cards: [], assessment: null, profile: { interviewDate: null } });
     const { mail, data } = await buildDigest(env, mem.store, user({ name: null }), profile({ interviewDate: null }), { now: () => at('07:45').toISOString() });
     expect(headlineOf(data)).toBe('программы ещё нет');
     expect(taskLines(data)[0]).toMatch(/^Программа ещё не составлена/);
@@ -146,10 +149,10 @@ describe('текст письма', () => {
     expect(mail.subject).toBe('Offerly, 12 ноября: программы ещё нет');
   });
   it('день без занятия, репетиция и уже пройденный день', async () => {
-    const mem = seeded({ days: [day('2026-11-11'), day('2026-11-13')] });
+    const mem = await seeded({ days: [day('2026-11-11'), day('2026-11-13')] });
     const d1 = await collectDigest(mem.store, user(), profile(), { now: () => at('07:45').toISOString() });
     expect(headlineOf(d1)).toBe('день без занятия по программе');
-    const mem2 = seeded({ days: [day(TODAY, { format: 'rehearsal', topic: 'mixed', writing: null, reason: null, status: 'done', score: 71 })], lessons: [] });
+    const mem2 = await seeded({ days: [day(TODAY, { format: 'rehearsal', topic: 'mixed', writing: null, reason: null, status: 'done', score: 71 })], lessons: [] });
     const d2 = await collectDigest(mem2.store, user(), profile(), { now: () => at('07:45').toISOString() });
     expect(headlineOf(d2)).toBe('репетиция интервью');
     expect(d2.todayDone).toBe(true);
@@ -157,7 +160,7 @@ describe('текст письма', () => {
     expect(taskLines(d2)[0]).toBe('репетиция интервью, 25 минут.');
   });
   it('профиля нет — письмо собирается с пустым профилем и временем по умолчанию в подвале', async () => {
-    const mem = seeded({ days: [], lessons: [], cards: [], assessment: null });
+    const mem = await seeded({ days: [], lessons: [], cards: [], assessment: null });
     const { mail } = await buildDigest(env, mem.store, user(), null, { now: () => at('07:45').toISOString() });
     expect(mail.text).toContain(`раз в день в ${DEFAULT_NOTIFY_AT}`);
   });
@@ -165,11 +168,11 @@ describe('текст письма', () => {
 
 describe('проход расписания', () => {
   it('пора — письмо уходит и день отмечен; рано — не трогаем; второй проход в тот же день не дублирует', async () => {
-    const mem = seeded();
-    mem.users.push(user({ id: 'u2', email: 'late@example.com', tz: 'Europe/Moscow' }));
-    mem.profiles.set('u2', profile({ userId: 'u2', notifyAt: '09:00' })); // в Москве сейчас 04:45 — рано
-    mem.users.push(user({ id: 'u3', email: 'off@example.com' }));
-    mem.profiles.set('u3', profile({ userId: 'u3', notifyAt: null }));
+    const mem = await seeded();
+    await mem.store.insertUser(user({ id: 'u2', email: 'late@example.com', tz: 'Europe/Moscow' }));
+    mem.putProfile(profile({ userId: 'u2', notifyAt: '09:00' })); // в Москве сейчас 04:45 — рано
+    await mem.store.insertUser(user({ id: 'u3', email: 'off@example.com' }));
+    mem.putProfile(profile({ userId: 'u3', notifyAt: null }));
     const fetchFn = okFetch();
     const now = () => at('07:45').toISOString();
     const r = await runDigest(env, mem.store, { now, fetchFn });
@@ -180,8 +183,8 @@ describe('проход расписания', () => {
     expect(body.to).toEqual(['y@example.com']);
     expect(body.subject).toBe('Offerly, 12 ноября: занятие · Союзы и инверсия');
     expect(body.from).toBe('Offerly <onboarding@resend.dev>');
-    expect(mem.profiles.get('u1')!.digestSentOn).toBe(TODAY);
-    expect(mem.digests).toEqual([{ userId: 'u1', sentOn: TODAY, sentAt: now(), note: 'sent' }]);
+    expect(marks(mem)).toEqual({ sentOn: TODAY, sentAt: now(), note: 'sent' });
+    expect(marks(mem, 'u2')).toEqual({ sentOn: null, sentAt: null, note: null });
     const r2 = await runDigest(env, mem.store, { now: () => at('08:30').toISOString(), fetchFn });
     expect(r2).toMatchObject({ checked: 2, sent: 0, skipped: 0, failed: 0 });
     expect(r2.users[0]).toEqual({ userId: 'u1', state: 'sent', note: null });
@@ -189,55 +192,56 @@ describe('проход расписания', () => {
     // следующий день — снова пора
     const r3 = await runDigest(env, mem.store, { now: () => at('07:50', '2026-11-13').toISOString(), fetchFn });
     expect(r3.sent).toBe(1);
-    expect(mem.profiles.get('u1')!.digestSentOn).toBe('2026-11-13');
+    expect(marks(mem).sentOn).toBe('2026-11-13');
   });
   it('окно прошло — день помечается пропущенным без письма', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const fetchFn = okFetch();
     const r = await runDigest(env, mem.store, { now: () => at('12:00').toISOString(), fetchFn });
     expect(r).toMatchObject({ checked: 1, sent: 0, skipped: 1, failed: 0 });
     expect(r.users[0]).toEqual({ userId: 'u1', state: 'late', note: 'skipped:late' });
     expect(fetchFn).not.toHaveBeenCalled();
-    expect(mem.digests[0]).toMatchObject({ sentOn: TODAY, sentAt: null, note: 'skipped:late' });
+    expect(marks(mem)).toEqual({ sentOn: TODAY, sentAt: null, note: 'skipped:late' });
   });
   it('почта не настроена — skipped, Resend отказал — failed с отметкой дня (без повторов каждые 15 минут)', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const r = await runDigest({ ...env, RESEND_API_KEY: undefined }, mem.store, { now: () => at('07:45').toISOString(), fetchFn: okFetch() });
     expect(r).toMatchObject({ sent: 0, skipped: 1, failed: 0 });
-    expect(mem.digests[0].note).toBe('skipped:mail_not_configured');
-    const mem2 = seeded();
+    expect(marks(mem).note).toBe('skipped:mail_not_configured');
+    const mem2 = await seeded();
     const bad = vi.fn(async () => new Response('rate limited', { status: 429 }));
     const r2 = await runDigest(env, mem2.store, { now: () => at('07:45').toISOString(), fetchFn: bad });
     expect(r2).toMatchObject({ sent: 0, skipped: 0, failed: 1 });
     expect(r2.users[0].note).toMatch(/^error:Resend 429/);
-    expect(mem2.profiles.get('u1')!.digestSentOn).toBe(TODAY);
+    expect(marks(mem2).sentOn).toBe(TODAY);
   });
   it('sendDigestNow: письмо уходит сразу и день отмечен как sent:manual', async () => {
-    const mem = seeded();
+    const mem = await seeded();
     const fetchFn = okFetch();
     const r = await sendDigestNow(env, mem.store, user(), profile(), { now: () => at('06:00').toISOString(), fetchFn });
     expect(r.result).toEqual({ sent: true, id: 'm1' });
     expect(r.subject).toContain('Союзы и инверсия');
     expect(r.sentOn).toBe(TODAY);
-    expect(mem.digests[0].note).toBe('sent:manual');
+    expect(marks(mem).note).toBe('sent:manual');
   });
 });
 
 describe('API', () => {
   const appEnv = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
-  async function login(mem: ReturnType<typeof memoryStore>, app: ReturnType<typeof createApp>) {
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, appEnv);
+  async function login(mem: ReturnType<typeof sqlStore>, app: ReturnType<typeof createApp>) {
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, { ...appEnv, DB: mem.DB });
     const r1 = await call('/auth/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com' }) });
     const { code } = await r1.json() as any;
     const r2 = await call('/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com', code }) });
-    return { call, cookie: r2.headers.get('set-cookie')!.split(';')[0], uid: mem.users[mem.users.length - 1].id };
+    return { call, cookie: r2.headers.get('set-cookie')!.split(';')[0], uid: (await mem.store.findUserByEmail('y@example.com'))!.id };
   }
   it('GET/PUT /api/digest: без cookie — 401; состояние с предпросмотром; время включается, переставляется, выключается; мусор — 400', async () => {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
-    expect((await app.request('https://offerly.test/api/digest', {}, appEnv)).status).toBe(401);
-    expect((await app.request('https://offerly.test/api/digest', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"notifyAt":"07:00"}' }, appEnv)).status).toBe(401);
-    expect((await app.request('https://offerly.test/api/digest/send', { method: 'POST' }, appEnv)).status).toBe(401);
+    const mem = sqlStore();
+    const app = createApp('test');
+    const env = { ...appEnv, DB: mem.DB } as Env;
+    expect((await app.request('https://offerly.test/api/digest', {}, env)).status).toBe(401);
+    expect((await app.request('https://offerly.test/api/digest', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"notifyAt":"07:00"}' }, env)).status).toBe(401);
+    expect((await app.request('https://offerly.test/api/digest/send', { method: 'POST' }, env)).status).toBe(401);
     const { call, cookie } = await login(mem, app);
     const g = await call('/digest', { headers: { cookie } });
     expect(g.status).toBe(200);
@@ -249,7 +253,7 @@ describe('API', () => {
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ ok: false, error: 'notify_invalid', reason: 'format' });
     // время на минуту вперёд от текущего в поясе пользователя — первое письмо сегодня; на минуту назад — уже прошло, первое письмо завтра
-    const tz = mem.users[0].tz;
+    const tz = (await mem.store.findUserByEmail('y@example.com'))!.tz;
     const clock = localClock(tz, new Date());
     const hhmm = (m: number) => `${String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String(((m % 1440) + 1440) % 1440 % 60).padStart(2, '0')}`;
     const ahead = hhmm(clock.minutes + 5), behind = hhmm(clock.minutes - 5);
@@ -273,23 +277,23 @@ describe('API', () => {
     expect(((await noPreview.json()) as any).preview).toBeUndefined();
   });
   it('POST /api/digest/send: без ключа — 503, с ключом — письмо через Resend и день отмечен, отказ Resend — 502', async () => {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const app = createApp('test');
     const { call, cookie, uid } = await login(mem, app);
     const r503 = await call('/digest/send', { method: 'POST', headers: { cookie } });
     expect(r503.status).toBe(503);
     expect(await r503.json()).toEqual({ ok: false, error: 'mail_not_configured' });
     const fetchMock = okFetch();
     vi.stubGlobal('fetch', fetchMock);
-    const appMail = createApp('test', () => mem.store);
-    const envMail = { ...appEnv, RESEND_API_KEY: 'k', APP_URL: 'https://offerly-c8b.pages.dev' } as unknown as Env;
+    const appMail = createApp('test');
+    const envMail = { ...appEnv, DB: mem.DB, RESEND_API_KEY: 'k', APP_URL: 'https://offerly-c8b.pages.dev' } as unknown as Env;
     const ok = await appMail.request('https://offerly.test/api/digest/send', { method: 'POST', headers: { cookie } }, envMail);
     expect(ok.status).toBe(200);
     const j: any = await ok.json();
     expect(j.ok).toBe(true);
     expect(j.subject).toMatch(/^Offerly, /);
     expect(j.id).toBe('m1');
-    expect(mem.profiles.get(uid)!.digestSentOn).toBe(j.sentOn);
+    expect(marks(mem, uid).sentOn).toBe(j.sentOn);
     const body = JSON.parse((fetchMock.mock.calls[0] as any)[1].body);
     expect(body.to).toEqual(['y@example.com']);
     expect(body.html).toContain('https://offerly-c8b.pages.dev');

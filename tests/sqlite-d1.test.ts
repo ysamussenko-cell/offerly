@@ -34,4 +34,18 @@ describe('sqliteD1', () => {
     await store.insertSpeech({ ...take, userId: 'u1' });
     expect(rows('SELECT user_id, longest_pause FROM speech_takes')).toEqual([{ userId: 'u1', longestPause: 0 }]);
   });
+
+  it('putAssessment и putProfile: записанное читается хранилищами без потерь — оси и балл среза, все поля профиля', async () => {
+    const { store, addUser, putAssessment, putProfile } = sqlStore();
+    addUser('u1');
+    const at = '2026-10-29T03:00:00.000Z';
+    const a = { id: 'a1', userId: 'u1', kind: 'baseline', status: 'finished', startedAt: at, finishedAt: at, level: 'B1', currentLevel: 'B1', updatedAt: at,
+      axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: at, scoringNote: 'вне приложения', adaptiveCount: 12, programDayId: null } as const;
+    await putAssessment(a);
+    expect(await store.latestAssessment('u1')).toEqual(a);
+    const p = { userId: 'u1', specialty: 'инженер', industry: 'энергетика', years: 15, targetRole: 'OpenTrain AI', keywords: ['boiler', 'energy audit'], summary: 's', resumeText: null, resumeName: null, resumeAt: null,
+      interviewDate: '2026-12-02', interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: at, targetLevel: 'C1', weeklyGoalMinutes: 90, notifyAt: '07:30', digestSentOn: null, updatedAt: at };
+    putProfile(p);
+    expect(await store.getProfile('u1')).toEqual(p);
+  });
 });

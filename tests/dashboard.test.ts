@@ -9,8 +9,7 @@ import type { ProgramDay } from '../functions/_lib/program';
 import type { Profile } from '../functions/_lib/profile';
 import { d1ProfileStore } from '../functions/_lib/profile';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 
 const USER = 'u1';
 const TZ = 'Asia/Almaty';
@@ -181,21 +180,24 @@ describe('план недели', () => {
 });
 
 describe('сборка главного экрана', () => {
-  function seed() {
-    const mem = memoryStore();
-    mem.assessments.push(assessment());
-    mem.profiles.set(USER, profile({ interviewDate: '2026-12-02' }));
-    for (const d of ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13']) mem.programDays.push(day(d));
-    mem.programDays.push(day('2026-11-07', { format: 'lesson', topic: 'mixed' }), day('2026-11-08', { format: 'rehearsal', topic: 'task-response', writing: null }), day('2026-11-14', { format: 'lesson', topic: 'mixed' }), day('2026-11-15', { format: 'checkpoint', topic: 'mixed', writing: null }));
+  /** Срез, профиль, две недели программы и семь занятий — у пользователя uid (по умолчанию u1, его заводим здесь же). */
+  async function seed(mem = sqlStore(), uid = USER) {
+    if (uid === USER) mem.addUser(USER);
+    const own = <T extends { userId: string }>(x: T): T => ({ ...x, userId: uid });
+    await mem.putAssessment(own(assessment()));
+    mem.putProfile(own(profile({ interviewDate: '2026-12-02' })));
+    const days = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'].map(d => day(d));
+    days.push(day('2026-11-07', { format: 'lesson', topic: 'mixed' }), day('2026-11-08', { format: 'rehearsal', topic: 'task-response', writing: null }), day('2026-11-14', { format: 'lesson', topic: 'mixed' }), day('2026-11-15', { format: 'checkpoint', topic: 'mixed', writing: null }));
+    await mem.store.replacePlannedDays(uid, '2026-11-01', days.map(own));
     for (const [d, s] of [['2026-11-02', 100], ['2026-11-03', 80], ['2026-11-05', 60], ['2026-11-06', 50], ['2026-11-09', 90], ['2026-11-10', 100], ['2026-11-11', 70]] as [string, number][]) {
-      const l = lesson(d, s); mem.lessons.push(l);
-      mem.steps.push(step(`${d}T02:00:00Z`, `${d}T02:08:00Z`, l.id), step(`${d}T02:08:00Z`, `${d}T02:14:00Z`, l.id));
+      const l = own(lesson(d, s)); await mem.store.createLesson(l);
+      for (const st of [step(`${d}T02:00:00Z`, `${d}T02:08:00Z`, l.id), step(`${d}T02:08:00Z`, `${d}T02:14:00Z`, l.id)]) await mem.store.insertStep(own(st));
     }
     return mem;
   }
   it('собирает готовность с прогнозом, отсчёт, серию, цель и неделю из занятий и программы', async () => {
-    const mem = seed();
-    const v = await dashboard(mem.store, USER, TZ, mem.profiles.get(USER)!, { now: () => NOW });
+    const mem = await seed();
+    const v = await dashboard(mem.store, USER, TZ, (await mem.store.getProfile(USER))!, { now: () => NOW });
     expect(v.today).toBe(TODAY);
     // 4.11 — заморозка недели 2–8 (серия 2–6 = 4), 7.11 рвёт серию; 9–11.11 — серия 3
     expect(v.streak).toMatchObject({ current: 3, best: 4, todayDone: false, freezeAvailable: true, frozen: ['2026-11-04'], missed: ['2026-11-07'], lastDone: '2026-11-11' });
@@ -211,7 +213,7 @@ describe('сборка главного экрана', () => {
     expect(v.program).toEqual({ exists: true, endDate: '2026-11-15', done: 0, total: 14 });
   });
   it('без программы и среза — пустые значения, цель по умолчанию, неделя свободна', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore();
     const v = await dashboard(mem.store, USER, TZ, null, { now: () => NOW });
     expect(v.readiness.value).toBeNull();
     expect(v.streak.current).toBe(0);
@@ -221,9 +223,9 @@ describe('сборка главного экрана', () => {
     expect(v.countdown).toEqual({ interviewDate: null, daysLeft: null });
   });
   it('API: GET /api/dashboard и PUT /api/dashboard/goal с проверкой; без cookie — 401', async () => {
-    const mem = seed();
-    const env = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
-    const app = createApp('test', () => mem.store);
+    const mem = sqlStore();
+    const env = { DB: mem.DB, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
+    const app = createApp('test');
     const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, env);
     expect((await call('/dashboard')).status).toBe(401);
     expect((await call('/dashboard/goal', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"minutes":100}' })).status).toBe(401);
@@ -231,10 +233,9 @@ describe('сборка главного экрана', () => {
     const { code } = await r1.json() as any;
     const r2 = await call('/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'y@example.com', code }) });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
-    const uid = mem.users[0].id;
-    // переносим данные на созданного пользователя
-    mem.profiles.set(uid, { ...mem.profiles.get(USER)!, userId: uid });
-    for (const x of [...mem.assessments, ...mem.lessons, ...mem.programDays]) x.userId = uid;
+    const uid = mem.rows<{ id: string }>('SELECT id FROM users')[0].id;
+    // данные — у пользователя, созданного входом (профиль заводим целиком, вход его ещё не создал)
+    await seed(mem, uid);
     const g = await call('/dashboard', { headers: { cookie } });
     expect(g.status).toBe(200);
     const j: any = await g.json();
@@ -252,7 +253,7 @@ describe('сборка главного экрана', () => {
     expect(ok.status).toBe(200);
     const k: any = await ok.json();
     expect(k.goal).toMatchObject({ minutes: 60, custom: true });
-    expect(mem.profiles.get(uid)!.weeklyGoalMinutes).toBe(60);
+    expect(mem.rows('SELECT weekly_goal_minutes FROM profiles WHERE user_id = ?', uid)).toEqual([{ weeklyGoalMinutes: 60 }]);
     const reset = await call('/dashboard/goal', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ minutes: null }) });
     expect(((await reset.json()) as any).goal).toMatchObject({ minutes: 125, custom: false });
   });

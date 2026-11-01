@@ -11,8 +11,7 @@ import type { ErrorCard } from '../functions/_lib/cards';
 import { d1LessonStore } from '../functions/_lib/lesson';
 import { d1CardStore } from '../functions/_lib/cards';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 
 const ENV = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
 const USER = 'u1';
@@ -103,26 +102,28 @@ describe('открытие и запись', () => {
   const step = (lessonId: string, item: Item, correct: number, position: number): LessonStep => ({ id: `s${++seq}`, lessonId, userId: USER, position, part: 'warmup', itemId: item.id, cardId: null, level: item.level, answer: 'C', correct, score: correct * 100, feedback: null, detail: null, createdAt: at(seq), answeredAt: at(seq) });
 
   it('sync открывает достижения один раз с датой, возвращает каталог с прогрессом (открытые первыми) и только новые; seen гасит «новое»', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore(); mem.addUser(USER);
     const l = lessonOf({ bonus: 'correct' });
-    mem.lessons.push(l);
+    await mem.store.createLesson(l);
     const items = Array.from({ length: 5 }, () => makeItem('mcq', 'B1', 'articles'));
-    mem.items.push(...items);
-    items.forEach((it, i) => mem.steps.push(step(l.id, it, 1, i + 1)));
-    mem.cards.push(cardOf(true));
+    await mem.store.insertItems(items);
+    const steps = items.map((it, i) => step(l.id, it, 1, i + 1));
+    for (const s of steps) await mem.store.insertStep(s);
+    const retired = cardOf(true);
+    await mem.store.insertCards([retired]);
     const r1 = await syncAchievements(mem.store, USER, TZ, { now: () => NOW });
     expect(r1.fresh.map(a => a.code).sort()).toEqual(['bonus-1', 'retired-1', 'streak5:articles', 'warmup-perfect']);
     expect(r1.all).toHaveLength(ACHIEVEMENTS.length);
     expect(r1.all.slice(0, 4).every(a => a.unlocked && a.new && a.unlockedAt === NOW)).toBe(true);
-    expect(r1.all.find(a => a.code === 'streak5:articles')).toMatchObject({ unlocked: true, detail: mem.steps[4].answeredAt!.slice(0, 10), progress: { value: 5, target: 5 }, groupLabel: 'темы' });
+    expect(r1.all.find(a => a.code === 'streak5:articles')).toMatchObject({ unlocked: true, detail: steps[4].answeredAt!.slice(0, 10), progress: { value: 5, target: 5 }, groupLabel: 'темы' });
     expect(r1.all.find(a => a.code === 'retired-10')).toMatchObject({ unlocked: false, new: false, progress: { value: 1, target: 10 } });
-    expect(mem.achievements).toHaveLength(4);
+    expect(mem.rows('SELECT code FROM achievements')).toHaveLength(4);
     // повторный пересчёт ничего не добавляет и не меняет дату
     const r2 = await syncAchievements(mem.store, USER, TZ, { now: () => '2026-11-13T03:00:00.000Z' });
-    expect(r2.fresh).toEqual([]); expect(mem.achievements).toHaveLength(4);
+    expect(r2.fresh).toEqual([]); expect(mem.rows('SELECT code FROM achievements')).toHaveLength(4);
     expect(r2.all.find(a => a.code === 'bonus-1')!.unlockedAt).toBe(NOW);
     // открытое остаётся открытым, даже если данные изменились
-    mem.cards[0].retired = false;
+    await mem.store.updateCard(retired.id, { retired: false });
     const r3 = await syncAchievements(mem.store, USER, TZ);
     expect(r3.all.find(a => a.code === 'retired-1')).toMatchObject({ unlocked: true, progress: { value: 0, target: 1 } });
     await mem.store.markAchievementsSeen(USER, NOW);
@@ -171,20 +172,20 @@ describe('открытие и запись', () => {
 
 describe('API достижений', () => {
   async function login() {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, ENV);
+    const mem = sqlStore();
+    const app = createApp('test');
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, { ...ENV, DB: mem.DB });
     const post = (path: string, body: unknown, cookie?: string) => call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
     const r1: any = await (await post('/auth/request', { email: 'y@example.com' })).json();
     const r2 = await post('/auth/verify', { email: 'y@example.com', code: r1.code });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
-    return { mem, call, post, cookie, userId: mem.users[0].id };
+    return { mem, call, post, cookie, userId: mem.rows<{ id: string }>('SELECT id FROM users')[0].id };
   }
   it('без входа — 401; каталог с прогрессом и счётчиками; seen гасит новое', async () => {
     const { mem, call, post, cookie, userId } = await login();
     expect((await call('/achievements')).status).toBe(401);
     expect((await post('/achievements/seen', {})).status).toBe(401);
-    mem.cards.push({ ...cardOf(true), userId });
+    await mem.store.insertCards([{ ...cardOf(true), userId }]);
     const g: any = await (await call('/achievements', { headers: { cookie } })).json();
     expect(g).toMatchObject({ ok: true, total: ACHIEVEMENTS.length, unlocked: 1, fresh: 1 });
     expect(g.achievements[0]).toMatchObject({ code: 'retired-1', unlocked: true, new: true, title: 'Первая погашенная карточка', groupLabel: 'журнал' });
@@ -196,7 +197,7 @@ describe('API достижений', () => {
 
   it('открытое раньше (ответом в занятии) и не увиденное считается в fresh — иначе клиент не гасит «новое»', async () => {
     const { mem, call, post, cookie, userId } = await login();
-    mem.cards.push({ ...cardOf(true), userId });
+    await mem.store.insertCards([{ ...cardOf(true), userId }]);
     // открытие произошло вне GET /achievements — как при ответе на шаг занятия
     await syncAchievements(mem.store, userId, 'Asia/Almaty');
     const g: any = await (await call('/achievements', { headers: { cookie } })).json();

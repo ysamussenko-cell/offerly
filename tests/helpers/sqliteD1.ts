@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { d1AllStores, type Env } from '../../functions/_lib/app';
+import type { Assessment } from '../../functions/_lib/assessment';
+import type { Profile } from '../../functions/_lib/profile';
 
 // node:sqlite — встроенный модуль Node 22, но Vite его не знает как builtin; берём напрямую у процесса.
 const { DatabaseSync: Sqlite } = (process as any).getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
@@ -53,5 +55,15 @@ export function sqlStore() {
   /** Пользователь без входа — для тестов модулей, которые получают userId готовым (внешние ключи в D1 соблюдаются). */
   const addUser = (id: string, email = `${id}@example.com`, tz = 'Asia/Almaty') =>
     void db.prepare('INSERT INTO users (id, email, tz) VALUES (?, ?, ?)').run(id, email, tz);
-  return { store, db, DB, rows: rowsOf(db), addUser };
+  /** Тест или срез целиком, с осями и баллом: createAssessment пишет только начало, оценку — updateAssessment, как в работе. */
+  const putAssessment = async (a: Assessment) => {
+    await store.createAssessment(a);
+    if (a.scoredAt || a.overall != null) await store.updateAssessment(a.id, { axes: a.axes ?? undefined, overall: a.overall, scoredAt: a.scoredAt, scoringNote: a.scoringNote } as Partial<Assessment>);
+  };
+  /** Профиль целиком одной строкой (у хранилища профиля только частичные записи — анкета, резюме, разбор): поля → колонки snake_case, keywords — JSON. */
+  const putProfile = (p: Profile) => {
+    const cols = Object.entries(p).map(([k, v]) => [k.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`), k === 'keywords' ? JSON.stringify(v) : v] as const);
+    db.prepare(`INSERT INTO profiles (${cols.map(c => c[0]).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...cols.map(c => c[1] as any));
+  };
+  return { store, db, DB, rows: rowsOf(db), addUser, putAssessment, putProfile };
 }

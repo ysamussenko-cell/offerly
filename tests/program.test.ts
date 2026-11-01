@@ -9,8 +9,7 @@ import type { Attempt } from '../functions/_lib/types';
 import type { Item } from '../functions/_lib/items';
 import type { Profile } from '../functions/_lib/profile';
 import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 
 const USER = 'u1';
 const NOW = '2026-11-02T03:00:00.000Z'; // понедельник 2 ноября 2026 в Алматы
@@ -161,14 +160,14 @@ describe('сборка программы', () => {
 
 describe('программа в хранилище', () => {
   const now = () => NOW;
-  function setup() {
-    const mem = memoryStore();
-    for (const c of YURIY_CARDS) mem.cards.push({ ...c });
-    mem.assessments.push(assessment({}));
+  async function setup() {
+    const mem = sqlStore(); mem.addUser(USER);
+    await mem.store.insertCards(YURIY_CARDS.map(c => ({ ...c })));
+    await mem.putAssessment(assessment({}));
     return mem;
   }
   it('построить → посмотреть; пересборка сохраняет пройденный день и заменяет остальные', async () => {
-    const mem = setup();
+    const mem = await setup();
     expect(await current(mem.store, USER, TZ, profile(), now)).toBeNull();
     const v = await generateProgram(mem.store, USER, TZ, profile(), { now, id: nextId });
     expect(v.startDate).toBe('2026-11-02'); expect(v.endDate).toBe('2026-11-29'); expect(v.totalDays).toBe(28); expect(v.today).toBe('2026-11-02');
@@ -177,8 +176,8 @@ describe('программа в хранилище', () => {
     expect(v.days[0].writingLabel).toBe('отзыв рецензента'); expect(v.days[1].writingLabel).toBe('объяснение неспециалисту');
     expect(v.topics.find(t => t.id === 'conjunctions')!.days).toBeGreaterThan(1);
     // день пройден — пересборка завтра его не трогает и не дублирует
-    const first = mem.programDays[0];
-    first.status = 'done'; first.completedAt = NOW;
+    const [first] = await mem.store.listProgramDays(USER);
+    await mem.store.updateProgramDay(first.id, { status: 'done', completedAt: NOW });
     const tomorrow = () => '2026-11-03T03:00:00.000Z';
     const v2 = await generateProgram(mem.store, USER, TZ, profile({ interviewDate: '2026-11-20' }), { now: tomorrow, id: nextId });
     expect(v2.startDate).toBe('2026-11-02'); // идущая программа не начинается заново
@@ -187,7 +186,7 @@ describe('программа в хранилище', () => {
     expect(v2.endDate).toBe('2026-11-19');
     expect(v2.totalDays).toBe(18);
     expect(new Set(v2.days.map(d => d.date)).size).toBe(v2.days.length);
-    expect(mem.programDays.filter(d => d.status === 'planned' && d.generatedAt === NOW)).toHaveLength(0);
+    expect(mem.rows("SELECT id FROM program_days WHERE status = 'planned' AND generated_at = ?", NOW)).toHaveLength(0);
     expect(v2.counts.done).toBe(1);
     // программа закончилась — новая начинается сегодня
     const later = () => '2026-12-01T03:00:00.000Z';
@@ -195,7 +194,7 @@ describe('программа в хранилище', () => {
     expect(v3.startDate).toBe('2026-12-01'); expect(v3.totalDays).toBe(28); expect(v3.counts.done).toBe(0);
   });
   it('перестановка тем: только занятия, только не пройденные, не в прошлом', async () => {
-    const mem = setup();
+    const mem = await setup();
     const v = await generateProgram(mem.store, USER, TZ, profile(), { now, id: nextId });
     const [a, b] = v.days.filter(d => d.format === 'lesson');
     const v2 = await swapDays(mem.store, USER, TZ, profile(), a.id, b.id, { now });
@@ -206,7 +205,7 @@ describe('программа в хранилище', () => {
     await expect(swapDays(mem.store, USER, TZ, profile(), a.id, a.id)).rejects.toMatchObject({ reason: 'same' });
     await expect(swapDays(mem.store, USER, TZ, profile(), a.id, 'nope')).rejects.toMatchObject({ reason: 'not_found' });
     await expect(swapDays(mem.store, 'other', TZ, profile(), a.id, b.id)).rejects.toMatchObject({ reason: 'not_found' });
-    mem.programDays.find(d => d.id === b.id)!.status = 'done';
+    await mem.store.updateProgramDay(b.id, { status: 'done' });
     await expect(swapDays(mem.store, USER, TZ, profile(), a.id, b.id)).rejects.toMatchObject({ reason: 'not_planned' });
     const c = v.days.filter(d => d.format === 'lesson')[2];
     await expect(swapDays(mem.store, USER, TZ, profile(), a.id, c.id, { now: () => '2026-11-05T03:00:00.000Z' })).rejects.toBeInstanceOf(ProgramError);
@@ -240,14 +239,14 @@ describe('хранилище D1 (node:sqlite с миграциями)', () => {
 describe('API программы', () => {
   const ENV = { DB: null, AI: { run: async () => ({ response: '{}' }) }, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env;
   async function login() {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
-    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, ENV);
+    const mem = sqlStore();
+    const app = createApp('test');
+    const call = (path: string, init: RequestInit = {}) => app.request(`https://offerly.test/api${path}`, init, { ...ENV, DB: mem.DB });
     const post = (path: string, body: unknown, cookie?: string) => call(path, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
     const r1: any = await (await post('/auth/request', { email: 'y@example.com' })).json();
     const r2 = await post('/auth/verify', { email: 'y@example.com', code: r1.code });
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
-    const userId = mem.users[0].id;
+    const userId = mem.rows<{ id: string }>('SELECT id FROM users')[0].id;
     return { mem, call, post, cookie, userId };
   }
   it('без входа — 401', async () => {
@@ -258,7 +257,7 @@ describe('API программы', () => {
   });
   it('пустая программа → generate → GET → swap; ошибки перестановки — 400 с причиной', async () => {
     const { mem, call, post, cookie, userId } = await login();
-    for (const c of YURIY_CARDS) mem.cards.push({ ...c, userId });
+    await mem.store.insertCards(YURIY_CARDS.map(c => ({ ...c, userId })));
     const empty: any = await (await call('/program', { headers: { cookie } })).json();
     expect(empty.program).toBeNull(); expect(empty.days).toBe(28); expect(empty.topics.some((t: any) => t.id === 'mixed')).toBe(true);
     const g: any = await (await post('/program/generate', {}, cookie)).json();

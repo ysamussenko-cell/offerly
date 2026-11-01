@@ -7,8 +7,7 @@ import { normalizeWritingEval, WRITING_EVAL_SCHEMA, writingPrompt } from '../fun
 import { score, startOrResume, answer, rescore, attemptOrigin, CARD_SOURCE as TEST_SOURCE, type Assessment } from '../functions/_lib/assessment';
 import { createApp, type Env } from '../functions/_lib/app';
 import { LEVELS, type Item } from '../functions/_lib/items';
-import { memoryStore } from './helpers/memoryStore';
-import { freshDb, d1Of } from './helpers/sqliteD1';
+import { freshDb, d1Of, sqlStore } from './helpers/sqliteD1';
 import { makeItem } from './assessment.test';
 
 const USER = 'u1';
@@ -76,9 +75,11 @@ describe('заготовки карточек из ошибок', () => {
 
 describe('создание карточек', () => {
   it('новые карточки со сроком на завтра; та же ошибка у активной карточки — пропуск; у погашенной — возврат в оборот; повторный источник — пропуск', async () => {
-    const mem = memoryStore();
-    mem.cards.push(card({ id: 'active', example: 'Less boilers were inspected.', correction: 'Fewer boilers were inspected.' }));
-    mem.cards.push(card({ id: 'gone', example: 'I suggest to replace the burner.', correction: 'I suggest replacing the burner.', retired: true, streak: 3, reps: 3, due: null }));
+    const mem = sqlStore(); mem.addUser(USER);
+    await mem.store.insertCards([
+      card({ id: 'active', example: 'Less boilers were inspected.', correction: 'Fewer boilers were inspected.' }),
+      card({ id: 'gone', example: 'I suggest to replace the burner.', correction: 'I suggest replacing the burner.', retired: true, streak: 3, reps: 3, due: null }),
+    ]);
     const drafts = [
       { topic: 'quantifiers', rule: 'r1', example: 'LESS boilers were inspected!', correction: 'Fewer boilers were inspected.', origin: 'step:1' },
       { topic: 'verb-patterns', rule: 'r2', example: 'I suggest to replace the burner', correction: 'I suggest replacing the burner.', origin: 'step:2' },
@@ -90,9 +91,10 @@ describe('создание карточек', () => {
     expect(r.created.map(c => c.origin)).toEqual(['step:3']);
     expect(r.revived.map(c => c.id)).toEqual(['gone']);
     expect(r.skipped).toBe(3);
-    expect(mem.cards).toHaveLength(3);
-    expect(mem.cards.find(c => c.id === 'gone')).toMatchObject({ retired: false, streak: 0, lapses: 1, reps: 3, due: '2026-11-03' });
-    const made = mem.cards.find(c => c.origin === 'step:3')!;
+    const all = await mem.store.listCards(USER);
+    expect(all).toHaveLength(3);
+    expect(all.find(c => c.id === 'gone')).toMatchObject({ retired: false, streak: 0, lapses: 1, reps: 3, due: '2026-11-03' });
+    const made = all.find(c => c.origin === 'step:3')!;
     expect(made).toMatchObject({ userId: USER, topic: 'articles', rule: 'r3', source: 'lesson', stability: 1, difficulty: 5, reps: 0, lapses: 0, streak: 0, reviewedAt: null, retired: false, due: '2026-11-03', createdAt: NOW });
     expect(dueForReview(made, TODAY)).toBe(false); expect(dueForReview(made, '2026-11-03')).toBe(true);
     // тот же источник второй раз (пересчёт) — ничего не добавляет
@@ -117,13 +119,18 @@ describe('карточки из ошибок теста', () => {
     { original: 'shows a small loss', corrected: 'showed a small loss', note: 'Прошедшее время', topic: 'tenses' },
     { original: 'The boiler efficiency test', corrected: 'The boiler-efficiency test', note: 'Дефис', topic: null },
   ], rewrite: TEXT.replace(/shows/g, 'showed') };
-  function bank(mem: ReturnType<typeof memoryStore>) {
-    for (const l of LEVELS) { for (let i = 0; i < 3; i++) { mem.items.push(makeItem('mcq', l, 'articles')); mem.items.push(makeItem('correction', l, 'tenses')); } mem.items.push(makeItem('reading', l)); mem.items.push(makeItem('writing', l)); }
+  /** Банк заданий в базе; массив остаётся у теста — в нём эталоны для верных ответов. */
+  async function bank(mem: ReturnType<typeof sqlStore>) {
+    const items: Item[] = [];
+    for (const l of LEVELS) { for (let i = 0; i < 3; i++) { items.push(makeItem('mcq', l, 'articles')); items.push(makeItem('correction', l, 'tenses')); } items.push(makeItem('reading', l)); items.push(makeItem('writing', l)); }
+    await mem.store.insertItems(items);
+    return items;
   }
-  const key = (mem: ReturnType<typeof memoryStore>, attId: string) => { const t = mem.attempts.find(x => x.id === attId)!; return mem.items.find(i => i.id === t.itemId)!; };
+  const itemOf = (mem: ReturnType<typeof sqlStore>, items: Item[], attId: string) => { const [t] = mem.rows('SELECT item_id FROM attempts WHERE id = ?', attId); return items.find(i => i.id === t.itemId)!; };
+  const attempts = (mem: ReturnType<typeof sqlStore>) => mem.rows('SELECT id, item_id FROM attempts ORDER BY position');
 
   it('после теста неверные ответы и ошибки письма с темой становятся карточками; пересчёт не дублирует', async () => {
-    const mem = memoryStore(); bank(mem);
+    const mem = sqlStore(); mem.addUser(USER); const items = await bank(mem);
     const o = { rng: () => 0, generate: false, chatFn: (async () => JSON.stringify(EVAL)) as any, now: () => NOW, id: nextId };
     let v = await startOrResume(ENV, mem.store, USER, DOMAIN, o);
     let wrong = 0;
@@ -134,28 +141,28 @@ describe('карточки из ошибок теста', () => {
       if (cur.kind === 'reading') ans = ['A', 'A'];
       else if (cur.kind === 'writing') ans = TEXT;
       else if (wrong < 2 && (cur.position === 1 || cur.position === 3)) { wrong++; ans = cur.kind === 'mcq' ? 'A' : 'This answer is wrong on purpose.'; }
-      else ans = key(mem, cur.attemptId).answer;
+      else ans = itemOf(mem, items, cur.attemptId).answer;
       v = await answer(ENV, mem.store, USER, cur.attemptId, ans, DOMAIN, o);
     }
     expect(v.status).toBe('finished');
-    const cards = mem.cards.filter(c => c.userId === USER);
+    const cards = await mem.store.listCards(USER);
     expect(cards).toHaveLength(3); // mcq, исправление, одна ошибка письма с темой (чтение карточек не даёт)
     expect(cards.map(c => c.source)).toEqual([TEST_SOURCE, TEST_SOURCE, TEST_SOURCE]);
     const m = cards.find(c => c.topic === 'articles')!, cr = cards.find(c => c.topic === 'tenses' && c.origin!.indexOf(':w') < 0)!, w = cards.find(c => c.origin!.endsWith(':w1'))!;
-    expect(m.origin).toBe(attemptOrigin(mem.attempts[0].id)); expect(m.example).toContain(' a energy audit');
-    expect(cr.example).toBe(mem.items.find(i => i.id === mem.attempts[2].itemId)!.prompt);
+    expect(m.origin).toBe(attemptOrigin(attempts(mem)[0].id)); expect(m.example).toContain(' a energy audit');
+    expect(cr.example).toBe(items.find(i => i.id === attempts(mem)[2].itemId)!.prompt);
     expect(w).toMatchObject({ topic: 'tenses', example: 'shows a small loss', correction: 'showed a small loss', rule: 'Прошедшее время', due: '2026-11-03' });
     // пересчёт письма заново — те же источники, карточек не прибавилось
     await rescore(ENV, mem.store, USER, o, true);
-    expect(mem.cards).toHaveLength(3);
+    expect(mem.rows('SELECT id FROM error_cards')).toHaveLength(3);
   });
   it('score без хранилища карточек работает как раньше', async () => {
-    const mem = memoryStore();
+    const mem = sqlStore(); mem.addUser(USER);
     const a: Assessment = { id: 'a1', userId: USER, kind: 'placement', status: 'finished', startedAt: NOW, finishedAt: NOW, level: 'B1', currentLevel: 'B1', updatedAt: NOW, axes: null, overall: null, scoredAt: null, scoringNote: null, adaptiveCount: 12, programDayId: null };
-    mem.assessments.push(a);
+    await mem.putAssessment(a);
     const { insertCards, ...rest } = mem.store;
     const r = await score(ENV, rest as any, a, [], { now: () => NOW });
-    expect(r.scoringNote).toBe('письмо не сдано'); expect(mem.cards).toHaveLength(0);
+    expect(r.scoringNote).toBe('письмо не сдано'); expect(mem.rows('SELECT id FROM error_cards')).toEqual([]);
   });
 });
 
@@ -181,14 +188,14 @@ describe('хранилище D1 карточек (node:sqlite с миграци�
     expect(await store.getCard('old')).toMatchObject({ streak: 0, reviewedAt: null, origin: null, stability: 1, difficulty: 5 });
   });
   it('GET /api/cards отдаёт серию и остаток до гашения', async () => {
-    const mem = memoryStore();
-    const app = createApp('test', () => mem.store);
-    const env = { DB: null, DEV_ECHO_CODE: '1', APP_NAME: 'Offerly' } as unknown as Env;
+    const mem = sqlStore();
+    const app = createApp('test');
+    const env = { DB: mem.DB, DEV_ECHO_CODE: '1', APP_NAME: 'Offerly' } as unknown as Env;
     const r1 = await app.request('https://offerly.test/api/auth/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'a@b.cc' }) }, env);
     const code = ((await r1.json()) as any).code;
     const r2 = await app.request('https://offerly.test/api/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'a@b.cc', code }) }, env);
     const cookie = r2.headers.get('set-cookie')!.split(';')[0];
-    mem.cards.push(card({ userId: mem.users[0].id, streak: 2, reviewedAt: TODAY }));
+    await mem.store.insertCards([card({ userId: mem.rows('SELECT id FROM users')[0].id, streak: 2, reviewedAt: TODAY })]);
     const j: any = await (await app.request('https://offerly.test/api/cards', { headers: { cookie } }, env)).json();
     expect(j.cards[0]).toMatchObject({ streak: 2, left: 1, reviewedAt: TODAY, retired: false });
   });
