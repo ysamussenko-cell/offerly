@@ -1,7 +1,7 @@
 /** Засев стенда e2e для вошедшего пользователя: разобранное резюме, анкета, исходный срез B1,
  *  банк принятых заданий (без модели — задания детерминированные: выбор, исправление, чтение, письмо), две карточки
  *  к повтору и день программы на сегодня в поясе пользователя (по умолчанию «занятие»). Данные учебные, помечены source 'e2e'. */
-import type { memoryStore } from '../tests/helpers/memoryStore';
+import type { Store } from '../functions/_lib/app';
 import type { Item, Kind, Level } from '../functions/_lib/items';
 import type { Assessment } from '../functions/_lib/assessment';
 import type { ErrorCard } from '../functions/_lib/cards';
@@ -60,16 +60,15 @@ export function seedBank(now: string): Item[] {
   return out;
 }
 
-export async function seedUser(memory: ReturnType<typeof memoryStore>, opts: SeedOptions) {
+export async function seedUser(store: Store, opts: SeedOptions) {
   const email = opts.email.trim().toLowerCase();
-  const user = memory.users.find(u => u.email === email);
+  const user = await store.findUserByEmail(email);
   if (!user) return null;
   const tz = opts.tz ?? 'Asia/Almaty';
   const topic = opts.topic ?? 'conjunctions';
   const now = new Date().toISOString();
   const today = todayIn(tz, new Date(now));
   const yesterday = todayIn(tz, new Date(Date.parse(now) - 86_400_000));
-  const { store } = memory;
 
   await store.saveAnalysis(user.id, {
     specialty: 'Теплоэнергетика', industry: 'Энергетика', years: 15, targetRole: 'Reviewer of AI model answers',
@@ -82,7 +81,9 @@ export async function seedUser(memory: ReturnType<typeof memoryStore>, opts: See
     id: nextId('e2e-baseline'), userId: user.id, kind: 'baseline', status: 'finished', startedAt: '2026-10-29T03:00:00.000Z', finishedAt: '2026-10-29T03:00:00.000Z',
     level: 'B1', currentLevel: 'B1', updatedAt: now, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: now, scoringNote: null, adaptiveCount: 12, programDayId: null,
   };
+  // createAssessment пишет только заголовок теста (как в проде) — оси и балл ложатся отдельным обновлением, как после оценки.
   await store.createAssessment(baseline);
+  await store.updateAssessment(baseline.id, { axes: baseline.axes, overall: baseline.overall, scoredAt: baseline.scoredAt });
 
   const items = seedBank(now);
   await store.insertItems(items);

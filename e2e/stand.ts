@@ -1,4 +1,4 @@
-/** `npm run e2e:stand` — поднять стенд руками (dist + API в памяти) и посмотреть экраны в браузере.
+/** `npm run e2e:stand` — поднять стенд руками (dist + API на SQLite в памяти) и посмотреть экраны в браузере.
  *  Код входа показывается на экране; засев: `curl -X POST localhost:4180/__e2e/seed -d '{"email":"…"}'`. */
 import { startStand } from './server';
 

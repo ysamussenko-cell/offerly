@@ -1,13 +1,15 @@
 /** Стенд для сценариев Playwright: статический dist плюс API на том же порту.
- *  /api/* идёт в createApp с хранилищем в памяти (memoryStore) — без D1, без модели (см. StandAi) и без почты:
+ *  /api/* идёт в createApp с настоящими хранилищами D1 поверх SQLite в памяти (node:sqlite, полный набор миграций —
+ *  тот же SQL, что в проде), без модели (см. StandAi) и без почты:
  *  код входа возвращается в ответе (DEV_ECHO_CODE), задания берутся из банка, который сценарий засеивает
  *  через служебный маршрут /__e2e/seed. Любой другой путь без расширения отдаёт index.html — как Pages. */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { createApp, type Env } from '../functions/_lib/app';
-import { memoryStore } from '../tests/helpers/memoryStore';
+import type { DatabaseSync } from 'node:sqlite';
+import { createApp, d1AllStores, type Env } from '../functions/_lib/app';
+import { d1Of, freshDb } from '../tests/helpers/sqliteD1';
 import { seedUser, type SeedOptions } from './seed';
 
 export const E2E_VERSION = 'e2e';
@@ -18,10 +20,18 @@ const TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
 };
 
+/** Строка таблицы для проверок сценария: колонки в camelCase (user_id → userId), значения как в SQLite (булевы — 0/1, JSON — строкой). */
+export type Row = Record<string, any>;
+
+const camel = (k: string) => k.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+
 export interface Stand {
   url: string;
   port: number;
-  memory: ReturnType<typeof memoryStore>;
+  /** База стенда: SQLite в памяти со всеми миграциями. */
+  db: DatabaseSync;
+  /** Выборка для проверок сценария, например rows('SELECT * FROM error_cards WHERE source = ?', 'rehearsal'). */
+  rows<T = Row>(sql: string, ...params: (string | number | null)[]): T[];
   ai: StandAi;
   close(): Promise<void>;
 }
@@ -90,11 +100,13 @@ function json(res: ServerResponse, status: number, body: unknown) {
 /** Поднимает стенд на свободном порту (или заданном). dist — собранная оболочка (`npm run build`). */
 export async function startStand(opts: { dist?: string; port?: number } = {}): Promise<Stand> {
   const dist = opts.dist ?? join(process.cwd(), 'dist');
-  const memory = memoryStore();
+  const db = freshDb();
   const ai = standAi();
   // RELEASE_URL задаётся после старта: адрес стенда, который отвечает 404 — страница установки показывает «готовится» без похода на GitHub.
-  const env = { DB: null, AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env & { RELEASE_URL?: string };
-  const app = createApp(E2E_VERSION, () => memory.store);
+  const env = { DB: d1Of(db), AI: ai, APP_NAME: 'Offerly', DEV_ECHO_CODE: '1' } as unknown as Env & { RELEASE_URL?: string };
+  const app = createApp(E2E_VERSION);
+  const rows = <T,>(sql: string, ...params: (string | number | null)[]) =>
+    db.prepare(sql).all(...params).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [camel(k), v]))) as T[];
   const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
   const index = await readFile(join(dist, 'index.html'));
 
@@ -108,7 +120,7 @@ export async function startStand(opts: { dist?: string; port?: number } = {}): P
       }
       if (path === '/__e2e/seed' && req.method === 'POST') {
         const body = JSON.parse((await readBody(req)).toString('utf8') || '{}') as SeedOptions;
-        const result = await seedUser(memory, body);
+        const result = await seedUser(d1AllStores(env), body);
         return json(res, result ? 200 : 404, result ? { ok: true, ...result } : { ok: false, error: 'user_not_found' });
       }
       const ext = extname(path);
@@ -131,7 +143,7 @@ export async function startStand(opts: { dist?: string; port?: number } = {}): P
   const port = (server.address() as AddressInfo).port;
   env.RELEASE_URL = `http://127.0.0.1:${port}/__e2e/no-release.json`;
   return {
-    url: `http://127.0.0.1:${port}`, port, memory, ai,
-    close: () => new Promise<void>((resolve, reject) => server.close(e => (e ? reject(e) : resolve()))),
+    url: `http://127.0.0.1:${port}`, port, db, rows, ai,
+    close: () => new Promise<void>((resolve, reject) => server.close(e => { db.close(); return e ? reject(e) : resolve(); })),
   };
 }

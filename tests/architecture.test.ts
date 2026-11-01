@@ -168,6 +168,13 @@ describe('тесты и версии', () => {
     expect(Number(tsVersion.replace(/^\D*/, '').split('.')[1])).toBeGreaterThanOrEqual(7); // Uint8Array<…> появился в TypeScript 5.7
   });
 
+  it('стенд Playwright работает на настоящем SQL: createApp с хранилищами D1 поверх node:sqlite, memoryStore в e2e не импортируется (с 0.25.12)', () => {
+    const server = readFileSync('e2e/server.ts', 'utf-8');
+    expect(server).toMatch(/from '\.\.\/tests\/helpers\/sqliteD1'/);
+    expect(server).toMatch(/createApp\(E2E_VERSION\)/);
+    for (const f of readdirSync('e2e').filter(f => f.endsWith('.ts'))) expect(readFileSync(`e2e/${f}`, 'utf-8'), `e2e/${f}`).not.toMatch(/memoryStore/);
+  });
+
   it('версия задаётся в package.json: API и Worker читают её через functions/_lib/version.ts, остальное правит release:version', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf-8')).version as string;
     expect(pkg).toMatch(/^\d+\.\d+\.\d+$/);

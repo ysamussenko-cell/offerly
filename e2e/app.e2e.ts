@@ -1,5 +1,5 @@
 /** Ключевые сценарии приложения в настоящем Chromium: вход → резюме → главный экран → занятие → тест → настройки.
- *  Стенд — собранный dist и API в памяти (e2e/server.ts); модель отключена, задания из засеянного банка. */
+ *  Стенд — собранный dist и API на SQLite в памяти (e2e/server.ts); модель отключена, задания из засеянного банка. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World } from './helpers';
 
@@ -12,8 +12,8 @@ describe('вход и первый экран', () => {
     await login(w.page, w.stand.url);
     expect(await text(w.page.locator('.who'))).toBe(EMAIL);
     await heading(w.page, 'Резюме').waitFor();
-    expect(w.stand.memory.users.map(u => u.email)).toEqual([EMAIL]);
-    expect(w.stand.memory.sessions).toHaveLength(1);
+    expect(w.stand.rows('SELECT email FROM users').map(u => u.email)).toEqual([EMAIL]);
+    expect(w.stand.rows('SELECT id FROM sessions')).toHaveLength(1);
   });
 
   it('после разбора резюме и анкеты главный экран собирает карточки', async () => {
@@ -60,7 +60,7 @@ describe('занятие дня', () => {
     expect(await text(w.page.locator('.review .ex-fix'))).toMatch(/the/);
     expect(await text(w.page.locator('.review'))).toMatch(/журнал/);
     await shot(w.page, 'lesson-review');
-    expect(w.stand.memory.steps.filter(s => s.answeredAt)).toHaveLength(2);
+    expect(w.stand.rows('SELECT id FROM lesson_steps WHERE answered_at IS NOT NULL')).toHaveLength(2);
   });
 
   it('«назад» в браузере закрывает занятие и возвращает на главный, где занятие можно продолжить', async () => {
@@ -68,7 +68,7 @@ describe('занятие дня', () => {
     await heading(w.page, 'Готовность к собеседованию').waitFor();
     expect(new URL(w.page.url()).searchParams.get('screen')).toBeNull();
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Продолжить занятие' }).waitFor();
-    expect(w.stand.memory.lessons[0].status).toBe('active');
+    expect(w.stand.rows('SELECT status FROM lessons ORDER BY rowid')[0].status).toBe('active');
   });
 });
 
@@ -83,7 +83,7 @@ describe('тест уровня', () => {
     await w.page.getByRole('button', { name: 'Прервать — продолжу позже' }).click();
     await heading(w.page, 'Готовность к собеседованию').waitFor();
     await card(w.page, 'Тест уровня').getByRole('button', { name: 'Продолжить', exact: true }).waitFor();
-    expect(w.stand.memory.assessments.filter(a => a.kind === 'placement' && a.status === 'active')).toHaveLength(1);
+    expect(w.stand.rows("SELECT id FROM assessments WHERE kind = 'placement' AND status = 'active'")).toHaveLength(1);
     // ключ задания наружу не ушёл
     const body = await (await w.ctx.request.get(`${w.stand.url}/api/assessment`)).text();
     expect(body).not.toMatch(/"answer":"C"/);
@@ -106,7 +106,7 @@ describe('настройки и выход', () => {
   it('выход закрывает сессию и возвращает экран входа', async () => {
     await w.page.getByRole('button', { name: 'Выйти' }).click();
     await heading(w.page, 'Вход').waitFor();
-    expect(w.stand.memory.sessions).toHaveLength(0);
+    expect(w.stand.rows('SELECT id FROM sessions')).toHaveLength(0);
     expect((await w.ctx.request.get(`${w.stand.url}/api/me`)).status()).toBe(401);
   });
 });

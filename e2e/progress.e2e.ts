@@ -1,5 +1,5 @@
 /** Программа, журнал ошибок, достижения и банк заданий в настоящем Chromium — экраны, где ученик видит свой прогресс.
- *  Стенд — собранный dist и API в памяти (e2e/server.ts). Два ученика на одном стенде: первый составляет программу сам
+ *  Стенд — собранный dist и API на SQLite в памяти (e2e/server.ts). Два ученика на одном стенде: первый составляет программу сам
  *  (засев без дня программы), второй проходит занятие дня по засеянному банку — разминку без ошибок, письмо, две карточки
  *  журнала (одна верно, одна неверно) — и видит, как это меняет журнал, достижения и день программы. Банк пополняется
  *  заготовленными ответами модели: генератор пишет три задания, экзаменатор решает каждое вслепую — одно принято,
@@ -18,9 +18,8 @@ let w: World;
 beforeAll(async () => { w = await openWorld(); });
 afterAll(async () => { await closeWorld(w); });
 
-const userId = (email: string) => w.stand.memory.users.find(u => u.email === email)!.id;
-// копии: стенд меняет объекты дней на месте, а сценарий сравнивает «до» и «после»
-const daysOf = (email: string) => w.stand.memory.programDays.filter(d => d.userId === userId(email)).map(d => ({ ...d })).sort((a, b) => a.dayDate.localeCompare(b.dayDate));
+const userId = (email: string): string => w.stand.rows('SELECT id FROM users WHERE email = ?', email)[0].id;
+const daysOf = (email: string) => w.stand.rows('SELECT * FROM program_days WHERE user_id = ? ORDER BY day_date', userId(email));
 const weekday = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
 const label = (topic: string) => PROGRAM_TOPICS.find(t => t.id === topic)!.label;
 const until = async (cond: () => boolean, what: string) => {
@@ -186,7 +185,7 @@ describe('журнал ошибок и достижения', () => {
     await w.page.getByRole('button', { name: 'К итогу' }).click();
 
     await heading(w.page, 'Занятие пройдено · Союзы и инверсия').waitFor();
-    const lesson = w.stand.memory.lessons.find(l => l.userId === userId(EMAIL))!;
+    const [lesson] = w.stand.rows('SELECT * FROM lessons WHERE user_id = ?', userId(EMAIL));
     // бонус предлагается по хешу id занятия — если предложен, отказываемся: он к журналу и достижениям не относится
     if (lesson.bonus === 'offered') {
       await w.page.getByRole('button', { name: 'Не сегодня' }).click();
@@ -205,7 +204,7 @@ describe('журнал ошибок и достижения', () => {
   it('после занятия: журнал переносит карточки по FSRS, неверная вернётся завтра', async () => {
     const today = todayIn(TZ, new Date());
     const tomorrow = todayIn(TZ, new Date(Date.now() + 86_400_000));
-    const cards = w.stand.memory.cards.filter(c => c.userId === userId(EMAIL));
+    const cards = w.stand.rows('SELECT * FROM error_cards WHERE user_id = ?', userId(EMAIL));
     expect(cards).toHaveLength(2);
     const ok = cards.find(c => c.streak === 1)!, bad = cards.find(c => c.lapses === 1)!;
     expect(ok.due! > today).toBe(true);
@@ -228,7 +227,7 @@ describe('журнал ошибок и достижения', () => {
   it('достижения: три открытых с отметкой «новое», растяжка 2 из 3; после показа отметка гаснет', async () => {
     const ac = card(w.page, 'Достижения');
     await ac.locator('li.ach.on').first().waitFor();
-    const rows = w.stand.memory.achievements.filter(a => a.userId === userId(EMAIL));
+    const rows = w.stand.rows('SELECT * FROM achievements WHERE user_id = ?', userId(EMAIL));
     expect(rows.map(r => r.code).sort()).toEqual(['review-clean', 'streak5:conjunctions', 'warmup-perfect']);
     expect(await text(ac)).toContain(`3 из ${ACHIEVEMENTS.length}`);
     expect(await ac.locator('li.ach.on').count()).toBe(3);
@@ -241,7 +240,7 @@ describe('журнал ошибок и достижения', () => {
     await shot(w.page, 'achievements');
 
     // показанное отмечается увиденным — после перезагрузки «новое» не горит
-    await until(() => rows.every(r => w.stand.memory.achievements.find(a => a.userId === r.userId && a.code === r.code)!.seenAt != null), 'отметка увиденным');
+    await until(() => w.stand.rows('SELECT code FROM achievements WHERE user_id = ? AND seen_at IS NULL', userId(EMAIL)).length === 0, 'отметка увиденным');
     await w.page.reload();
     await card(w.page, 'Достижения').locator('li.ach.on').first().waitFor();
     expect(await fresh().count()).toBe(0);
@@ -250,7 +249,7 @@ describe('журнал ошибок и достижения', () => {
 
   it('день программы отмечен пройденным с баллом занятия', async () => {
     const day = daysOf(EMAIL)[0];
-    const lesson = w.stand.memory.lessons.find(l => l.userId === userId(EMAIL))!;
+    const [lesson] = w.stand.rows('SELECT * FROM lessons WHERE user_id = ?', userId(EMAIL));
     expect(day.status).toBe('done');
     expect(day.score).toBe(lesson.score);
     const pc = card(w.page, 'Программа');
@@ -270,21 +269,21 @@ const GENERATED = {
 
 describe('банк заданий', () => {
   const bank = () => card(w.page, 'Банк заданий');
-  const b1mcq = () => w.stand.memory.items.filter(i => i.level === 'B1' && i.kind === 'mcq' && i.status === 'verified').length;
+  const b1mcq = () => w.stand.rows("SELECT id FROM items WHERE level = 'B1' AND kind = 'mcq' AND status = 'verified'").length;
 
   it('сводка по уровням и видам совпадает с банком; без модели пополнение даёт ошибку и ничего не пишет', async () => {
     const bc = bank();
     await bc.locator('table.bank tbody tr').first().waitFor();
     const row = bc.locator('table.bank tbody tr', { has: w.page.locator('th', { hasText: /^B1$/ }) });
     expect(await text(row.locator('td').first())).toBe(String(b1mcq()));
-    const verified = w.stand.memory.items.filter(i => i.status === 'verified').length;
+    const verified = w.stand.rows("SELECT id FROM items WHERE status = 'verified'").length;
     expect(await text(bc)).toMatch(new RegExp(`Принято: ${verified} задани\\S*\\. Отклонено проверкой: 0 заданий\\.`));
 
-    const before = w.stand.memory.items.length;
+    const before = w.stand.rows('SELECT id FROM items').length;
     await bc.getByLabel('Сколько').selectOption('3');
     await bc.getByRole('button', { name: 'Пополнить банк' }).click();
     await bc.getByRole('alert').waitFor();
-    expect(w.stand.memory.items).toHaveLength(before);
+    expect(w.stand.rows('SELECT id FROM items')).toHaveLength(before);
   });
 
   it('пополнение: генератор пишет три задания, экзаменатор решает вслепую — одно принято, одно отклонено, одно не дошло', async () => {
@@ -323,7 +322,7 @@ describe('банк заданий', () => {
   it('«Показать имеющиеся» — задания по уровню, виду и теме с ключами и заметками проверки', async () => {
     const bc = bank();
     await bc.getByRole('button', { name: 'Показать имеющиеся' }).click();
-    const n = w.stand.memory.items.filter(i => i.level === 'B1' && i.kind === 'mcq' && i.topic === 'articles').length;
+    const n = w.stand.rows("SELECT id FROM items WHERE level = 'B1' AND kind = 'mcq' AND topic = 'articles'").length;
     await bc.getByText(new RegExp(`^B1 · Артикли · .+: последние ${n} задани`)).waitFor();
     expect(await bc.locator('ol.items > li').count()).toBe(n);
     expect(await bc.locator('ol.items > li.rejected').count()).toBe(1);

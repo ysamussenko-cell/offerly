@@ -1,5 +1,5 @@
 /** Репетиция интервью и контрольный срез в настоящем Chromium — экраны, где больше всего логики.
- *  Стенд — собранный dist и API в памяти (e2e/server.ts). Модель по умолчанию отключена: сценарий сначала проходит путь
+ *  Стенд — собранный dist и API на SQLite в памяти (e2e/server.ts). Модель по умолчанию отключена: сценарий сначала проходит путь
  *  сбоя (встроенный сценарий интервью, «Разобрать снова», «Оценить письмо снова»), затем кладёт заготовленный ответ
  *  экзаменатора и проверяет разбор. Сервер проверяет заготовку так же, как ответ настоящей модели: фразы и ошибки,
  *  которых нет в тексте ученика, отбрасываются. Сегодня по программе — срез, репетиция идёт вне плана. */
@@ -66,7 +66,7 @@ describe('репетиция интервью', () => {
     expect(await text(turnLabel())).toMatch(/^Вопрос 1 из 5 · /);
     // модель отключена — интервьюер берёт встроенный сценарий, вопрос с экрана совпадает с записанным
     expect(await text(w.page.locator('.hint', { hasText: 'Интервьюер' }))).toMatch(/встроенный сценарий/);
-    const turns = [...w.stand.memory.turns].sort((a, b) => a.position - b.position);
+    const turns = w.stand.rows('SELECT * FROM rehearsal_turns ORDER BY position');
     expect(turns.map(t => t.kind)).toEqual(['experience', 'mistake', 'explain', 'star', 'role']);
     expect(await text(w.page.locator('p.task'))).toBe(turns[0].question);
     expect(turns.every(t => t.rubric.length > 0)).toBe(true);
@@ -75,7 +75,7 @@ describe('репетиция интервью', () => {
     await box.fill('I have fifteen years of experience.');
     await w.page.getByRole('button', { name: 'Ответить', exact: true }).click();
     await w.page.getByRole('alert').waitFor();
-    expect(w.stand.memory.turns.filter(t => t.answeredAt)).toHaveLength(0);
+    expect(w.stand.rows('SELECT id FROM rehearsal_turns WHERE answered_at IS NOT NULL')).toHaveLength(0);
 
     await box.fill(ANSWERS[0]);
     await w.page.getByRole('button', { name: 'Ответить', exact: true }).click();
@@ -114,7 +114,7 @@ describe('репетиция интервью', () => {
     await w.page.getByRole('button', { name: 'Разобрать снова' }).click();
     await heading(w.page, 'Фразы заменить').waitFor();
     expect(w.stand.ai.pending()).toBe(0);
-    const r = w.stand.memory.rehearsals.find(x => x.status === 'finished')!;
+    const [r] = w.stand.rows("SELECT * FROM rehearsals WHERE status = 'finished'");
     expect(r.overall).not.toBeNull();
     expect(await text(w.page.locator('.level-badge'))).toBe(String(r.overall));
     // беглость не оценена: все ответы набраны текстом
@@ -125,9 +125,9 @@ describe('репетиция интервью', () => {
     expect(await text(reps.nth(0).locator('.ex-fix'))).toMatch(/for fifteen years/);
     expect(await text(screen())).not.toMatch(/optimised/);
     expect(await text(screen())).toMatch(/В журнал записано 2 карточки/);
-    expect(w.stand.memory.cards.filter(c => c.source === 'rehearsal').map(c => c.example)).toEqual([REVIEW.replacements[0].original, REVIEW.replacements[1].original]);
+    expect(w.stand.rows("SELECT example FROM error_cards WHERE source = 'rehearsal' ORDER BY rowid").map(c => c.example)).toEqual([REVIEW.replacements[0].original, REVIEW.replacements[1].original]);
     // баллы по вопросам — от экзаменатора
-    expect(w.stand.memory.turns.map(t => t.score).sort()).toEqual([44, 48, 52, 56, 60]);
+    expect(w.stand.rows('SELECT score FROM rehearsal_turns').map(t => t.score).sort()).toEqual([44, 48, 52, 56, 60]);
     await w.page.getByRole('button', { name: 'Показать разговор (5 вопросов)' }).click();
     expect(await w.page.locator('.review.graded').count()).toBe(5);
     await shot(w.page, 'rehearsal-debrief');
@@ -169,8 +169,8 @@ describe('контрольный срез', () => {
       }
       await w.page.getByRole('button', { name: 'Ответить', exact: true }).click();
     }
-    const cp = w.stand.memory.assessments.find(a => a.kind === 'checkpoint')!;
-    const adaptive = w.stand.memory.attempts.filter(a => a.assessmentId === cp.id && a.position <= 8);
+    const [cp] = w.stand.rows("SELECT * FROM assessments WHERE kind = 'checkpoint'");
+    const adaptive = w.stand.rows('SELECT * FROM attempts WHERE assessment_id = ? AND position <= 8 ORDER BY position', cp.id);
     // старт — с уровня исходного среза B1; после неверного ответа уровень опускается
     expect(adaptive[0].level).toBe('B1');
     expect(adaptive[1].level).toBe('A2');
@@ -193,7 +193,7 @@ describe('контрольный срез', () => {
     expect(await text(w.page.getByRole('alert'))).toMatch(/Письмо не оценено/);
     expect(await text(w.page.locator('.facts-list'))).toMatch(/верно 7 из 8/);
     expect(await text(w.page.locator('.facts-list'))).toMatch(/оба вопроса верно/);
-    expect(w.stand.memory.cards.filter(c => c.source === 'assessment')).toHaveLength(1);
+    expect(w.stand.rows("SELECT id FROM error_cards WHERE source = 'assessment'")).toHaveLength(1);
   });
 
   it('письмо оценивается повторно: сравнение с исходным срезом, правка из письма, день программы пройден', async () => {
@@ -206,7 +206,7 @@ describe('контрольный срез', () => {
     expect(call.user).toContain('MODEL ANSWER');
     expect(call.user).toContain(WRITING);
 
-    const cp = w.stand.memory.assessments.find(a => a.kind === 'checkpoint')!;
+    const [cp] = w.stand.rows("SELECT * FROM assessments WHERE kind = 'checkpoint'");
     expect(cp.overall).not.toBeNull();
     expect(cp.scoringNote).toBeNull();
     const page = await text(screen());
@@ -222,11 +222,11 @@ describe('контрольный срез', () => {
     expect(await text(screen().locator('.row .muted').first())).toMatch(/день 1 программы/);
     await shot(w.page, 'checkpoint-result');
 
-    const day = w.stand.memory.programDays.find(d => d.format === 'checkpoint')!;
+    const [day] = w.stand.rows("SELECT * FROM program_days WHERE format = 'checkpoint'");
     expect(day.status).toBe('done');
     expect(day.score).toBe(cp.overall);
     // ошибка письма записана в журнал рядом с ошибкой выбора варианта
-    expect(w.stand.memory.cards.filter(c => c.source === 'assessment')).toHaveLength(2);
+    expect(w.stand.rows("SELECT id FROM error_cards WHERE source = 'assessment'")).toHaveLength(2);
 
     await w.page.getByRole('button', { name: 'На главную' }).click();
     const cc = card(w.page, 'Контрольный срез');
