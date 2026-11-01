@@ -51,7 +51,7 @@ const baseline = (over: Partial<Assessment> = {}): Assessment => ({
   updatedAt: NOW, axes: { grammar: 54, vocabulary: 50, coherence: 54, taskResponse: 53, fluency: null }, overall: 53, scoredAt: NOW, scoringNote: 'срез вне приложения', adaptiveCount: 12, programDayId: null, ...over,
 });
 const day = (over: Partial<ProgramDay> = {}): ProgramDay => ({
-  id: `d${++seq}`, userId: USER, dayDate: TODAY, position: 14, week: 2, format: 'checkpoint', topic: 'mixed', writing: null, reason: 'укороченный тест, сравнение с исходным срезом от 2026-10-29', status: 'planned', minutes: 15, score: null, completedAt: null, generatedAt: '2026-10-31T04:00:00.000Z', updatedAt: null, ...over,
+  id: `d${++seq}`, userId: USER, dayDate: TODAY, position: 14, week: 2, format: 'checkpoint', topic: 'mixed', writing: null, reason: 'укороченный тест, сравнение с исходным срезом от 29 октября 2026', status: 'planned', minutes: 15, score: null, completedAt: null, generatedAt: '2026-10-31T04:00:00.000Z', updatedAt: null, ...over,
 });
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
@@ -82,7 +82,7 @@ describe('план среза и сравнение', () => {
     const up = compare({ level: 'B2', overall: 62, axes: { grammar: 70, vocabulary: 55, coherence: 60, taskResponse: 44, fluency: null } }, prev)!;
     expect(up.level).toEqual({ before: 'B1', after: 'B2', change: 'up' });
     expect(up.overall).toEqual({ before: 53, after: 62, delta: 9 });
-    expect(up.verdict).toMatch(/^Уровень вырос: B1 → B2, сводный балл \+9 к исходному срезу от 2026-10-29/);
+    expect(up.verdict).toMatch(/^Уровень вырос: B1 → B2, сводный балл \+9 к исходному срезу от 29 октября 2026 \(/);
     expect(up.improved).toEqual(['grammar', 'vocabulary', 'coherence']);
     expect(up.declined).toEqual(['taskResponse']);
     expect(up.axes.find(a => a.id === 'fluency')).toMatchObject({ before: null, after: null, delta: null });
@@ -157,7 +157,7 @@ describe('ход среза', () => {
     expect(planned.every(x => x.generatedAt === NOW)).toBe(true);
     expect(mem.programDays.filter(x => x.status === 'done')).toHaveLength(13 + 1);
     const cp28 = planned.find(x => x.position === 28)!;
-    expect(cp28.format).toBe('checkpoint'); expect(cp28.reason).toContain('сравнение с контрольным срезом от 2026-11-13');
+    expect(cp28.format).toBe('checkpoint'); expect(cp28.reason).toContain('сравнение с контрольным срезом от 13 ноября 2026');
 
     // сегодня: срез пройден, следующий — 28-й день; готовность — от нового среза, день в серии
     const t1 = await checkpointToday(mem.store, USER, TZ, o);

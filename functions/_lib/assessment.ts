@@ -20,6 +20,7 @@ import {
 } from './scoring';
 import { createCards, draftFromItem, draftsFromWriting, type CardStore } from './cards';
 import { DomainError } from './errors';
+import { longDateRu } from './dates';
 import type { Attempt } from './types';
 
 export const ADAPTIVE_COUNT = 12;
@@ -281,7 +282,7 @@ export function compare(a: Pick<Assessment, 'axes' | 'overall' | 'level'>, prev:
   });
   const improved = axes.filter(x => x.delta != null && x.delta >= SIGNIFICANT_DELTA).map(x => x.id);
   const declined = axes.filter(x => x.delta != null && x.delta <= -SIGNIFICANT_DELTA).map(x => x.id);
-  const since = prev.finishedAt ? ` от ${prev.finishedAt.slice(0, 10)}` : '';
+  const since = prev.finishedAt ? ` от ${longDateRu(prev.finishedAt)}` : '';
   const vs = `${KIND_LABELS_DAT[prev.kind]}${since}`;
   let verdict: string;
   if (change === 'up') verdict = `Уровень вырос: ${prev.level} → ${a.level}, сводный балл ${signed(delta)} к ${vs} (${prev.overall} → ${a.overall}).`;

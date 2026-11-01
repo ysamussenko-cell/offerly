@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { longDateRu } from '../functions/_lib/dates';
 import {
   parseNotifyAt, localClock, digestState, nextDigest, renderDigest, headlineOf, taskLines, progressLines, collectDigest, buildDigest, runDigest, sendDigestNow,
-  d1DigestStore, longDateRu, weekdayRu, SEND_WINDOW_MINUTES, DEFAULT_NOTIFY_AT, CRON, type DigestData, type DigestEnv,
+  d1DigestStore, weekdayRu, SEND_WINDOW_MINUTES, DEFAULT_NOTIFY_AT, CRON, type DigestData, type DigestEnv,
 } from '../functions/_lib/digest';
 import { d1ProfileStore, type Profile } from '../functions/_lib/profile';
 import { d1Store, type User } from '../functions/_lib/auth';

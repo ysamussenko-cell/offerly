@@ -18,6 +18,7 @@ import { dueForReview, type CardStore } from './cards';
 import { publicDay, type ProgramStore, type PublicDay } from './program';
 import { sendMail, type MailEnv, type SendResult } from './mail';
 import { daysBetween } from './onboarding';
+import { longDateRu } from './dates';
 
 /** Время по умолчанию, когда письмо включают без указания времени. */
 export const DEFAULT_NOTIFY_AT = '07:30';
@@ -98,7 +99,6 @@ export function nextDigest(p: Pick<Profile, 'notifyAt' | 'digestSentOn'>, tz: st
 
 // ---------- текст ----------
 
-const MONTHS_RU = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const WEEKDAYS_LONG_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 export const plural = (n: number, one: string, few: string, many: string) => {
   const abs = Math.abs(n), m10 = abs % 10, m100 = abs % 100;
@@ -109,11 +109,6 @@ export const plural = (n: number, one: string, few: string, many: string) => {
 export const daysText = (n: number) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
 const minutesText = (n: number) => `${n} ${plural(n, 'минута', 'минуты', 'минут')}`;
 const cardsText = (n: number) => `${n} ${plural(n, 'карточка', 'карточки', 'карточек')}`;
-/** «31 октября 2026» и «суббота, 31 октября» из YYYY-MM-DD. */
-export function longDateRu(iso: string, withYear = true): string {
-  const [y, m, d] = iso.split('-').map(Number);
-  return `${d} ${MONTHS_RU[m - 1]}${withYear ? ` ${y}` : ''}`;
-}
 export const weekdayRu = (iso: string) => WEEKDAYS_LONG_RU[new Date(Date.parse(`${iso}T00:00:00Z`)).getUTCDay()];
 
 const firstName = (u: User) => (u.name ?? '').trim().split(/\s+/)[0] || null;

@@ -136,7 +136,7 @@ describe('сборка программы', () => {
     expect(lessons.map(d => d.writing)).toEqual(lessons.map((_, i) => WRITING_FORMATS[i % 2]));
     expect(days.filter(d => d.format !== 'lesson').every(d => d.writing === null)).toBe(true);
     expect(days.every(d => d.reason && d.reason.length > 5)).toBe(true);
-    expect(days.find(d => d.format === 'checkpoint')!.reason).toContain('исходным срезом');
+    expect(days.find(d => d.format === 'checkpoint')!.reason).toBe('укороченный тест, сравнение с исходным срезом от 29 октября 2026');
     expect(days.find(d => d.format === 'checkpoint')!.minutes).toBe(15);
     expect(days.find(d => d.format === 'rehearsal')!.reason).toContain('OpenTrain AI');
     expect(lessons.every(d => d.minutes === 25)).toBe(true);
