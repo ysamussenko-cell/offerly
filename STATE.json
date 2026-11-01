@@ -1,16 +1,16 @@
 {
   "current_task": null,
-  "last_completed": "Постоянно / долг обзора 31.10: подсказки модели репетиции вынесены в functions/_lib/rehearsal-prompts.ts (0.25.18) — тексты без изменений, реэкспорт из rehearsal.ts, правило в tests/architecture.test.ts. Пункты долга обзора 31.10 закрыты; следующий архитектурный обзор — около 07.11.",
+  "last_completed": "Постоянно: сценарий Playwright e2e/notify.e2e.ts (письмо и напоминание — последние карточки главного без сценариев) и исправление «отправлено» на этих карточках, когда день только отмечен (включение на прошедшее время, пропуск, ненастроенная почта, ошибка) — заметка skipped:enabled_after (0.25.19). Следующий архитектурный обзор — около 07.11.",
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "8dba5ef",
-    "run": 41320281861,
-    "version": "0.25.18",
-    "health": "ok:true version 0.25.18 db:ok ai:ok mail:ok push:db — по аннотации health в run 41320281861",
+    "commit": "dc6237e",
+    "run": 41325540369,
+    "version": "0.25.19",
+    "health": "ok:true version 0.25.19 db:ok ai:ok mail:ok push:db — по аннотации health в run 41325540369",
     "seed": "миграций нет",
-    "e2e": "5 файлов, 33 сценария — зелёные (локально и в Actions)",
-    "smoke": "run завершён успешно, rehearsal-маршруты 401 без cookie"
+    "e2e": "6 файлов, 40 сценариев — зелёные (локально и в Actions)",
+    "smoke": "run завершён успешно; digest/push-маршруты 401 без cookie; Worker письма: users 1, states sent:1 (письмо 1.11 ушло), push users 0"
   },
   "defects": [],
   "pending_from_yuriy": [
