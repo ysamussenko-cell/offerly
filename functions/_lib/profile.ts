@@ -28,6 +28,8 @@ export interface Profile {
   /** Ежедневное письмо (4.4): время HH:MM в поясе пользователя, null — выключено; дата последнего письма (в поясе пользователя). */
   notifyAt: string | null;
   digestSentOn: string | null;
+  /** Итог дня письма: sent | sent:manual | skipped:<причина> | error:<текст>; без него «день отмечен» читался как «письмо отправлено». */
+  digestNote?: string | null;
   updatedAt: string;
 }
 
@@ -154,7 +156,7 @@ export function d1ProfileStore(db: D1Database): ProfileStore {
       interviewDate: r.interview_date ?? null, interviewFormat: r.interview_format ?? null,
       minutesPerDay: r.minutes_per_day ?? null, nativeLanguage: r.native_language ?? null, onboardedAt: r.onboarded_at ?? null,
       targetLevel: r.target_level ?? null, weeklyGoalMinutes: r.weekly_goal_minutes == null ? null : Number(r.weekly_goal_minutes),
-      notifyAt: r.notify_at ?? null, digestSentOn: r.digest_sent_on ?? null,
+      notifyAt: r.notify_at ?? null, digestSentOn: r.digest_sent_on ?? null, digestNote: r.digest_note ?? null,
       updatedAt: r.updated_at,
     };
   };

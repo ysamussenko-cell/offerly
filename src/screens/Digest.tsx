@@ -8,7 +8,13 @@ type Props = { refreshKey?: number };
 export function digestStatusText(d: Digest): string {
   if (!d.enabled) return 'Выключено. Включите — и каждое утро в почте будет задание дня и прогресс.';
   const next = d.next ? `следующее ${d.next.date === d.today ? 'сегодня' : longDate(d.next.date)} в ${d.next.time}` : '';
-  if (d.state === 'sent') return `Сегодняшнее письмо отправлено; ${next}.`;
+  if (d.state === 'sent') {
+    if (d.note === 'skipped:enabled_after') return `Письмо включено, когда сегодняшнее время уже прошло; первое — ${next.replace(/^следующее /, '')}.`;
+    if (d.note === 'skipped:late') return `Сегодня окно отправки прошло; ${next}.`;
+    if (d.note === 'skipped:mail_not_configured') return `Сегодня письмо не ушло — почта на сервере не настроена; ${next}.`;
+    if (d.note?.startsWith('error:')) return `Сегодня отправить не удалось (${d.note.slice(6)}); ${next}.`;
+    return `Сегодняшнее письмо отправлено; ${next}.`;
+  }
   if (d.state === 'early') return `Сегодня ещё не отправлялось; ${next} (придёт в течение ${d.stepMinutes} минут после назначенного времени).`;
   if (d.state === 'due') return `Время наступило — письмо уйдёт в ближайшие ${d.stepMinutes} минут.`;
   return `Сегодня окно отправки прошло (${d.windowMinutes / 60} часа после назначенного времени); ${next}.`;

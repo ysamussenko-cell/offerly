@@ -14,7 +14,7 @@
  *  Текст напоминания — из тех же данных, что и письмо (collectDigest): задание дня, карточки к повтору, серия, минуты недели. */
 import type { User } from './auth';
 import type { Profile } from './profile';
-import { collectDigest, digestState, headlineOf, daysText, localClock, SEND_WINDOW_MINUTES, DEFAULT_APP_URL, type ContentStore, type DigestData, type DigestState, type RunOpts } from './digest';
+import { collectDigest, digestState, headlineOf, daysText, localClock, SEND_WINDOW_MINUTES, DEFAULT_APP_URL, ENABLED_AFTER, type ContentStore, type DigestData, type DigestState, type RunOpts } from './digest';
 import { DomainError } from './errors';
 import type { Bytes } from './types';
 
@@ -413,8 +413,9 @@ export function d1PushStore(db: D1Database): PushStore {
     },
     async savePushAt(userId, pushAt, sentOn, nowIso) {
       await db.prepare(
-        `INSERT INTO push_settings (user_id, push_at, sent_on, updated_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO push_settings (user_id, push_at, sent_on, note, updated_at) VALUES (?1, ?2, ?3, CASE WHEN ?3 IS NULL THEN NULL ELSE '${ENABLED_AFTER}' END, ?4)
          ON CONFLICT(user_id) DO UPDATE SET push_at = excluded.push_at,
+         note = CASE WHEN excluded.sent_on IS NULL OR excluded.sent_on = push_settings.sent_on THEN push_settings.note ELSE excluded.note END,
          sent_on = CASE WHEN excluded.sent_on IS NULL THEN push_settings.sent_on ELSE excluded.sent_on END, updated_at = excluded.updated_at`,
       ).bind(userId, pushAt, sentOn, nowIso).run();
     },

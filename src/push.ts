@@ -68,6 +68,7 @@ export function pushStatusText(d: Push): string {
   if (!d.enabled) return d.subscriptions.length ? 'Выключено: устройства подписаны, но напоминание не приходит. Включите время — и оно вернётся.' : 'Выключено. Включите — и раз в день, к назначенному времени, придёт короткое напоминание с заданием дня.';
   const next = d.next ? `следующее ${d.next.date === d.today ? 'сегодня' : longDate(d.next.date)} в ${d.next.time}` : '';
   if (d.state === 'sent') {
+    if (d.note === 'skipped:enabled_after') return `Напоминание включено, когда сегодняшнее время уже прошло; первое — ${next.replace(/^следующее /, '')}.`;
     if (d.note === 'skipped:done') return `Сегодня напоминание не понадобилось — занятие уже было пройдено; ${next}.`;
     if (d.note === 'skipped:no_subscriptions') return `Сегодня слать было некуда — устройств не было; ${next}.`;
     if (d.note?.startsWith('error:')) return `Сегодня доставить не удалось (${d.note.slice(6)}); ${next}.`;

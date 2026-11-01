@@ -44,7 +44,7 @@ describe('sqliteD1', () => {
     await putAssessment(a);
     expect(await store.latestAssessment('u1')).toEqual(a);
     const p = { userId: 'u1', specialty: 'инженер', industry: 'энергетика', years: 15, targetRole: 'OpenTrain AI', keywords: ['boiler', 'energy audit'], summary: 's', resumeText: null, resumeName: null, resumeAt: null,
-      interviewDate: '2026-12-02', interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: at, targetLevel: 'C1', weeklyGoalMinutes: 90, notifyAt: '07:30', digestSentOn: null, updatedAt: at };
+      interviewDate: '2026-12-02', interviewFormat: 'ai', minutesPerDay: 25, nativeLanguage: 'русский', onboardedAt: at, targetLevel: 'C1', weeklyGoalMinutes: 90, notifyAt: '07:30', digestSentOn: '2026-10-29', digestNote: 'sent', updatedAt: at };
     putProfile(p);
     expect(await store.getProfile('u1')).toEqual(p);
   });

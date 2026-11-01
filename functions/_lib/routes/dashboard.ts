@@ -36,7 +36,7 @@ export function dashboardRoutes() {
     const s = digestState({ notifyAt: p?.notifyAt ?? null, digestSentOn: p?.digestSentOn ?? null }, user.tz, now);
     const out: Record<string, unknown> = {
       ok: true, ...digestMeta, notifyAt: p?.notifyAt ?? null, enabled: s.state !== 'off', tz: user.tz, localTime: s.time, today: s.date, state: s.state,
-      sentOn: p?.digestSentOn ?? null, next: nextDigest({ notifyAt: p?.notifyAt ?? null, digestSentOn: p?.digestSentOn ?? null }, user.tz, now),
+      sentOn: p?.digestSentOn ?? null, note: p?.digestNote ?? null, next: nextDigest({ notifyAt: p?.notifyAt ?? null, digestSentOn: p?.digestSentOn ?? null }, user.tz, now),
       mail: c.env.RESEND_API_KEY ? 'ok' : 'missing',
     };
     if (preview) {

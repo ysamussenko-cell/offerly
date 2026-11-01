@@ -4,7 +4,7 @@ import {
   buildReminder, pushToUser, sendPushNow, runPush, parseSubscribeBody, deviceLabel, publicSubscription, sentOnIfPassed, d1PushStore, PushError,
   PUSH_TTL_SECONDS, VAPID_TTL_SECONDS, RECORD_SIZE, PUSH_TOPIC, VAPID_SETTING_KEY, type PushEnv, type PushSubscription,
 } from '../functions/_lib/push';
-import { collectDigest, type DigestData } from '../functions/_lib/digest';
+import { collectDigest, ENABLED_AFTER, type DigestData } from '../functions/_lib/digest';
 import type { Profile } from '../functions/_lib/profile';
 import type { User } from '../functions/_lib/auth';
 import type { Assessment } from '../functions/_lib/assessment';
@@ -490,6 +490,13 @@ describe('D1 и Worker', () => {
     expect(await store.getPushSetting('u1')).toMatchObject({ pushAt: '08:00', sentOn: '2026-11-13' });
     await store.savePushAt('u1', null, null, '2026-11-13T11:00:00.000Z');
     expect((await store.listPushUsers()).map(x => x.user.id)).toEqual(['u2']);
+    // день, отмеченный при включении, — skipped:enabled_after; отметку уже прошедшего дня включение не переписывает
+    expect(await store.getPushSetting('u2')).toMatchObject({ sentOn: '2026-11-12', note: ENABLED_AFTER });
+    await store.markPush('u2', '2026-11-13', '2026-11-13T04:00:00.000Z', 'sent', '2026-11-13T04:00:00.000Z');
+    await store.savePushAt('u2', '07:00', '2026-11-13', '2026-11-13T05:00:00.000Z');
+    expect(await store.getPushSetting('u2')).toMatchObject({ pushAt: '07:00', sentOn: '2026-11-13', note: 'sent' });
+    await store.savePushAt('u2', '07:00', '2026-11-14', '2026-11-14T05:00:00.000Z');
+    expect(await store.getPushSetting('u2')).toMatchObject({ sentOn: '2026-11-14', note: ENABLED_AFTER });
     // app_settings: первая запись побеждает
     expect(await store.getSetting('vapid')).toBeNull();
     expect(await store.initSetting('vapid', 'first', '2026-11-12T00:00:00.000Z')).toBe('first');

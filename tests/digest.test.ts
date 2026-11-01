@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { longDateRu } from '../functions/_lib/dates';
 import {
   parseNotifyAt, localClock, digestState, nextDigest, renderDigest, headlineOf, taskLines, progressLines, collectDigest, buildDigest, runDigest, sendDigestNow,
-  d1DigestStore, weekdayRu, SEND_WINDOW_MINUTES, DEFAULT_NOTIFY_AT, CRON, type DigestData, type DigestEnv,
+  d1DigestStore, weekdayRu, SEND_WINDOW_MINUTES, DEFAULT_NOTIFY_AT, CRON, ENABLED_AFTER, type DigestData, type DigestEnv,
 } from '../functions/_lib/digest';
 import { d1ProfileStore, type Profile } from '../functions/_lib/profile';
 import { d1Store, type User } from '../functions/_lib/auth';
@@ -246,7 +246,7 @@ describe('API', () => {
     const g = await call('/digest', { headers: { cookie } });
     expect(g.status).toBe(200);
     const j: any = await g.json();
-    expect(j).toMatchObject({ ok: true, enabled: false, notifyAt: null, state: 'off', next: null, defaultAt: '07:30', stepMinutes: 15, mail: 'missing' });
+    expect(j).toMatchObject({ ok: true, enabled: false, notifyAt: null, state: 'off', note: null, next: null, defaultAt: '07:30', stepMinutes: 15, mail: 'missing' });
     expect(j.preview.subject).toMatch(/^Offerly, \d+ \S+: программы ещё нет$/);
     expect(j.preview.text).toContain('Карточек к повтору сегодня нет.');
     const bad = await call('/digest', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ notifyAt: '25:00' }) });
@@ -267,7 +267,7 @@ describe('API', () => {
     if (clock.minutes - 5 >= 0) {
       const re = await call('/digest', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ notifyAt: behind }) });
       const k2: any = await re.json();
-      expect(k2).toMatchObject({ ok: true, enabled: true, notifyAt: behind, state: 'sent', sentOn: clock.date });
+      expect(k2).toMatchObject({ ok: true, enabled: true, notifyAt: behind, state: 'sent', sentOn: clock.date, note: ENABLED_AFTER });
       expect(k2.next.time).toBe(behind);
       expect(k2.next.date > clock.date).toBe(true);
     }
@@ -329,6 +329,27 @@ describe('D1 и Worker', () => {
     expect((await profiles.getProfile('u1'))).toMatchObject({ notifyAt: '08:00', digestSentOn: '2026-11-13' });
     await store.saveNotifyAt('u1', null, null, '2026-11-13T11:00:00.000Z');
     expect((await store.listDigestUsers()).map(x => x.user.id)).toEqual(['u2']);
+  });
+  it('день, отмеченный при включении, — заметка skipped:enabled_after, а не «отправлено»; отметку уже прошедшего дня включение не переписывает', async () => {
+    const db = freshDb();
+    db.exec(`INSERT INTO users (id, email, tz) VALUES ('u1', 'y@example.com', 'Asia/Almaty'), ('u2', 'z@example.com', 'Asia/Almaty')`);
+    const d1 = d1Of(db);
+    const store = d1DigestStore(d1), profiles = d1ProfileStore(d1);
+    const note = (id: string) => (db.prepare('SELECT digest_sent_on AS sentOn, digest_note AS note FROM profiles WHERE user_id = ?').get(id) as any);
+    // профиля ещё нет: вставка сразу с заметкой
+    await store.saveNotifyAt('u1', '07:00', '2026-11-12', '2026-11-12T05:00:00.000Z');
+    expect({ ...note('u1') }).toEqual({ sentOn: '2026-11-12', note: ENABLED_AFTER });
+    expect((await profiles.getProfile('u1'))?.digestNote).toBe(ENABLED_AFTER);
+    // сегодня письмо уже ушло — перестановка на прошедшее время не превращает «отправлено» в «включено поздно»
+    await store.markDigest('u2', '2026-11-12', '2026-11-12T02:45:00.000Z', 'sent', '2026-11-12T02:45:00.000Z');
+    await store.saveNotifyAt('u2', '07:00', '2026-11-12', '2026-11-12T05:00:00.000Z');
+    expect({ ...note('u2') }).toEqual({ sentOn: '2026-11-12', note: 'sent' });
+    // назавтра прошедшее время ставится заново — новая отметка дня, новая заметка; перестановка на будущее заметку не трогает
+    await store.saveNotifyAt('u2', '07:00', '2026-11-13', '2026-11-13T05:00:00.000Z');
+    expect({ ...note('u2') }).toEqual({ sentOn: '2026-11-13', note: ENABLED_AFTER });
+    await store.saveNotifyAt('u2', '23:00', null, '2026-11-13T05:00:00.000Z');
+    expect({ ...note('u2') }).toEqual({ sentOn: '2026-11-13', note: ENABLED_AFTER });
+    expect((await store.listDigestUsers()).find(x => x.user.id === 'u2')?.profile.digestNote).toBe(ENABLED_AFTER);
   });
   it('Worker на seed первого пользователя: в 07:50 Алматы письмо Юрию уходит через Resend по настоящему SQL, статус без адресов', async () => {
     const db = freshDb();

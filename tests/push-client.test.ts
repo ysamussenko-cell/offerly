@@ -49,6 +49,7 @@ describe('строка состояния напоминания', () => {
     expect(pushStatusText(view())).toBe('Сегодняшнее напоминание отправлено; следующее 13 ноября 2026 г. в 07:41.');
     expect(pushStatusText(view({ note: 'sent:1/2' }))).toMatch(/^Сегодняшнее напоминание отправлено/);
     expect(pushStatusText(view({ note: 'skipped:done' }))).toMatch(/занятие уже было пройдено/);
+    expect(pushStatusText(view({ note: 'skipped:enabled_after' }))).toBe('Напоминание включено, когда сегодняшнее время уже прошло; первое — 13 ноября 2026 г. в 07:41.');
     expect(pushStatusText(view({ note: 'skipped:no_subscriptions' }))).toMatch(/устройств не было/);
     expect(pushStatusText(view({ note: 'skipped:late' }))).toMatch(/окно отправки прошло/);
     expect(pushStatusText(view({ note: 'error:410 gone' }))).toMatch(/доставить не удалось \(410 gone\)/);

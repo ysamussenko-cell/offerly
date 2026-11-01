@@ -160,6 +160,8 @@ export type DigestState = 'off' | 'sent' | 'early' | 'due' | 'late';
 export type Digest = {
   ok: true; defaultAt: string; windowMinutes: number; stepMinutes: number;
   notifyAt: string | null; enabled: boolean; tz: string; localTime: string; today: string; state: DigestState; sentOn: string | null;
+  /** Итог отмеченного дня: sent | sent:manual | skipped:<причина> | error:<текст>; null — старые записи (считаются отправкой). */
+  note: string | null;
   next: { date: string; time: string } | null; mail: 'ok' | 'missing';
   preview?: { subject: string; text: string; headline: string; dueCards: number };
 };

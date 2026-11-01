@@ -25,6 +25,8 @@ export const DEFAULT_NOTIFY_AT = '07:30';
 export const SEND_WINDOW_MINUTES = 180;
 /** Шаг расписания Worker — письмо приходит не позже чем через столько минут после назначенного времени. */
 export const CRON_STEP_MINUTES = 15;
+/** Заметка дня, отмеченного при включении: назначенное время сегодня уже прошло, первое письмо (напоминание) — завтра. Не «отправлено». */
+export const ENABLED_AFTER = 'skipped:enabled_after';
 export const CRON = `*/${CRON_STEP_MINUTES} * * * *`;
 export const DEFAULT_APP_URL = 'https://offerly-c8b.pages.dev';
 
@@ -308,15 +310,16 @@ export function d1DigestStore(db: D1Database): DigestStore {
           interviewDate: r.interview_date ?? null, interviewFormat: r.interview_format ?? null, minutesPerDay: r.minutes_per_day ?? null,
           nativeLanguage: r.native_language ?? null, onboardedAt: r.onboarded_at ?? null, targetLevel: r.target_level ?? null,
           weeklyGoalMinutes: r.weekly_goal_minutes == null ? null : Number(r.weekly_goal_minutes),
-          notifyAt: r.notify_at ?? null, digestSentOn: r.digest_sent_on ?? null, updatedAt: r.updated_at,
+          notifyAt: r.notify_at ?? null, digestSentOn: r.digest_sent_on ?? null, digestNote: r.digest_note ?? null, updatedAt: r.updated_at,
         };
         return { user, profile };
       });
     },
     async saveNotifyAt(userId, notifyAt, sentOn, nowIso) {
       await db.prepare(
-        `INSERT INTO profiles (user_id, notify_at, digest_sent_on, updated_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO profiles (user_id, notify_at, digest_sent_on, digest_note, updated_at) VALUES (?1, ?2, ?3, CASE WHEN ?3 IS NULL THEN NULL ELSE '${ENABLED_AFTER}' END, ?4)
          ON CONFLICT(user_id) DO UPDATE SET notify_at = excluded.notify_at,
+         digest_note = CASE WHEN excluded.digest_sent_on IS NULL OR excluded.digest_sent_on = profiles.digest_sent_on THEN profiles.digest_note ELSE excluded.digest_note END,
          digest_sent_on = CASE WHEN excluded.digest_sent_on IS NULL THEN profiles.digest_sent_on ELSE excluded.digest_sent_on END,
          updated_at = excluded.updated_at`,
       ).bind(userId, notifyAt, sentOn, nowIso).run();
