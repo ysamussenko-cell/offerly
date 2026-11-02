@@ -3,7 +3,7 @@ import { api, type AssessmentMode as Mode, type Health, type Profile, type User 
 import Login from './screens/Login';
 import { InstallButton } from './install';
 import { ThemeSwitch } from './ThemeSwitch';
-import { OFFLINE_NOTICE, useOnline } from './offline';
+import { isUnreachable, OFFLINE_NOTICE, SESSION_UNREACHABLE, useOnline } from './offline';
 import Resume, { ProfileCard } from './screens/Resume';
 import Questionnaire, { AnswersCard } from './screens/Questionnaire';
 import { BankCard } from './screens/Bank';
@@ -23,7 +23,7 @@ import { INSTALL_PATH, screenFor } from './installPage';
 import { isDesktop, startDesktopReminder } from './desktop';
 import { createScreenHistory, parseScreen, type ScreenName } from './nav';
 
-type Auth = { state: 'loading' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
+type Auth = { state: 'loading' } | { state: 'unreachable' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
 /** Открытый экран поверх главного: занятие, репетиция, тест уровня или срез (с режимом), настройки. */
 type Screen = { name: 'lesson' } | { name: 'rehearsal' } | { name: 'settings' } | { name: 'test' | 'checkpoint'; mode: Mode };
@@ -66,10 +66,19 @@ function Shell() {
     return () => window.removeEventListener('popstate', onPop);
   }, [nav, screen]);
 
+  // Без связи ответа «не вошли» не было: форма входа здесь обманула бы вошедшего ученика.
+  function checkSession() {
+    setAuth({ state: 'loading' });
+    api.me().then(r => setAuth({ state: 'in', user: r.user, isNew: false })).catch(e => setAuth({ state: isUnreachable(e) ? 'unreachable' : 'anonymous' }));
+  }
+
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ ok: false, version: '-', db: 'error', ai: 'error' }));
-    api.me().then(r => setAuth({ state: 'in', user: r.user, isNew: false })).catch(() => setAuth({ state: 'anonymous' }));
+    checkSession();
   }, []);
+
+  // Сеть вернулась, а сессия ещё не проверена — проверить без перезагрузки.
+  useEffect(() => { if (online && auth.state === 'unreachable') checkSession(); }, [online]);
 
   useEffect(() => {
     if (auth.state !== 'in') { setProfile({ state: 'loading' }); setReplacing(false); setSurvey('auto'); setScreen(null); nav.leave(); return; }
@@ -127,6 +136,14 @@ function Shell() {
       {!online && <p className="offline" role="status">{OFFLINE_NOTICE}</p>}
 
       {auth.state === 'loading' && <section className="card"><p className="muted">Проверяю сессию…</p></section>}
+
+      {auth.state === 'unreachable' && (
+        <section className="card" style={{ marginBottom: 16 }}>
+          <h2>Нет связи</h2>
+          <p className="muted">{SESSION_UNREACHABLE}</p>
+          <button className="btn" onClick={checkSession}>Проверить снова</button>
+        </section>
+      )}
 
       {auth.state === 'anonymous' && (
         <>

@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 
+export const SESSION_UNREACHABLE = 'Нет связи с сервером, поэтому вход не проверить. Занятия и ответы хранятся на сервере — подключитесь, и экран откроется сам.';
+
 export const OFFLINE_NOTICE = 'Нет сети. Экраны открываются из кэша, но ответы и проверка не отправятся — подключитесь и повторите.';
+
+/** Запрос не дошёл до сервера (статус 0, см. networkFailure в api.ts): нельзя считать это ответом «не вошли». */
+export const isUnreachable = (e: unknown): boolean => (e as { status?: unknown } | null | undefined)?.status === 0;
 
 /** Есть ли сеть, по navigator.onLine и событиям online/offline. */
 export function useOnline(): boolean {
