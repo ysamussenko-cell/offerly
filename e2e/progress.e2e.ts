@@ -45,7 +45,8 @@ describe('программа', () => {
     expect(rehearsals).toHaveLength(4);
     // репетиция — в воскресенье; если воскресенье занято срезом, то в субботу накануне
     for (const r of rehearsals) expect(weekday(r.dayDate) === 0 || days.find(d => d.position === r.position + 1)?.format === 'checkpoint').toBe(true);
-    for (const d of days.filter(x => x.topic === MIXED_TOPIC.id)) expect(weekday(d.dayDate)).toBe(6);
+    // смешанное занятие — по субботам; у срезов тема тоже mixed, но они могут выпасть на воскресенье (программа с понедельника), поэтому только занятия
+    for (const d of days.filter(x => x.format === 'lesson' && x.topic === MIXED_TOPIC.id)) expect(weekday(d.dayDate)).toBe(6);
     // письмо чередуется по дням занятий
     const writings = days.filter(d => d.format === 'lesson').map(d => d.writing);
     expect(writings.every((x, i) => x === (i % 2 ? 'explain' : 'review'))).toBe(true);
