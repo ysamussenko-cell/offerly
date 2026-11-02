@@ -18,6 +18,7 @@ import { d1SpeechStore } from './voice';
 import { d1DigestStore } from './digest';
 import { d1PushStore } from './push';
 import { d1SettingsStore } from './settings';
+import { countingAi, d1UsageStore, usagePath } from './usage';
 import { DomainError } from './errors';
 import { type ApiEnv, type Env, type Store } from './routes/context';
 import { systemRoutes } from './routes/system';
@@ -36,7 +37,7 @@ export type { Env, Store } from './routes/context';
 export const d1AllStores = (env: Env): Store => ({
   ...d1Store(env.DB), ...d1ProfileStore(env.DB), ...d1OnboardingStore(env.DB), ...d1ItemStore(env.DB), ...d1AssessmentStore(env.DB), ...d1CardStore(env.DB),
   ...d1ProgramStore(env.DB), ...d1LessonStore(env.DB), ...d1DashboardStore(env.DB), ...d1AchievementStore(env.DB), ...d1RehearsalStore(env.DB),
-  ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB), ...d1PushStore(env.DB), ...d1SettingsStore(env.DB),
+  ...d1SpeechStore(env.DB), ...d1DigestStore(env.DB), ...d1PushStore(env.DB), ...d1SettingsStore(env.DB), ...d1UsageStore(env.DB),
 });
 
 /** Тело ответа на ошибку, не относящуюся к предметной области: без стека и внутренних подробностей наружу. */
@@ -47,7 +48,9 @@ export function createApp(version: string, makeStore: (env: Env) => Store = d1Al
   const app = new Hono<ApiEnv>().basePath('/api');
 
   app.use('*', async (c, next) => {
-    c.set('store', makeStore(c.env));
+    const store = makeStore(c.env);
+    c.set('store', store);
+    if (c.env.AI) c.env = { ...c.env, AI: countingAi(c.env.AI, usagePath(c.req.path), store) };
     c.set('auth', null);
     await next();
   });

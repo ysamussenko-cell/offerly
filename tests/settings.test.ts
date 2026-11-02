@@ -293,7 +293,7 @@ describe('маршруты /api/settings и /api/export', () => {
     expect(j.provider.key).toMatchObject({ provider: 'groq', short: 'Groq', hint: '…6789', readable: true, custom: false, checkedAt: null });
     expect(JSON.stringify(j)).not.toContain('gsk_0123456789');
     expect(mem.rows('SELECT key_enc FROM provider_keys WHERE user_id = ?', uid)[0].keyEnc).toMatch(/^v1\./);
-    // /ai/ping без провайдера в теле → встроенная; а защищённый маршрут с моделью (разбор резюме) пойдёт через Groq
+    // Защищённый маршрут с моделью (разбор резюме) пойдёт через Groq
     const fetchMock = vi.fn(async () => openaiReply(JSON.stringify({ specialty: 'инженер', industry: 'энергетика', years: 15, target_role: null, keywords: ['boiler'], summary: 'Вы инженер.' })));
     vi.stubGlobal('fetch', fetchMock);
     const res = await json('/resume', 'POST', { text: 'Thermal power engineer with fifteen years of experience in boilers, turbines and energy audits of district heating plants and industrial sites across Kazakhstan. '.repeat(3) });

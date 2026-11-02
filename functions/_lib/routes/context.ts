@@ -21,6 +21,7 @@ import type { DigestStore } from '../digest';
 import type { PushEnv, PushStore } from '../push';
 import { userProvider, type SettingsEnv, type SettingsStore } from '../settings';
 import type { ReleaseEnv } from '../release';
+import type { UsageStore } from '../usage';
 
 export interface Env extends ProviderEnv, MailEnv, PushEnv, SettingsEnv, ReleaseEnv {
   /** Адрес приложения для ссылок в письмах; без него — адрес по умолчанию из digest.ts. */
@@ -29,7 +30,7 @@ export interface Env extends ProviderEnv, MailEnv, PushEnv, SettingsEnv, Release
   DEV_ECHO_CODE?: string;
 }
 
-export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore & SettingsStore;
+export type Store = AuthStore & ProfileStore & OnboardingStore & ItemStore & AssessmentStore & CardStore & ProgramStore & LessonStore & DashboardStore & AchievementStore & RehearsalStore & SpeechStore & DigestStore & PushStore & SettingsStore & UsageStore;
 
 export type Auth = { user: User; sessionId: string };
 export type Vars = { store: Store; auth: Auth | null };

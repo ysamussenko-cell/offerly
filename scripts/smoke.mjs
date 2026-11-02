@@ -74,6 +74,9 @@ async function deepCheck(ctx) {
   if (h.extract !== 'ok') out.push({ level: 'error', title: 'extract', message: `самопроверка извлечения не прошла (код ${r.status})` });
   if (h.ai_chat !== 'ok') out.push({ level: 'warning', title: 'ai_chat', message: String(h.ai_chat) });
   if (!String(h.analysis).startsWith('ok')) out.push({ level: 'warning', title: 'analysis', message: String(h.analysis) });
+  if (h.ai_usage) out.push({ level: 'notice', title: 'ai_usage', message: `сегодня (UTC): ${JSON.stringify(h.ai_usage).slice(0, 700)}; самопроверка из кэша: ${h.deep_cached_at ?? 'нет'}` });
+  const ping = await status(ctx, '/api/ai/ping', post({ prompt: 'ok' }));
+  if (ping === 200) out.push({ level: 'error', title: 'ai_ping', message: 'POST /api/ai/ping отвечает без входа: модель открыта наружу' });
   return out;
 }
 

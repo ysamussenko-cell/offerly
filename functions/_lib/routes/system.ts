@@ -1,11 +1,26 @@
-/** Открытые служебные маршруты: состояние сервиса, релиз для страницы установки, список провайдеров, проба модели. */
+/** Открытые служебные маршруты: состояние сервиса, релиз для страницы установки, список провайдеров. */
 import { chat, PROVIDERS } from '../providers';
 import { selfTestExtract } from '../extract';
 import { analyzeResume, SELF_TEST_RESUME } from '../profile';
 import { selfTestVoice } from '../voice';
 import { VAPID_SETTING_KEY } from '../push';
 import { fetchRelease, CACHE_SECONDS as RELEASE_CACHE_SECONDS } from '../release';
-import { area, bodyOf } from './context';
+import { DEEP_CHECK_TTL_MS, type DeepResult } from '../usage';
+import { area, type Env } from './context';
+
+/** Вызовы модели самопроверки: ловят лимиты, имя модели, формат ответа; голос — MeloTTS озвучивает фразу, Whisper её распознаёт. */
+async function deepModelCheck(env: Env): Promise<DeepResult> {
+  let ai_chat: string, analysis: string;
+  try {
+    const reply = await chat(env, [{ role: 'user', content: 'Reply with the single word: ok' }], { maxTokens: 8 });
+    ai_chat = reply.trim() ? 'ok' : 'error: empty reply';
+  } catch (e) { ai_chat = `error: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`; }
+  try {
+    const a = await analyzeResume(env, SELF_TEST_RESUME);
+    analysis = `ok: ${a.specialty} / ${a.industry} / ${a.years} лет / ${a.keywords.length} терминов`;
+  } catch (e) { analysis = `error: ${String(e instanceof Error ? e.message : e).slice(0, 400)}`; }
+  return { ai_chat, analysis, voice: await selfTestVoice(env) };
+}
 
 export function systemRoutes(version: string) {
   const r = area();
@@ -21,22 +36,26 @@ export function systemRoutes(version: string) {
     let push: 'env' | 'db' | 'pending' | 'error' = c.env.VAPID_PRIVATE_KEY ? 'env' : 'pending';
     if (push === 'pending' && db === 'ok') { try { push = (await c.get('store').getSetting(VAPID_SETTING_KEY)) ? 'db' : 'pending'; } catch { push = 'error'; } }
     const out: Record<string, unknown> = { ok: db === 'ok' && ai === 'ok', version, db, ai, mail: c.env.RESEND_API_KEY ? 'ok' : 'missing', push };
-    // ?deep=1 — прогон извлечения текста на крошечных встроенных PDF и DOCX: проверяет, что pdf.js и zip работают в этой среде.
-    if (c.req.query('deep') === '1' || c.req.query('deep') === '2') {
-      out.extract = await selfTestExtract();
-      // и один короткий вызов встроенной модели — ловит ошибки Workers AI (лимиты, имя модели, формат ответа)
+    // ?deep=1 — прогон извлечения текста на крошечных встроенных PDF и DOCX: проверяет, что pdf.js и zip работают в этой среде. Модель не вызывается.
+    if (c.req.query('deep') === '1' || c.req.query('deep') === '2') out.extract = await selfTestExtract();
+    // ?deep=2 — ещё и модель: чат, разбор тестового резюме, голос. Маршрут открыт без входа, поэтому модель зовём
+    // не чаще раза в полчаса на версию (usage.ts), остальным — последний итог с пометкой времени.
+    if (c.req.query('deep') === '2') {
+      const store = c.get('store');
+      const now = new Date();
+      const nowIso = now.toISOString();
       try {
-        const reply = await chat(c.env, [{ role: 'user', content: 'Reply with the single word: ok' }], { maxTokens: 8 });
-        out.ai_chat = reply.trim() ? 'ok' : 'error: empty reply';
-      } catch (e) { out.ai_chat = `error: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`; }
-      // ?deep=2 — полный разбор встроенного тестового резюме моделью: воспроизводит путь «резюме → профиль» в проде.
-      if (c.req.query('deep') === '2') {
-        try {
-          const a = await analyzeResume(c.env, SELF_TEST_RESUME);
-          out.analysis = `ok: ${a.specialty} / ${a.industry} / ${a.years} лет / ${a.keywords.length} терминов`;
-        } catch (e) { out.analysis = `error: ${String(e instanceof Error ? e.message : e).slice(0, 400)}`; }
-        // голосовой контур: MeloTTS озвучивает фразу, Whisper её распознаёт — проверка обеих моделей без записи с микрофона
-        out.voice = await selfTestVoice(c.env);
+        if (await store.claimDeepCheck(version, nowIso, new Date(now.getTime() - DEEP_CHECK_TTL_MS).toISOString())) {
+          const result = await deepModelCheck(c.env);
+          await store.saveDeepCheck({ version, at: nowIso, result });
+          Object.assign(out, result);
+        } else {
+          const last = await store.lastDeepCheck();
+          Object.assign(out, last?.result ?? { ai_chat: 'pending', analysis: 'pending', voice: 'pending' }, { deep_cached_at: last?.at ?? null });
+        }
+        out.ai_usage = await store.aiUsage(nowIso.slice(0, 10));
+      } catch (e) {
+        out.ai_chat = `error: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`;
       }
     }
     return c.json(out);
@@ -49,15 +68,6 @@ export function systemRoutes(version: string) {
   });
 
   r.get('/providers', (c) => c.json(PROVIDERS.map(({ id, name, short, keyUrl, defaultModel, free }) => ({ id, name, short, keyUrl, defaultModel, free }))));
-
-  r.post('/ai/ping', async (c) => {
-    const body = await bodyOf(c);
-    const text = await chat(c.env, [
-      { role: 'system', content: 'You are an English coach. Answer in one short sentence.' },
-      { role: 'user', content: body.prompt ?? 'Say hello to a thermal power engineer preparing for an interview.' },
-    ], { provider: body.provider, apiKey: body.apiKey, model: body.model, maxTokens: 120 });
-    return c.json({ text });
-  });
 
   return r;
 }

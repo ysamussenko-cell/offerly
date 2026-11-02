@@ -49,7 +49,7 @@ describe('scripts/smoke.mjs', () => {
     expect(lines.every(l => /^::(notice|warning|error) title=[\w ]+::[^\n]*$/.test(l))).toBe(true);
     const titles = res.annotations.filter(a => a.level === 'notice').map(a => a.title);
     expect(titles).toEqual(['health', 'auth', 'resume', 'onboarding', 'items', 'assessment', 'cards', 'program', 'lesson', 'achievements', 'dashboard',
-      'extract', 'pwa', 'rehearsal', 'voice', 'checkpoint', 'digest', 'push', 'settings', 'install']);
+      'extract', 'ai_usage', 'pwa', 'rehearsal', 'voice', 'checkpoint', 'digest', 'push', 'settings', 'install']);
     const msg = (t: string) => res.annotations.find(a => a.title === t && a.level === 'notice')!.message;
     expect(msg('auth')).toContain('POST /api/auth/request с плохим адресом → 400');
     expect(msg('items')).toMatch(/^GET \/api\/items\/topics → 200 \(\d+ тем/);
