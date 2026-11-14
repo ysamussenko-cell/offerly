@@ -4,7 +4,7 @@
  *  экзаменатора и проверяет разбор. Сервер проверяет заготовку так же, как ответ настоящей модели: фразы и ошибки,
  *  которых нет в тексте ученика, отбрасываются. Сегодня по программе — срез, репетиция идёт вне плана. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { openWorld, closeWorld, login, seed, text, heading, card, shot, type World } from './helpers';
+import { openWorld, closeWorld, login, seed, text, heading, card, shot, type World, openCard } from './helpers';
 
 let w: World;
 beforeAll(async () => {
@@ -57,6 +57,7 @@ const turnLabel = (n: number) => w.page.locator(`.card .progress[aria-label="В�
 
 describe('репетиция интервью', () => {
   it('вне плана: встроенный сценарий из пяти вопросов, короткий ответ не принимается одной строкой, «Выйти» сохраняет прогресс', async () => {
+    await openCard(w.page, w.stand.url, 'Репетиция интервью');
     const rc = card(w.page, 'Репетиция интервью');
     await rc.getByRole('button', { name: 'Начать репетицию' }).waitFor();
     expect(await text(rc)).toMatch(/вне плана/);
@@ -87,6 +88,7 @@ describe('репетиция интервью', () => {
 
     await w.page.locator('section.card').getByRole('button', { name: 'Выйти', exact: true }).click();
     await heading(w.page, 'Сегодня').waitFor();
+    await openCard(w.page, w.stand.url, 'Репетиция интервью');
     const again = card(w.page, 'Репетиция интервью');
     await again.getByRole('button', { name: 'Продолжить репетицию' }).waitFor();
     await again.locator('.progress').waitFor();
@@ -135,6 +137,8 @@ describe('репетиция интервью', () => {
     await shot(w.page, 'rehearsal-debrief');
 
     await w.page.getByRole('button', { name: 'На главную' }).click();
+    await heading(w.page, 'Сегодня').waitFor();
+    await openCard(w.page, w.stand.url, 'Репетиция интервью');
     const rc = card(w.page, 'Репетиция интервью');
     await rc.getByRole('button', { name: 'Открыть разбор' }).waitFor();
     expect(await text(rc)).toMatch(new RegExp(`Репетиция пройдена · уровень разговора ${r.level}, 2 карточки в журнале`));
@@ -150,6 +154,7 @@ async function currentTask(n: number) {
 
 describe('контрольный срез', () => {
   it('по программе: восемь заданий с уровня последнего среза, чтение и письмо; одна ошибка уходит в журнал', async () => {
+    await openCard(w.page, w.stand.url, 'Контрольный срез');
     const cc = card(w.page, 'Контрольный срез');
     await cc.getByRole('button', { name: 'Начать срез' }).waitFor();
     expect(await text(cc)).toMatch(/сегодня по программе/);
@@ -231,6 +236,8 @@ describe('контрольный срез', () => {
     expect(w.stand.rows("SELECT id FROM error_cards WHERE source = 'assessment'")).toHaveLength(2);
 
     await w.page.getByRole('button', { name: 'На главную' }).click();
+    await heading(w.page, 'Сегодня').waitFor();
+    await openCard(w.page, w.stand.url, 'Контрольный срез');
     const cc = card(w.page, 'Контрольный срез');
     await cc.getByRole('button', { name: 'Открыть разбор' }).waitFor();
     expect(await text(cc)).toMatch(new RegExp(`Срез пройден · ${cp.overall} из 100`));

@@ -3,7 +3,7 @@
  *  Результат: уровень, лестница, радар пяти осей (беглость не оценивается), письмо с переписанным вариантом, три примера ошибок;
  *  карточка «Тест уровня» на главном заменяет исходный срез 29.10 результатом теста. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { openWorld, closeWorld, login, seed, text, heading, card, shot, type World } from './helpers';
+import { openWorld, closeWorld, login, seed, text, heading, card, shot, type World, openCard } from './helpers';
 
 let w: World;
 beforeAll(async () => {
@@ -39,6 +39,7 @@ const send = () => w.page.getByRole('button', { name: 'Ответить', exact:
 
 describe('тест уровня до результата', () => {
   it('12 адаптивных заданий: исправления на 3, 6, 9, 12; ошибка опускает уровень, верные ответы поднимают', async () => {
+    await openCard(w.page, w.stand.url, 'Тест уровня');
     const tc = card(w.page, 'Тест уровня');
     await tc.getByRole('button', { name: 'Пройти тест' }).waitFor();
     expect(await text(tc)).toMatch(/Исходный срез/);
@@ -158,10 +159,11 @@ describe('тест уровня до результата', () => {
     expect(cards.some(c => /boiler were replaced/.test(String(c.example)))).toBe(false);
   });
 
-  it('на главном карточка «Тест уровня» показывает результат теста вместо исходного среза', async () => {
+  it('в «Прогрессе» карточка «Тест уровня» показывает результат теста вместо исходного среза', async () => {
     const [t] = w.stand.rows("SELECT * FROM assessments WHERE kind = 'placement'");
     await w.page.getByRole('button', { name: 'На главную' }).click();
     await heading(w.page, 'Сегодня').waitFor();
+    await openCard(w.page, w.stand.url, 'Тест уровня');
     const tc = card(w.page, 'Тест уровня');
     await tc.getByRole('button', { name: 'Открыть разбор' }).waitFor();
     await tc.getByRole('button', { name: 'Пройти заново' }).waitFor();

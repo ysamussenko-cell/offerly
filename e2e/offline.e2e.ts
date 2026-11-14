@@ -1,6 +1,6 @@
 /** Офлайн и тема в настоящем Chromium. Без сети: плашка, оболочка из кэша service worker при перезагрузке, вошедшему
  *  ученику не показывается форма входа, ответ не теряется и уходит после возврата сети.
- *  Тема: три режима, выбор переживает перезагрузку, вечер и система в «Авто», скрипт в index.html до загрузки приложения. */
+ *  Тема (переключатель — в настройках и на /install): три режима, выбор переживает перезагрузку, вечер и система в «Авто», скрипт в index.html до загрузки приложения. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { BrowserContextOptions } from 'playwright';
 import { openWorld, closeWorld, login, seed, heading, card, inPage, shot, DESKTOP, type World } from './helpers';
@@ -26,7 +26,7 @@ describe('без сети', () => {
     await seed(w.stand);
     await w.page.reload();
     await homeHeading().waitFor();
-    await w.page.waitForFunction('navigator.serviceWorker.controller !== null');
+    await w.page.waitForFunction('navigator.serviceWorker.controller !== null', undefined, { timeout: 30_000 });
     expect(await banner().count()).toBe(0);
 
     await w.ctx.setOffline(true);
@@ -123,7 +123,7 @@ describe('тема', () => {
 
   it('днём «Авто» светлая на бумаге; выбор «Тёмная» переживает перезагрузку, возврат к «Авто» снимает его', async () => {
     const { ctx, page } = await themed({ colorScheme: 'light' }, at('10:00'));
-    await page.goto(w.stand.url + '/');
+    await page.goto(w.stand.url + '/install');
     await mode(page, 'Авто').waitFor();
     expect(await attr(page)).toBe('light');
     expect(await bg(page)).toBe(BG.light);
@@ -151,7 +151,7 @@ describe('тема', () => {
 
   it('«Авто»: вечер наступает сам, система в тёмной теме включает тёмную и днём, «Светлая» сильнее обоих', async () => {
     const evening = await themed({ colorScheme: 'light' }, at('19:58'));
-    await evening.page.goto(w.stand.url + '/');
+    await evening.page.goto(w.stand.url + '/install');
     await mode(evening.page, 'Авто').waitFor();
     expect(await attr(evening.page)).toBe('light');
     await evening.page.clock.fastForward('03:00');
@@ -162,7 +162,7 @@ describe('тема', () => {
     await evening.ctx.close();
 
     const system = await themed({ colorScheme: 'dark' }, at('10:00'));
-    await system.page.goto(w.stand.url + '/');
+    await system.page.goto(w.stand.url + '/install');
     await system.page.getByText('Сейчас тёмная: система в тёмной теме.').waitFor();
     expect(await attr(system.page)).toBe('dark');
     await system.ctx.close();

@@ -26,7 +26,7 @@ import { createScreenHistory, parseScreen, type ScreenName } from './nav';
 type Auth = { state: 'loading' } | { state: 'unreachable' } | { state: 'anonymous' } | { state: 'in'; user: User; isNew: boolean };
 type ProfileState = { state: 'loading' } | { state: 'ready'; profile: Profile | null };
 /** Открытый экран поверх главного: занятие, репетиция, тест уровня или срез (с режимом), настройки. */
-type Screen = { name: 'lesson' } | { name: 'rehearsal' } | { name: 'settings' } | { name: 'test' | 'checkpoint'; mode: Mode };
+type Screen = { name: 'lesson' } | { name: 'rehearsal' } | { name: 'settings' } | { name: 'progress' } | { name: 'service' } | { name: 'test' | 'checkpoint'; mode: Mode };
 
 /** Экран по имени из адреса или истории (6.1): тест и срез открываются в режиме прохождения. */
 const screenNamed = (name: ScreenName): Screen => (name === 'test' || name === 'checkpoint' ? { name, mode: 'test' } : { name });
@@ -60,7 +60,7 @@ function Shell() {
     const onPop = (e: PopStateEvent) => {
       const next = nav.onPop(e.state, screen?.name ?? null);
       // «вперёд» после «назад»: занятие, репетицию и настройки открываем снова; тест и срез — только с карточки.
-      if (next && !screen && (next === 'lesson' || next === 'rehearsal' || next === 'settings')) setScreen(screenNamed(next));
+      if (next && !screen && (next === 'lesson' || next === 'rehearsal' || next === 'settings' || next === 'progress' || next === 'service')) setScreen(screenNamed(next));
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -117,6 +117,12 @@ function Shell() {
   // Анкета открывается сама один раз — когда резюме разобрано, а ответов ещё нет; позже — по кнопке.
   const showSurvey = ready != null && !showResume && (survey === 'open' || (survey === 'auto' && ready.analyzed && !ready.onboarded));
 
+  const profileCard = (p: Profile) => (
+    <ProfileCard profile={p} notice={profileNotice} onReplace={() => setReplacing(true)}
+      onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}
+      onNext={p.onboarded ? undefined : () => setSurvey('open')} />
+  );
+
   return (
     <main className="wrap">
       <header className="row topbar">
@@ -167,7 +173,48 @@ function Shell() {
       )}
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && screen?.name === 'settings' && (
-        <Settings onClose={closeScreen} />
+        <div className="stack" style={{ marginTop: 0 }}>
+          <Settings onClose={closeScreen} />
+          {ready.analyzed && <DigestCard refreshKey={testRuns} />}
+          {ready.analyzed && <PushCard refreshKey={testRuns} />}
+          {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
+          {profileCard(ready)}
+          <section className="card">
+            <h3>Приложение</h3>
+            <div className="row"><InstallButton /><a className="link" href={INSTALL_PATH}>Установка на компьютер и телефон</a></div>
+            <div style={{ marginTop: 12 }}><ThemeSwitch /></div>
+          </section>
+        </div>
+      )}
+
+      {auth.state === 'in' && ready && !showResume && !showSurvey && screen?.name === 'progress' && (
+        <div className="stack" style={{ marginTop: 0 }}>
+          <section className="card">
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0 }}>Прогресс</h2>
+              <button className="link" type="button" onClick={closeScreen}>назад</button>
+            </div>
+          </section>
+          <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />
+          <TestCard onOpen={mode => openScreen({ name: 'test', mode })} refreshKey={testRuns} />
+          <CheckpointCard refreshKey={testRuns} onOpen={mode => openScreen({ name: 'checkpoint', mode })} />
+          <RehearsalCard refreshKey={testRuns} onOpen={() => openScreen({ name: 'rehearsal' })} />
+          <JournalCard refreshKey={testRuns} />
+          <AchievementsCard refreshKey={testRuns} />
+        </div>
+      )}
+
+      {auth.state === 'in' && ready && !showResume && !showSurvey && screen?.name === 'service' && (
+        <div className="stack" style={{ marginTop: 0 }}>
+          <section className="card">
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <h2 style={{ margin: 0 }}>Служебное</h2>
+              <button className="link" type="button" onClick={closeScreen}>назад</button>
+            </div>
+          </section>
+          <BankCard />
+          <HealthCard health={health} />
+        </div>
       )}
 
       {auth.state === 'in' && ready && !showResume && !showSurvey && screen && (screen.name === 'test' || screen.name === 'checkpoint') && (
@@ -185,43 +232,35 @@ function Shell() {
       {auth.state === 'in' && ready && !showResume && !showSurvey && !screen && (
         <div className="stack" style={{ marginTop: 0 }}>
           {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenDay={f => openScreen(f === 'rehearsal' ? { name: 'rehearsal' } : f === 'checkpoint' ? { name: 'checkpoint', mode: 'test' } : { name: 'lesson' })} />}
-          {ready.analyzed && <RehearsalCard refreshKey={testRuns} onOpen={() => openScreen({ name: 'rehearsal' })} />}
-          {ready.analyzed && <CheckpointCard refreshKey={testRuns} onOpen={mode => openScreen({ name: 'checkpoint', mode })} />}
-          {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}
-          {ready.analyzed && <TestCard onOpen={mode => openScreen({ name: 'test', mode })} refreshKey={testRuns} />}
-          {ready.analyzed && <JournalCard refreshKey={testRuns} />}
-          {ready.analyzed && <AchievementsCard refreshKey={testRuns} />}
-          {ready.analyzed && <DigestCard refreshKey={testRuns} />}
-          {ready.analyzed && <PushCard refreshKey={testRuns} />}
-          {ready.onboarded && <AnswersCard profile={ready} user={auth.user} onEdit={() => setSurvey('open')} />}
-          <ProfileCard profile={ready} notice={profileNotice} onReplace={() => setReplacing(true)}
-            onRetry={async () => { const r = await api.analyzeResume(); gotProfile(r.profile); }}
-            onNext={ready.onboarded ? undefined : () => setSurvey('open')} />
-          {ready.analyzed && <BankCard />}
+          {ready.analyzed && (
+            <nav className="row home-more" aria-label="Ещё">
+              <button className="btn secondary" type="button" onClick={() => openScreen({ name: 'rehearsal' })}>Репетиция интервью</button>
+              <button className="btn secondary" type="button" onClick={() => openScreen({ name: 'progress' })}>Прогресс</button>
+            </nav>
+          )}
+          {(!ready.analyzed || !ready.onboarded) && profileCard(ready)}
         </div>
       )}
 
-      {auth.state !== 'loading' && (
-        <div className="row footer">
-          <InstallButton />
-          <a className="link" href={INSTALL_PATH}>Установка на компьютер и телефон</a>
-          <ThemeSwitch />
-          <a className="link" href="/api/health">Состояние сервиса</a>
-        </div>
-      )}
 
-      <section className="card" style={{ marginTop: 16 }}>
-        <h3>Состояние</h3>
-        {health ? (
-          <ul className="mono" style={{ margin: 0 }}>
-            <li>Версия: {health.version}</li>
-            <li>База данных: <span className={health.db === 'ok' ? 'ok' : 'bad'}>{health.db}</span></li>
-            <li>Workers AI: <span className={health.ai === 'ok' ? 'ok' : 'bad'}>{health.ai}</span></li>
-            <li>Почта: <span className={health.mail === 'ok' ? 'ok' : 'bad'}>{health.mail ?? 'missing'}</span></li>
-            <li>Push (ключи VAPID): <span className={health.push === 'env' || health.push === 'db' ? 'ok' : 'bad'}>{health.push ?? 'pending'}</span></li>
-          </ul>
-        ) : <p className="muted">Проверяю…</p>}
-      </section>
     </main>
+  );
+}
+
+/** Состояние сервиса — только на служебном экране (/?screen=service), ученику не показывается. */
+function HealthCard({ health }: { health: Health | null }) {
+  return (
+    <section className="card">
+      <h3>Состояние</h3>
+      {health ? (
+        <ul className="mono" style={{ margin: 0 }}>
+          <li>Версия: {health.version}</li>
+          <li>База данных: <span className={health.db === 'ok' ? 'ok' : 'bad'}>{health.db}</span></li>
+          <li>Workers AI: <span className={health.ai === 'ok' ? 'ok' : 'bad'}>{health.ai}</span></li>
+          <li>Почта: <span className={health.mail === 'ok' ? 'ok' : 'bad'}>{health.mail ?? 'missing'}</span></li>
+          <li>Push (ключи VAPID): <span className={health.push === 'env' || health.push === 'db' ? 'ok' : 'bad'}>{health.push ?? 'pending'}</span></li>
+        </ul>
+      ) : <p className="muted">Проверяю…</p>}
+    </section>
   );
 }

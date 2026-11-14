@@ -16,7 +16,7 @@ describe('телефон 390 px', () => {
     await seed(w.stand);
     await w.page.reload();
     await heading(w.page, 'Сегодня').waitFor();
-    await heading(w.page, 'Журнал ошибок').waitFor();
+    await w.page.getByRole('navigation', { name: 'Ещё' }).getByRole('button', { name: 'Прогресс' }).waitFor();
     expect(await overflowX(w.page)).toBeLessThanOrEqual(0);
     await shot(w.page, 'phone-home');
   });

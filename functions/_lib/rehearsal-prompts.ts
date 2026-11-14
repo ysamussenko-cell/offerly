@@ -12,7 +12,7 @@ export type QuestionKind = typeof QUESTION_KINDS[number];
 /** Что должен спросить интервьюер в каждом вопросе — подсказка модели, пишущей сценарий. */
 const KIND_BRIEF: Record<QuestionKind, string> = {
   experience: 'ask the candidate to describe the experience most relevant to this role: what exactly they did, at what scale and with what result',
-  mistake: 'describe in two or three sentences a realistic professional situation from the candidate\'s field in which something went wrong (a wrong assumption, a missed check, a bad estimate) and ask the candidate to analyse it: what the error was, why it happened and how they would prevent it',
+  mistake: 'ask about a time something went wrong in the candidate\'s own work, or describe a realistic case from their field in two or three sentences of context first (which equipment or task, at what stage, what was observed); then ask what the cause was, what they did and what they changed afterwards. Never ask a bare question such as "X failed. What was the error?"',
   explain: 'name one specific concept, method or result from the candidate\'s field and ask the candidate to explain it to a non-specialist (a manager or a client) in plain English and say why it matters for the business',
   star: 'a behavioural question that calls for a STAR answer (Situation, Task, Action, Result) about teamwork, conflict, deadline pressure or a hard decision',
   role: 'ask why the candidate wants this role and what they would focus on in the first months, so that they connect their background to the role',
@@ -53,6 +53,7 @@ export function scriptPrompt(domain: Domain, targetRole: string | null, level: L
     'You are an experienced hiring manager preparing a job interview in English. You write an interview script of exactly five questions for the candidate described below, in this order and of these kinds:',
     ...QUESTION_KINDS.map((k, i) => `${i + 1}. "${k}" — ${KIND_BRIEF[k]}.`),
     'Every question must be rooted in the candidate\'s own field and the target role: name real tools, situations and stakeholders of that field, never generic placeholders. Use only what is given about the candidate; do not invent employers or facts about them.',
+    'Write as a real interviewer speaks: polite, complete sentences, context before the question, no accusatory or telegraphic wording.',
     LEVEL_NOTE[level],
     'For each question return: "kind" — one of experience, mistake, explain, star, role; "question" — the interviewer\'s words in English, one to three sentences, at most 70 words; "rubric" — exactly three lines in Russian, each up to 120 characters, stating what a strong answer must contain (content first, then the language expected: structure, tense, register).',
     'Return ONLY one JSON object: {"questions": [ ... five objects ... ]}.',
@@ -71,7 +72,7 @@ export function defaultScript(targetRole: string | null): ScriptQuestion[] {
   return [
     { kind: 'experience', question: `Tell me about the experience that is most relevant to ${role}. What exactly did you do, at what scale, and what came out of it?`,
       rubric: ['Конкретные проекты и своя роль в них, а не общие слова', 'Масштаб и результат — в цифрах или фактах', 'Прошедшее время для завершённых дел, Present Perfect — для опыта в целом'] },
-    { kind: 'mistake', question: 'Think of a professional mistake you have seen in your field — a wrong assumption, a missed check or a bad estimate. What exactly went wrong, why did it happen, and how would you prevent it next time?',
+    { kind: 'mistake', question: 'Tell me about a time when something went wrong in your work — for example, a test result that did not match the design data, or a wrong assumption in a calculation. What happened, what was the cause, and what did you change afterwards?',
       rubric: ['Названа конкретная ошибка и её причина', 'Разделены факт, причина и вывод', 'Связки причины и следствия: because, so that, as a result'] },
     { kind: 'explain', question: 'Pick one concept or method you use every day and explain it to me as if I were a manager without a technical background. Why does it matter for the business?',
       rubric: ['Понятие объяснено без жаргона, с примером или сравнением', 'Есть ответ на «почему это важно», а не только «что это»', 'Короткие ясные предложения, термины расшифрованы'] },

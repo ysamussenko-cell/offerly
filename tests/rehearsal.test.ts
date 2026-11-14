@@ -8,7 +8,7 @@ import {
 } from '../functions/_lib/rehearsal-prompts';
 import {
   QUESTION_COUNT, ANSWER_WORDS, CARD_SOURCE, KIND_LABELS,
-  normalizeScript, writeScript, validateAnswer, normalizeReview, reviewRehearsal, rehearsalAxes,
+  normalizeScript, questionUsable, writeScript, validateAnswer, normalizeReview, reviewRehearsal, rehearsalAxes,
   draftsFromReplacements, replacementOrigin, today as rehearsalToday, startOrResume, answer, rescore, abandon, d1RehearsalStore, RehearsalError,
   type Rehearsal, type Turn,
 } from '../functions/_lib/rehearsal';
@@ -106,13 +106,14 @@ describe('сценарий', () => {
     expect(user.content).toContain('boiler efficiency, heat balance');
     expect(scriptPrompt({ ...DOMAIN, keywords: [] }, null, 'B1')[1].content).toContain('No résumé terms');
   });
-  it('нормализация: пять видов по одному в нашем порядке; лишнее отбрасывается, неполное — null', () => {
+  it('нормализация: пять видов по одному в нашем порядке; лишнее отбрасывается, недостающий вид — встроенный, меньше трёх годных — null', () => {
     const qs = normalizeScript(SCRIPT)!;
     expect(qs.map(q => q.kind)).toEqual([...QUESTION_KINDS]);
     const shuffled = { questions: [...SCRIPT.questions].reverse().concat([{ kind: 'star', question: 'Duplicate star question that should be ignored', rubric: ['x'] }]) };
     expect(normalizeScript(shuffled)!.map(q => q.kind)).toEqual([...QUESTION_KINDS]);
     expect(normalizeScript(shuffled)![3].question).toBe(SCRIPT.questions[3].question);
-    expect(normalizeScript({ questions: SCRIPT.questions.slice(0, 4) })).toBeNull();
+    expect(normalizeScript({ questions: SCRIPT.questions.slice(0, 4) })![4].question).toBe(defaultScript(null)[4].question);
+    expect(normalizeScript({ questions: SCRIPT.questions.slice(0, 2) })).toBeNull();
     expect(normalizeScript({ questions: SCRIPT.questions.map(q => ({ ...q, rubric: [] })) })).toBeNull();
     expect(normalizeScript({ questions: SCRIPT.questions.map(q => ({ ...q, question: 'short' })) })).toBeNull();
     expect(normalizeScript(null)).toBeNull();
@@ -426,5 +427,22 @@ describe('подсказки модели в rehearsal-prompts.ts', () => {
     expect(user).toContain('(spoken; automatic transcript');
     expect(user).toContain('QUESTION 2 (mistake): What went wrong?');
     expect(user).toContain('(no answer)');
+  });
+});
+
+describe('вопрос без контекста не попадает в сценарий', () => {
+  it('«A boiler failed. What was the error?» — не годится, встроенный разбор ошибки вместо него', () => {
+    expect(questionUsable('mistake', 'A boiler failed. What was the error?')).toBe(false);
+    expect(questionUsable('mistake', 'During the commissioning of a 75 t/h boiler, the measured flue gas temperature was 30 °C above the design value. What could cause this, what would you check first, and how would you prevent it?')).toBe(true);
+    const raw = { questions: SCRIPT.questions.map(q => (q.kind === 'mistake' ? { ...q, question: 'A boiler failed. What was the error?' } : q)) };
+    const qs = normalizeScript(raw, 'Reviewer')!;
+    expect(qs).toHaveLength(5);
+    const mistake = qs.find(q => q.kind === 'mistake')!;
+    expect(mistake.question).toBe(defaultScript('Reviewer').find(q => q.kind === 'mistake')!.question);
+    expect(qs.find(q => q.kind === 'experience')!.question).toBe(SCRIPT.questions.find(q => q.kind === 'experience')!.question);
+  });
+
+  it('встроенные вопросы сами проходят проверку', () => {
+    for (const q of defaultScript(null)) expect(questionUsable(q.kind, q.question), q.question).toBe(true);
   });
 });

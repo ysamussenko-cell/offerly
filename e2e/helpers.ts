@@ -69,3 +69,21 @@ export async function shot(page: Page, name: string) {
 // Код для браузера — строками: в tsconfig стенда нет DOM-типов (они конфликтуют с типами Workers).
 export const overflowX = (page: Page) => page.evaluate('document.documentElement.scrollWidth - window.innerWidth') as Promise<number>;
 export const inPage = <T,>(page: Page, expr: string) => page.evaluate(expr) as Promise<T>;
+
+/** Экраны вне главного (этап 7): программа, тест, срез, журнал, достижения — «Прогресс»; письмо, напоминание, анкета,
+ *  резюме, тема — «Настройки»; банк заданий — служебный экран. Открываются адресом, как ссылкой быстрого доступа. */
+export const SCREEN_OF: Record<string, 'progress' | 'settings' | 'service'> = {
+  'Программа': 'progress', 'Тест уровня': 'progress', 'Контрольный срез': 'progress', 'Репетиция интервью': 'progress', 'Журнал ошибок': 'progress', 'Достижения': 'progress',
+  'Ежедневное письмо': 'settings', 'Напоминание': 'settings', 'Подготовка': 'settings', 'Что я понял из резюме': 'settings',
+  'Банк заданий': 'service',
+};
+const SCREEN_HEADING = { progress: 'Прогресс', settings: 'Настройки', service: 'Служебное' } as const;
+
+/** Открыть экран, где живёт карточка (или экран по имени), и дождаться карточки. */
+export async function openCard(page: Page, baseUrl: string, name: string) {
+  const s = SCREEN_OF[name];
+  if (!s) throw new Error(`карточка «${name}» не привязана к экрану`);
+  await page.goto(`${baseUrl}/?screen=${s}`);
+  await heading(page, SCREEN_HEADING[s]).waitFor();
+  await card(page, name).waitFor();
+}

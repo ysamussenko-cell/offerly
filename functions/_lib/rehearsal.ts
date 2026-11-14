@@ -123,8 +123,20 @@ const modelOf = (opts: GenerateOpts) => opts.model ?? PROVIDERS.find(p => p.id =
 
 // ---------- сценарий ----------
 
-/** Приводит ответ модели к сценарию: все пять видов по одному, в нашем порядке; вопрос и рубрика непустые. null — не годится. */
-export function normalizeScript(raw: unknown): ScriptQuestion[] | null {
+/** Минимум слов в вопросе по виду: вопрос без контекста («A boiler failed. What was the error?») интервьюер не задаёт. */
+export const MIN_QUESTION_WORDS: Record<QuestionKind, number> = { experience: 12, mistake: 25, explain: 15, star: 15, role: 10 };
+const sentences = (s: string) => s.split(/[.!?]+(?:\s|$)/).filter(x => x.trim()).length;
+
+/** Вопрос годится для интервью: достаточно длинный, у разбора ошибки — описание ситуации и сам вопрос (не меньше двух предложений). */
+export function questionUsable(kind: QuestionKind, question: string): boolean {
+  if (countWords(question) < MIN_QUESTION_WORDS[kind]) return false;
+  if (kind === 'mistake' && sentences(question) < 2) return false;
+  return true;
+}
+
+/** Приводит ответ модели к сценарию: все пять видов по одному, в нашем порядке; вопрос и рубрика непустые.
+ *  Слабый вопрос (без контекста, слишком короткий) заменяется встроенным того же вида; годных меньше трёх — null. */
+export function normalizeScript(raw: unknown, targetRole: string | null = null): ScriptQuestion[] | null {
   if (!raw || typeof raw !== 'object') return null;
   const list = (raw as Record<string, unknown>).questions;
   if (!Array.isArray(list)) return null;
@@ -134,13 +146,14 @@ export function normalizeScript(raw: unknown): ScriptQuestion[] | null {
     const kind = clean(o.kind, 20).toLowerCase() as QuestionKind;
     if (!(QUESTION_KINDS as readonly string[]).includes(kind) || byKind.has(kind)) continue;
     const question = clean(o.question, 600);
-    if (question.length < 15) continue;
+    if (!questionUsable(kind, question)) continue;
     const rubric = (Array.isArray(o.rubric) ? o.rubric : []).map(r => clean(r, 200)).filter(Boolean).slice(0, 5);
     if (!rubric.length) continue;
     byKind.set(kind, { kind, question, rubric });
   }
-  if (byKind.size !== QUESTION_COUNT) return null;
-  return QUESTION_KINDS.map(k => byKind.get(k)!);
+  if (byKind.size < 3) return null;
+  const fallback = defaultScript(targetRole);
+  return QUESTION_KINDS.map(k => byKind.get(k) ?? fallback.find(q => q.kind === k)!);
 }
 
 /** Сценарий от модели (одна повторная попытка); не получилось — встроенный, model = null. */
@@ -151,7 +164,7 @@ export async function writeScript(env: ProviderEnv, domain: Domain, targetRole: 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const reply = await call(env, messages, { provider: opts.provider, apiKey: opts.apiKey, model: opts.model, maxTokens: 1800, jsonSchema: SCRIPT_SCHEMA });
-      const qs = normalizeScript(extractJsonObject(reply));
+      const qs = normalizeScript(extractJsonObject(reply), targetRole);
       if (qs) return { questions: qs, model: modelOf(opts), note: null };
       note = `модель не вернула сценарий из пяти вопросов; ответ: «${reply.replace(/\s+/g, ' ').slice(0, 160)}»`;
     } catch (e) {

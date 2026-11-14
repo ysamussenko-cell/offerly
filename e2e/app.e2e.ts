@@ -1,7 +1,7 @@
 /** Ключевые сценарии приложения в настоящем Chromium: вход → резюме → главный экран → занятие → тест (старт и «Выйти»; до результата — `placement.e2e.ts`) → настройки.
  *  Стенд — собранный dist и API на SQLite в памяти (e2e/server.ts); модель отключена, задания из засеянного банка. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World } from './helpers';
+import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World, openCard } from './helpers';
 
 let w: World;
 beforeAll(async () => { w = await openWorld(); });
@@ -21,15 +21,23 @@ describe('вход и первый экран', () => {
     expect(s.items).toBeGreaterThan(50);
     await w.page.reload();
     await heading(w.page, 'Сегодня').waitFor();
-    for (const name of ['Сегодня', 'Тест уровня', 'Журнал ошибок', 'Программа']) await heading(w.page, name).waitFor();
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Начать занятие' }).waitFor();
+    // главный — одно действие: карточка «Сегодня» и две кнопки, служебного и аналитики нет
+    expect(await w.page.locator('section.card').count()).toBe(1);
+    await w.page.getByRole('navigation', { name: 'Ещё' }).getByRole('button', { name: 'Репетиция интервью' }).waitFor();
+    await w.page.getByRole('navigation', { name: 'Ещё' }).getByRole('button', { name: 'Прогресс' }).waitFor();
+    for (const gone of ['Банк заданий', 'Состояние', 'Тест уровня', 'Журнал ошибок']) expect(await heading(w.page, gone).count()).toBe(0);
+    await shot(w.page, 'home');
+    await openCard(w.page, w.stand.url, 'Тест уровня');
+    for (const name of ['Программа', 'Журнал ошибок', 'Достижения']) await heading(w.page, name).waitFor();
     const test = card(w.page, 'Тест уровня');
     await test.getByRole('button', { name: 'Пройти тест' }).waitFor();
     await test.getByRole('button', { name: 'Открыть срез' }).waitFor();
     // исходный срез из засева: B1, 53 из 100
     expect(await text(test)).toMatch(/B1/);
     expect(await text(test)).toMatch(/53/);
-    await shot(w.page, 'home');
+    await w.page.goto(w.stand.url + '/');
+    await heading(w.page, 'Сегодня').waitFor();
   });
 });
 
@@ -74,6 +82,7 @@ describe('занятие дня', () => {
 
 describe('тест уровня', () => {
   it('«Пройти тест» выдаёт первое задание из 14, «Выйти» возвращает на главный с кнопкой «Продолжить»', async () => {
+    await openCard(w.page, w.stand.url, 'Тест уровня');
     await card(w.page, 'Тест уровня').getByRole('button', { name: 'Пройти тест' }).click();
     await w.page.waitForURL(/screen=test/);
     await heading(w.page, 'Тест уровня').waitFor();
@@ -82,7 +91,10 @@ describe('тест уровня', () => {
     await shot(w.page, 'test');
     await w.page.locator('section.card').getByRole('button', { name: 'Выйти', exact: true }).click();
     await heading(w.page, 'Сегодня').waitFor();
+    await openCard(w.page, w.stand.url, 'Тест уровня');
     await card(w.page, 'Тест уровня').getByRole('button', { name: 'Продолжить', exact: true }).waitFor();
+    await w.page.goto(w.stand.url + '/');
+    await heading(w.page, 'Сегодня').waitFor();
     expect(w.stand.rows("SELECT id FROM assessments WHERE kind = 'placement' AND status = 'active'")).toHaveLength(1);
     // ключ задания наружу не ушёл
     const body = await (await w.ctx.request.get(`${w.stand.url}/api/assessment`)).text();

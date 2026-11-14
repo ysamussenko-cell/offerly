@@ -6,7 +6,7 @@
  *  одно отклонено по ключу, одно не доходит до проверки. Даты программы зависят от дня запуска, поэтому сценарий
  *  проверяет инварианты разметки (28 дней, срезы на 14-й и 28-й, воскресенья — репетиции), а не конкретные дни. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World } from './helpers';
+import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World, openCard } from './helpers';
 import { ACHIEVEMENTS } from '../functions/_lib/achievements';
 import { PROGRAM_TOPICS, MIXED_TOPIC } from '../functions/_lib/program';
 import { todayIn } from '../functions/_lib/dates';
@@ -31,7 +31,7 @@ describe('программа', () => {
   it('«Составить программу»: 28 дней по неделям, срезы на 14-й и 28-й день, воскресенья — репетиции, открыта текущая неделя', async () => {
     await login(w.page, w.stand.url, PLANNER);
     await seed(w.stand, PLANNER, { program: false });
-    await w.page.reload();
+    await openCard(w.page, w.stand.url, 'Программа');
     const pc = card(w.page, 'Программа');
     await pc.getByRole('button', { name: 'Составить программу' }).click();
     await pc.locator('.weeks').waitFor();
@@ -127,7 +127,7 @@ describe('журнал ошибок и достижения', () => {
   it('до занятия: две карточки к повтору сегодня, достижений нет', async () => {
     await login(w.page, w.stand.url);
     await seed(w.stand);
-    await w.page.reload();
+    await openCard(w.page, w.stand.url, 'Журнал ошибок');
     const jc = card(w.page, 'Журнал ошибок');
     await jc.getByRole('button', { name: 'Показать карточки' }).waitFor();
     expect(await text(jc)).toMatch(/2 карточки в работе, 2 к повтору сегодня\./);
@@ -148,6 +148,7 @@ describe('журнал ошибок и достижения', () => {
   });
 
   it('занятие: разминка без ошибок, письмо без правок, карточки — одна верно, одна неверно; в итоге новые достижения', async () => {
+    await w.page.goto(w.stand.url + '/');
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Начать занятие' }).click();
     await w.page.waitForURL(/screen=lesson/);
     // разминка: выбор варианта — ключ C, исправление — глагол в третьем лице
@@ -212,6 +213,7 @@ describe('журнал ошибок и достижения', () => {
     expect(bad.due).toBe(tomorrow);
     expect(bad.streak).toBe(0);
 
+    await openCard(w.page, w.stand.url, 'Журнал ошибок');
     const jc = card(w.page, 'Журнал ошибок');
     await jc.getByText(/ближайший повтор/).waitFor();
     expect(await text(jc)).toMatch(/2 карточки в работе, ближайший повтор \d+ \S+ \d{4} г\./);
@@ -273,6 +275,7 @@ describe('банк заданий', () => {
   const b1mcq = () => w.stand.rows("SELECT id FROM items WHERE level = 'B1' AND kind = 'mcq' AND status = 'verified'").length;
 
   it('сводка по уровням и видам совпадает с банком; без модели пополнение даёт ошибку и ничего не пишет', async () => {
+    await openCard(w.page, w.stand.url, 'Банк заданий');
     const bc = bank();
     await bc.locator('table.bank tbody tr').first().waitFor();
     const row = bc.locator('table.bank tbody tr', { has: w.page.locator('th', { hasText: /^B1$/ }) });

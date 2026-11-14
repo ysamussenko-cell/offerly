@@ -2,7 +2,7 @@
  *  разбора моделью, экран «Что я понял из резюме», анкета из шести вопросов, правка ответов и замена резюме.
  *  Профиль от «модели» — заготовка стенда (stand.ai.reply); проверяется, что сервер её нормализует и кладёт в SQL. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { openWorld, closeWorld, login, text, heading, card, shot, EMAIL, type World } from './helpers';
+import { openWorld, closeWorld, login, text, heading, card, shot, EMAIL, type World, openCard } from './helpers';
 import { makeDocx, SAMPLE_RESUME } from '../tests/helpers/fixtures';
 import { addDays, todayIn } from '../functions/_lib/dates';
 
@@ -108,8 +108,9 @@ describe('анкета', () => {
 
     await w.page.getByLabel('На какую позицию готовитесь').focus();
     await w.page.keyboard.press('Control+Enter');
+    await heading(w.page, 'Сегодня').waitFor();
+    await openCard(w.page, w.stand.url, 'Подготовка');
     const answers = card(w.page, 'Подготовка');
-    await answers.waitFor();
 
     const row = profileRow();
     expect(row.targetRole).toBe('эксперт по оценке ответов ИИ в энергетике');

@@ -7,9 +7,9 @@
  * Логика без DOM: история и слушатели передаются снаружи, чтобы проверять её в тестах.
  */
 
-export type ScreenName = 'lesson' | 'rehearsal' | 'test' | 'checkpoint' | 'settings';
+export type ScreenName = 'lesson' | 'rehearsal' | 'test' | 'checkpoint' | 'settings' | 'progress' | 'service';
 
-export const SCREEN_NAMES: readonly ScreenName[] = ['lesson', 'rehearsal', 'test', 'checkpoint', 'settings'];
+export const SCREEN_NAMES: readonly ScreenName[] = ['lesson', 'rehearsal', 'test', 'checkpoint', 'settings', 'progress', 'service'];
 
 /** Параметр адреса, который открывает экран сразу после входа: /?screen=lesson. */
 export const SCREEN_PARAM = 'screen';

@@ -5,7 +5,7 @@
  *  напоминание (201), потом отвечает 410, и устройство пропадает из списка. Время включения выбирается заведомо прошедшим
  *  (00:00 в поясе ученика), поэтому первое письмо и напоминание — завтра, и карточка не должна писать «отправлено». */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { openWorld, closeWorld, login, seed, text, card, shot, inPage, EMAIL, type World } from './helpers';
+import { openWorld, closeWorld, login, seed, text, card, shot, inPage, EMAIL, type World, openCard } from './helpers';
 import { localClock, ENABLED_AFTER } from '../functions/_lib/digest';
 
 const PUSH_HOST = 'push.e2e.test';
@@ -29,7 +29,7 @@ beforeAll(async () => {
   });
   await login(w.page, w.stand.url);
   await seed(w.stand);
-  await w.page.reload();
+  await openCard(w.page, w.stand.url, 'Ежедневное письмо');
 });
 afterAll(async () => { vi.unstubAllGlobals(); await closeWorld(w); });
 
