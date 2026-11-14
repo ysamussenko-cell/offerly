@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, errorText, type Settings as SettingsData } from '../api';
+import { GoalCard } from './Home';
 import { countsText, keyErrorText, keyPlaceholder, keyStatusText, notificationsText, validateKeyInput } from '../settings';
 
 type Props = { onClose: () => void; refreshKey?: number };
@@ -29,11 +30,12 @@ export default function Settings({ onClose, refreshKey }: Props) {
           <h2 style={{ margin: 0 }}>Настройки</h2>
           <button className="link" type="button" onClick={onClose}>назад</button>
         </div>
-        <p className="muted" style={{ fontSize: 14, margin: '8px 0 0' }}>Модель, время уведомлений и копия ваших данных. Часовой пояс, цель и дата собеседования — в анкете.</p>
+        <p className="muted" style={{ fontSize: 14, margin: '8px 0 0' }}>Модель, недельная цель, уведомления и копия данных. Часовой пояс и дата собеседования — в анкете.</p>
         {!state.loaded && <p className="muted" style={{ marginTop: 12 }}>Смотрю…</p>}
         {state.error && <p className="error" role="alert" style={{ marginTop: 12 }}>{state.error}</p>}
       </section>
       {s && <ProviderCard s={s} onChange={got} />}
+      {s && <GoalCard />}
       {s && <NotificationsCard s={s} onChange={got} />}
       {s && <DataCard s={s} />}
     </div>

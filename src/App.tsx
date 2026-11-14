@@ -11,7 +11,7 @@ import Assessment, { TestCard } from './screens/Assessment';
 import { CheckpointCard } from './screens/Checkpoint';
 import { JournalCard } from './screens/Journal';
 import { ProgramCard } from './screens/Program';
-import Lesson, { LessonCard } from './screens/Lesson';
+import Lesson from './screens/Lesson';
 import Rehearsal, { RehearsalCard } from './screens/Rehearsal';
 import { HomeCard } from './screens/Home';
 import { AchievementsCard } from './screens/Achievements';
@@ -185,7 +185,6 @@ function Shell() {
       {auth.state === 'in' && ready && !showResume && !showSurvey && !screen && (
         <div className="stack" style={{ marginTop: 0 }}>
           {ready.analyzed && <HomeCard refreshKey={testRuns} onOpenDay={f => openScreen(f === 'rehearsal' ? { name: 'rehearsal' } : f === 'checkpoint' ? { name: 'checkpoint', mode: 'test' } : { name: 'lesson' })} />}
-          {ready.analyzed && <LessonCard refreshKey={testRuns} onOpen={() => openScreen({ name: 'lesson' })} />}
           {ready.analyzed && <RehearsalCard refreshKey={testRuns} onOpen={() => openScreen({ name: 'rehearsal' })} />}
           {ready.analyzed && <CheckpointCard refreshKey={testRuns} onOpen={mode => openScreen({ name: 'checkpoint', mode })} />}
           {ready.analyzed && <ProgramCard refreshKey={testRuns} interviewDate={ready.interviewDate} />}

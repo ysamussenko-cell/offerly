@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorText, type Achievement, type Lesson as View, type LessonStepDone, type LessonToday } from '../api';
+import { api, errorText, type Achievement, type Lesson as View, type LessonStepDone } from '../api';
 import { longDate, minutesText, plural } from '../text';
 import { changedWords, wordDiff } from '../diff';
 import { reviewOutcome } from './Journal';
@@ -16,79 +16,7 @@ const cardsText = (n: number) => `${n} ${plural(n, 'карточка', 'карт
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const cap = (s: string) => s ? s[0].toUpperCase() + s.slice(1) : s;
 
-type CardProps = { onOpen: () => void; refreshKey?: number };
-
-/** Карточка «Сегодня» на главном экране: что по программе на сегодня, начать или продолжить занятие, итог пройденного. */
-export function LessonCard({ onOpen, refreshKey }: CardProps) {
-  const [state, setState] = useState<{ loaded: boolean; t: LessonToday | null; error: string | null }>({ loaded: false, t: null, error: null });
-  useEffect(() => {
-    api.lesson().then(t => setState({ loaded: true, t, error: null })).catch(e => setState({ loaded: true, t: null, error: errorText(e) }));
-  }, [refreshKey]);
-
-  const t = state.t;
-  const l = t?.lesson ?? null;
-  const d = t?.day ?? null;
-  return (
-    <section className="card">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Сегодня</h2>
-        {t && <span className="muted" style={{ fontSize: 14 }}>{longDate(t.today)}</span>}
-      </div>
-      {!state.loaded && <p className="muted" style={{ marginTop: 12 }}>Смотрю…</p>}
-      {state.error && <p className="error" role="alert" style={{ marginTop: 12 }}>{state.error}</p>}
-      {t && !d && (
-        <p className="muted" style={{ marginTop: 12, marginBottom: 0 }}>
-          {t.reason === 'no_program' ? 'Занятие дня появится здесь, когда будет составлена программа — карточка «Программа» ниже.' : 'На сегодня дня программы нет: она закончилась или ещё не началась. Пересоберите программу в карточке «Программа».'}
-        </p>
-      )}
-      {t && d && !t.available && (
-        <>
-          <p style={{ marginTop: 12 }}>
-            <b>{cap(d.formatLabel)}</b>{d.minutes ? <span className="muted"> · {minutesText(d.minutes)}</span> : null}
-          </p>
-          <p className="muted" style={{ marginBottom: 0 }}>{d.reason ? `${cap(d.reason)}. ` : ''}{t.reason === 'rehearsal' ? 'Репетиция идёт в карточке «Репетиция интервью» ниже: пять вопросов по целевой позиции и разбор по пяти осям.' : 'Срез идёт в карточке «Контрольный срез» ниже: укороченный тест и сравнение с прошлым результатом.'}</p>
-        </>
-      )}
-      {t && d && t.available && (
-        <>
-          <p style={{ marginTop: 12 }}>
-            <b>{d.topicLabel}</b>
-            {d.writingLabel && <span className="tag" style={{ marginLeft: 8 }}>письмо: {d.writingLabel}</span>}
-            {d.minutes ? <span className="muted"> · {minutesText(d.minutes)}</span> : null}
-          </p>
-          {d.reason && <p className="muted" style={{ marginTop: -8, fontSize: 14 }}>{d.reason}</p>}
-          {!l && (
-            <>
-              <p className="muted" style={{ fontSize: 14 }}>Разминка из {t.warmup} заданий по теме дня, одно письмо формата дня с разбором и переписанным вариантом, затем повтор карточек журнала, у которых наступил срок (до {t.reviewMax}). Занятие можно прервать и продолжить с того же шага.</p>
-              <button className="btn" type="button" onClick={onOpen}>Начать занятие</button>
-            </>
-          )}
-          {l?.status === 'active' && (
-            <>
-              <div className="progress" aria-label={`Пройдено ${l.answered} из ${l.total}`}><span style={{ width: `${(l.answered / l.total) * 100}%` }} /></div>
-              <p className="muted" style={{ marginTop: -8, fontSize: 14 }}>Пройдено {l.answered} из {l.total}: {partsLine(l)}.</p>
-              <button className="btn" type="button" onClick={onOpen}>Продолжить занятие</button>
-            </>
-          )}
-          {l?.status === 'finished' && (
-            <>
-              <div className="level-row" style={{ marginTop: 4 }}>
-                <span className="level-badge">{l.score ?? '—'}</span>
-                <p style={{ margin: 0, fontWeight: 600 }}>Занятие пройдено — {partsLine(l)}{l.bonus ? `; ${bonusLine(l.bonus)}` : ''}</p>
-              </div>
-              {(l.bonus?.status === 'offered' || l.bonus?.status === 'active') ? (
-                <p className="muted" style={{ fontSize: 14 }}>Бонусная задача ступенью выше ({l.bonus.level}) ждёт: верный ответ умножит вклад занятия в готовность на {l.bonus.multiplier}, неверный ничего не отнимет.</p>
-              ) : null}
-              <button className={l.bonus?.status === 'offered' || l.bonus?.status === 'active' ? 'btn' : 'btn secondary'} type="button" onClick={onOpen}>{l.bonus?.status === 'offered' ? 'К бонусной задаче' : l.bonus?.status === 'active' ? 'Продолжить бонус' : 'Открыть разбор'}</button>
-            </>
-          )}
-        </>
-      )}
-    </section>
-  );
-}
-
-/** Короткая строка о бонусе для карточки и итога. */
+/** Короткая строка о бонусе для итога. */
 export function bonusLine(b: NonNullable<View['bonus']>): string {
   switch (b.status) {
     case 'offered': return 'предложен бонус';
@@ -97,14 +25,6 @@ export function bonusLine(b: NonNullable<View['bonus']>): string {
     case 'correct': return `бонус решён, вклад ×${b.multiplier}`;
     case 'wrong': return 'бонус не решён';
   }
-}
-
-function partsLine(l: View): string {
-  const p = l.parts;
-  const parts = [`разминка ${p.warmup.correct} из ${p.warmup.total}`];
-  parts.push(p.writing.done ? `письмо ${p.writing.score ?? '—'}` : 'письмо впереди');
-  if (p.review.total) parts.push(`карточки ${p.review.correct} из ${p.review.total}`);
-  return parts.join(', ');
 }
 
 type Props = { onClose: () => void };

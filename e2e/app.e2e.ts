@@ -20,7 +20,7 @@ describe('вход и первый экран', () => {
     const s = await seed(w.stand);
     expect(s.items).toBeGreaterThan(50);
     await w.page.reload();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     for (const name of ['Сегодня', 'Тест уровня', 'Журнал ошибок', 'Программа']) await heading(w.page, name).waitFor();
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Начать занятие' }).waitFor();
     const test = card(w.page, 'Тест уровня');
@@ -65,7 +65,7 @@ describe('занятие дня', () => {
 
   it('«назад» в браузере закрывает занятие и возвращает на главный, где занятие можно продолжить', async () => {
     await w.page.goBack();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     expect(new URL(w.page.url()).searchParams.get('screen')).toBeNull();
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Продолжить занятие' }).waitFor();
     expect(w.stand.rows('SELECT status FROM lessons ORDER BY rowid')[0].status).toBe('active');
@@ -81,7 +81,7 @@ describe('тест уровня', () => {
     expect(await text(w.page.locator('.card .muted', { hasText: 'Задание 1 из' }))).toMatch(/Задание 1 из 14/);
     await shot(w.page, 'test');
     await w.page.getByRole('button', { name: 'Прервать — продолжу позже' }).click();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     await card(w.page, 'Тест уровня').getByRole('button', { name: 'Продолжить', exact: true }).waitFor();
     expect(w.stand.rows("SELECT id FROM assessments WHERE kind = 'placement' AND status = 'active'")).toHaveLength(1);
     // ключ задания наружу не ушёл
@@ -99,7 +99,7 @@ describe('настройки и выход', () => {
     expect(await w.page.getByRole('button', { name: 'Настройки' }).getAttribute('aria-pressed')).toBe('true');
     await shot(w.page, 'settings');
     await w.page.getByRole('button', { name: 'Настройки' }).click();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     expect(new URL(w.page.url()).searchParams.get('screen')).toBeNull();
   });
 

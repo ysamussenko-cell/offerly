@@ -201,12 +201,12 @@ describe('программа в хранилище', () => {
     expect(v2.days[0]).toMatchObject({ id: a.id, topic: b.topic, reason: b.reason, writing: a.writing });
     expect(v2.days[1]).toMatchObject({ id: b.id, topic: a.topic, reason: a.reason });
     const rehearsal = v.days.find(d => d.format === 'rehearsal')!;
-    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, rehearsal.id)).rejects.toMatchObject({ code: 'program_invalid', reason: 'not_lesson' });
-    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, a.id)).rejects.toMatchObject({ reason: 'same' });
-    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, 'nope')).rejects.toMatchObject({ reason: 'not_found' });
-    await expect(swapDays(mem.store, 'other', TZ, profile(), a.id, b.id)).rejects.toMatchObject({ reason: 'not_found' });
+    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, rehearsal.id, { now })).rejects.toMatchObject({ code: 'program_invalid', reason: 'not_lesson' });
+    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, a.id, { now })).rejects.toMatchObject({ reason: 'same' });
+    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, 'nope', { now })).rejects.toMatchObject({ reason: 'not_found' });
+    await expect(swapDays(mem.store, 'other', TZ, profile(), a.id, b.id, { now })).rejects.toMatchObject({ reason: 'not_found' });
     await mem.store.updateProgramDay(b.id, { status: 'done' });
-    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, b.id)).rejects.toMatchObject({ reason: 'not_planned' });
+    await expect(swapDays(mem.store, USER, TZ, profile(), a.id, b.id, { now })).rejects.toMatchObject({ reason: 'not_planned' });
     const c = v.days.filter(d => d.format === 'lesson')[2];
     await expect(swapDays(mem.store, USER, TZ, profile(), a.id, c.id, { now: () => '2026-11-05T03:00:00.000Z' })).rejects.toBeInstanceOf(ProgramError);
   });

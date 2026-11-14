@@ -15,7 +15,7 @@ describe('телефон 390 px', () => {
     await login(w.page, w.stand.url);
     await seed(w.stand);
     await w.page.reload();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     await heading(w.page, 'Журнал ошибок').waitFor();
     expect(await overflowX(w.page)).toBeLessThanOrEqual(0);
     await shot(w.page, 'phone-home');
@@ -40,7 +40,7 @@ describe('телефон 390 px', () => {
 
   it('жест «назад» возвращает на главный, а не закрывает приложение', async () => {
     await w.page.goBack();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     expect(new URL(w.page.url()).searchParams.get('screen')).toBeNull();
   });
 });

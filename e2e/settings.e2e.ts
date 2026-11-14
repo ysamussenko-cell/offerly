@@ -267,7 +267,7 @@ describe('время уведомлений и выход с экрана', () =
 
   it('Esc вне поля ввода закрывает настройки', async () => {
     await w.page.keyboard.press('Escape');
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     expect(new URL(w.page.url()).searchParams.get('screen')).toBeNull();
   });
 });

@@ -199,7 +199,7 @@ describe('журнал ошибок и достижения', () => {
     expect((await unlocked.allTextContents()).sort()).toEqual(['Первый отзыв рецензента без правок', 'Пять подряд без ошибки — союзы и инверсия', 'Разминка без ошибок']);
     await shot(w.page, 'lesson-summary');
     await w.page.getByRole('button', { name: 'На главную' }).click();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
   });
 
   it('после занятия: журнал переносит карточки по FSRS, неверная вернётся завтра', async () => {

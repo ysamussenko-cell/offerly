@@ -11,7 +11,7 @@ beforeAll(async () => {
   await login(w.page, w.stand.url);
   await seed(w.stand);
   await w.page.reload();
-  await heading(w.page, 'Готовность к собеседованию').waitFor();
+  await heading(w.page, 'Сегодня').waitFor();
 });
 afterAll(async () => { await closeWorld(w); });
 
@@ -161,7 +161,7 @@ describe('тест уровня до результата', () => {
   it('на главном карточка «Тест уровня» показывает результат теста вместо исходного среза', async () => {
     const [t] = w.stand.rows("SELECT * FROM assessments WHERE kind = 'placement'");
     await w.page.getByRole('button', { name: 'На главную' }).click();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     const tc = card(w.page, 'Тест уровня');
     await tc.getByRole('button', { name: 'Открыть разбор' }).waitFor();
     await tc.getByRole('button', { name: 'Пройти заново' }).waitFor();
@@ -178,6 +178,6 @@ describe('тест уровня до результата', () => {
     expect(await w.page.locator('ol.examples > li').count()).toBe(3);
     expect(w.stand.ai.calls.length).toBe(before);
     await w.page.keyboard.press('Escape');
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
   });
 });

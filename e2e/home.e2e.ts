@@ -1,12 +1,11 @@
-/** Главный экран в настоящем Chromium: карточка «Готовность к собеседованию» до и после занятия — прибавка по баллу,
- *  разбор, прогноз, серия, недельная цель, план недели. Отдельно — цель своими минутами, обратный отсчёт, пропуски
- *  с заморозкой и пустое состояние без теста и программы. Три ученика на одном стенде. Пропуски зависят от дня недели,
- *  поэтому ожидание по заморозке считает computeStreak; минуты сдвигаются в базе — занятие в браузере идёт секунды. */
+/** Главный экран в настоящем Chromium (7.1): карточка «Сегодня» — день программы и одна кнопка, готовность числом,
+ *  срок до собеседования, неделя семью отметками без подписей. До и после занятия, обратный отсчёт, пропуски с заморозкой,
+ *  пустое состояние; недельная цель — теперь в «Настройках». Три ученика на одном стенде. Пропуски зависят от дня недели,
+ *  поэтому ожидание по заморозке считает computeStreak. Правило «без шума»: ни одного абзаца длиннее 140 знаков. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { openWorld, closeWorld, login, seed, text, heading, shot, EMAIL, type World } from './helpers';
 import { addDays, todayIn } from '../functions/_lib/dates';
 import { computeStreak, weekStart } from '../functions/_lib/dashboard';
-import { nextStep } from '../functions/_lib/scoring';
 
 const TZ = 'Asia/Almaty';
 const MISSER = 'miss@offerly.test';
@@ -29,8 +28,8 @@ const today = () => todayIn(TZ, new Date());
 const userId = (email: string): string => w.stand.rows('SELECT id FROM users WHERE email = ?', email)[0].id;
 const home = () => w.page.locator('section.card.home');
 const badge = () => home().locator('.level-badge.readiness');
-const fact = (name: string) => home().locator('.home-facts > div', { has: w.page.getByRole('term').filter({ hasText: name }) });
-const cell = (date: string) => home().locator('ol.week-strip > li').nth((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${weekStart(today())}T00:00:00Z`)) / 86_400_000);
+const countdown = () => home().locator('.home-facts .countdown');
+const mark = (date: string) => home().locator('ol.week-marks > li').nth((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${weekStart(today())}T00:00:00Z`)) / 86_400_000);
 const openHome = async () => { await w.page.reload(); await badge().waitFor(); };
 const answerButton = () => w.page.getByRole('button', { name: 'Ответить', exact: true });
 const stepLabel = (n: number) => w.page.locator('.card .muted', { hasText: new RegExp(`^Шаг ${n} из 8 · `) });
@@ -66,60 +65,51 @@ async function passLesson() {
     await w.page.getByText(/^Отклонена\./).waitFor();
   }
   await w.page.getByRole('button', { name: 'На главную' }).click();
-  await heading(w.page, 'Готовность к собеседованию').waitFor();
+  await heading(w.page, 'Сегодня').waitFor();
 }
 
-describe('готовность до и после занятия', () => {
-  it('до занятия: база среза 53, серии нет, цель 0 из 125 по анкете, сегодня в плане и кнопка', async () => {
+/** Без шума: не больше одного абзаца-строки, ни одного текста длиннее 140 знаков, нет механики готовности. */
+async function quiet() {
+  const texts = await home().locator('p, small, li').allInnerTexts();
+  for (const t of texts) expect(t.length, t).toBeLessThanOrEqual(140);
+  const all = await text(home());
+  for (const word of ['База ', 'Серия', 'заморозк', 'бонус', 'свободно', 'Недельная цель']) expect(all, word).not.toContain(word);
+}
+
+describe('«Сегодня» до и после занятия', () => {
+  it('до занятия: тема дня и «Начать занятие», готовность 53, срок не задан, семь отметок без подписей', async () => {
     await login(w.page, w.stand.url);
     await seed(w.stand);
     await openHome();
     expect(await badge().getAttribute('aria-label')).toBe(`Готовность ${BASE} из 100`);
-    const all = await text(home());
-    expect(all).toContain('уровень B1 · цель C1');
-    expect(all).toMatch(/за последнюю неделю готовность не росла — ступень не приближается/);
-    expect(all).toMatch(/База 53 — исходный срез 29 окт · занятий после него ещё не было/);
-    expect(await text(fact('Собеседование'))).toContain('дата не задана');
-    expect(await text(fact('Серия'))).toMatch(/0 дней.*занятий ещё не было/);
-    expect(await text(fact('Недельная цель'))).toMatch(/0 из 125 мин.*осталось/);
-    expect(await text(fact('Недельная цель'))).toContain('по анкете: 25 мин × 5 дней');
+    expect(await text(home().locator('.today-title'))).toMatch(/^Союзы и инверсия · \d+ минут/);
+    expect(await home().getByRole('button').count()).toBe(1);
+    await home().getByRole('button', { name: 'Начать занятие' }).waitFor();
+    expect(await text(countdown())).toContain('дата собеседования не задана');
 
-    const strip = home().locator('ol.week-strip > li');
-    expect(await strip.count()).toBe(7);
+    const marks = home().locator('ol.week-marks > li');
+    expect(await marks.count()).toBe(7);
     expect(await home().locator('li.is-today').count()).toBe(1);
-    expect(await text(cell(today()))).toMatch(/Союзы и инверсия.*сегодня$/);
-    expect(await home().locator('ol.week-strip > li.free').count()).toBe(6);
+    expect(await mark(today()).getAttribute('class')).toContain('today');
+    expect(await mark(today()).getAttribute('aria-label')).toMatch(/Союзы и инверсия, сегодня$/);
+    expect(await home().locator('ol.week-marks > li.free').count()).toBe(6);
+    await quiet();
+    expect(await heading(w.page, 'Готовность к собеседованию').count()).toBe(0);
     await shot(w.page, 'home-before');
   });
 
-  it('своя недельная цель переживает перезагрузку и возвращается к анкете', async () => {
-    const goal = fact('Недельная цель');
-    await goal.getByRole('button', { name: 'изменить' }).click();
-    await home().getByLabel('Минут в неделю').fill('200');
-    await home().getByRole('button', { name: 'Сохранить' }).click();
-    await goal.getByText('0 из 200 мин').waitFor();
-    expect(w.stand.rows('SELECT weekly_goal_minutes AS g FROM profiles WHERE user_id = ?', userId(EMAIL))[0].g).toBe(200);
-    await openHome();
-    expect(await text(goal)).toMatch(/0 из 200 мин.*своя/);
-
-    await goal.getByRole('button', { name: 'изменить' }).click();
-    await home().getByRole('button', { name: 'вернуть по анкете (125 мин)' }).click();
-    await goal.getByText('0 из 125 мин').waitFor();
-    expect(w.stand.rows('SELECT weekly_goal_minutes AS g FROM profiles WHERE user_id = ?', userId(EMAIL))[0].g).toBeNull();
-  });
-
-  it('кнопка карточки открывает занятие; недоделанное — «Продолжить занятие» и статус «идёт»', async () => {
+  it('кнопка открывает занятие; недоделанное — «Продолжить занятие» и отметка «идёт»', async () => {
     await home().getByRole('button', { name: 'Начать занятие' }).click();
     await w.page.waitForURL(/screen=lesson/);
     await stepLabel(1).waitFor();
     await w.page.goBack();
     await home().getByRole('button', { name: 'Продолжить занятие' }).waitFor();
-    expect(await text(cell(today()))).toMatch(/идёт$/);
+    expect(await mark(today()).getAttribute('class')).toContain('active');
     await home().getByRole('button', { name: 'Продолжить занятие' }).click();
     await w.page.waitForURL(/screen=lesson/);
   });
 
-  it('после занятия: готовность выросла по баллу, серия 1, день пройден, кнопки нет, прогноз по темпу', async () => {
+  it('после занятия: готовность выросла по баллу, день пройден с баллом, вместо кнопки занятия — «Открыть разбор»', async () => {
     await passLesson();
     const [lesson] = w.stand.rows('SELECT * FROM lessons WHERE user_id = ?', userId(EMAIL));
     expect(lesson.status).toBe('finished');
@@ -127,65 +117,57 @@ describe('готовность до и после занятия', () => {
     const value = Math.round(BASE + gained);
     expect(value).toBeGreaterThan(BASE);
     await home().locator(`.level-badge[aria-label="Готовность ${value} из 100"]`).waitFor();
-
-    const all = await text(home());
-    expect(all).toContain(`База 53 — исходный срез 29 окт · занятия +${String(gained).replace('.', ',')} (1 занятие)`);
-    const perDay = Math.round((value - BASE) / 7 * 10) / 10;
-    const next = nextStep(value)!;
-    expect(all).toContain(`До ${next.level} — ${next.points} балл`);
-    expect(all).toContain(`при текущем темпе (+${String(perDay).replace('.', ',')} в день) — через `);
-    expect(await text(fact('Серия'))).toMatch(/1 день.*сегодня засчитано/);
-    expect(await text(cell(today()))).toContain(`пройдено · ${lesson.score}`);
+    expect(await text(home().locator('.today-title'))).toBe(`Союзы и инверсия — пройдено · ${lesson.score}`);
+    expect(await mark(today()).getAttribute('class')).toContain('done');
     expect(await home().getByRole('button', { name: /занятие$/ }).count()).toBe(0);
+    await home().getByRole('button', { name: 'Открыть разбор' }).click();
+    await heading(w.page, /^Занятие пройдено/).waitFor();
+    await w.page.goBack();
+    await badge().waitFor();
+    await quiet();
     await shot(w.page, 'home-after');
   });
 
-  it('минуты недели: шаг дороже десяти минут считается как десять, цель и полоса сходятся', async () => {
-    const steps = w.stand.rows('SELECT id, answered_at AS a FROM lesson_steps WHERE answered_at IS NOT NULL ORDER BY position');
-    expect(steps.length).toBe(8);
-    steps.forEach((s, i) => {
-      const minutes = i === 0 ? 60 : 3;
-      w.stand.db.prepare('UPDATE lesson_steps SET created_at = ? WHERE id = ?').run(new Date(Date.parse(s.a) - minutes * 60_000).toISOString(), s.id);
-    });
-    await openHome();
-    const goal = fact('Недельная цель');
-    expect(await text(goal)).toContain('31 из 125 мин');
-    expect(await goal.locator('.progress').getAttribute('aria-label')).toBe('Выполнено 25%');
-    expect(await text(cell(today()))).toMatch(/ · 31 мин$/);
-
+  it('недельная цель — в «Настройках»: своя переживает перезагрузку и возвращается к анкете', async () => {
+    await w.page.getByRole('button', { name: 'Настройки' }).click();
+    const goal = w.page.locator('section.card.goal');
+    await goal.getByText('125 мин в неделю · по анкете: 25 мин × 5 дней').waitFor();
     await goal.getByRole('button', { name: 'изменить' }).click();
-    await home().getByLabel('Минут в неделю').fill('30');
-    await home().getByRole('button', { name: 'Сохранить' }).click();
-    await goal.getByText('цель недели выполнена').waitFor();
-    expect(await goal.locator('.progress').getAttribute('aria-label')).toBe('Выполнено 100%');
+    await goal.getByLabel('Минут в неделю').fill('200');
+    await goal.getByRole('button', { name: 'Сохранить' }).click();
+    await goal.getByText('200 мин в неделю · своя').waitFor();
+    expect(w.stand.rows('SELECT weekly_goal_minutes AS g FROM profiles WHERE user_id = ?', userId(EMAIL))[0].g).toBe(200);
+    await w.page.reload();
+    await goal.getByText('200 мин в неделю · своя').waitFor();
+    await goal.getByRole('button', { name: 'изменить' }).click();
+    await goal.getByRole('button', { name: 'вернуть по анкете (125 мин)' }).click();
+    await goal.getByText('125 мин в неделю · по анкете: 25 мин × 5 дней').waitFor();
+    expect(w.stand.rows('SELECT weekly_goal_minutes AS g FROM profiles WHERE user_id = ?', userId(EMAIL))[0].g).toBeNull();
+    await w.page.getByRole('button', { name: 'назад' }).click();
+    await badge().waitFor();
   });
 
-  it('обратный отсчёт: через 10 дней с прогнозом к дате, завтра, сегодня, дата прошла', async () => {
+  it('обратный отсчёт: через 10 дней с датой, завтра, сегодня, дата прошла', async () => {
     const setDate = (offset: number) => w.stand.db.prepare('UPDATE profiles SET interview_date = ? WHERE user_id = ?').run(addDays(today(), offset), userId(EMAIL));
-    const value = Number((await badge().getAttribute('aria-label'))!.match(/\d+/)![0]);
-    const perDay = Math.round((value - BASE) / 7 * 10) / 10;
-
     setDate(10);
     await openHome();
-    expect(await text(fact('Собеседование'))).toContain('через 10 дней');
-    expect(await text(home())).toContain(`к собеседованию при этом темпе — ${Math.round(value + perDay * 10)}`);
+    expect(await text(countdown())).toMatch(/через 10 дней.*собеседование · /s);
     setDate(1);
     await openHome();
-    expect(await text(fact('Собеседование'))).toContain('завтра');
+    expect(await text(countdown())).toContain('завтра');
     setDate(0);
     await openHome();
-    expect(await text(fact('Собеседование'))).toContain('сегодня');
-    expect(await text(home())).not.toContain('к собеседованию при этом темпе');
+    expect(await text(countdown())).toContain('сегодня');
     setDate(-1);
     await openHome();
-    expect(await text(fact('Собеседование'))).toContain('дата прошла');
+    expect(await text(countdown())).toContain('дата прошла');
     await w.page.getByRole('button', { name: 'Выйти' }).click();
     await heading(w.page, 'Вход').waitFor();
   });
 });
 
 describe('пропуски и заморозка', () => {
-  it('три пропущенных занятия: первое в неделе закрывает заморозка, остальные снижают готовность по баллу', async () => {
+  it('три пропущенных занятия: первое в неделе закрывает заморозка, остальные снижают готовность', async () => {
     await login(w.page, w.stand.url, MISSER);
     await seed(w.stand, MISSER);
     const uid = userId(MISSER);
@@ -206,13 +188,12 @@ describe('пропуски и заморозка', () => {
     expect(s.missed.length).toBeGreaterThan(0);
     const counted = s.missed.filter(d => d > BASE_DATE).length;
     expect(await badge().getAttribute('aria-label')).toBe(`Готовность ${BASE - counted} из 100`);
-    expect(await text(home())).toMatch(new RegExp(`пропуски -${counted} \\(${counted} пропуск`));
-    expect(await text(fact('Серия'))).toContain(s.freezeAvailable ? 'заморозка на эту неделю есть' : 'заморозка недели потрачена');
-    // в полосе только текущая неделя: прошедшие её дни подписаны по итогу, будущий — план
+    // на полосе только текущая неделя: прошедшие дни — цветом по итогу, будущий — план; подписи только в подсказке
     for (const d of pastDates.filter(x => x >= weekStart(today()))) {
-      expect(await text(cell(d))).toMatch(s.frozen.includes(d) ? /заморозка$/ : /пропущено$/);
+      expect(await mark(d).getAttribute('class')).toContain(s.frozen.includes(d) ? 'frozen' : 'missed');
     }
-    if (tomorrow < addDays(weekStart(today()), 7)) expect(await text(cell(tomorrow))).toMatch(/план$/);
+    if (tomorrow < addDays(weekStart(today()), 7)) expect(await mark(tomorrow).getAttribute('aria-label')).toMatch(/план$/);
+    await quiet();
     await shot(w.page, 'home-missed');
     await w.page.getByRole('button', { name: 'Выйти' }).click();
     await heading(w.page, 'Вход').waitFor();
@@ -220,7 +201,7 @@ describe('пропуски и заморозка', () => {
 });
 
 describe('пустое состояние', () => {
-  it('без теста и программы: прочерк вместо балла, подсказка, никаких кнопок дня', async () => {
+  it('без теста и программы: прочерк вместо балла, одна строка про программу, никаких кнопок', async () => {
     await login(w.page, w.stand.url, EMPTY);
     await seed(w.stand, EMPTY, { program: false });
     const uid = userId(EMPTY);
@@ -228,11 +209,10 @@ describe('пустое состояние', () => {
     await openHome();
     expect(await badge().getAttribute('aria-label')).toBe('Готовность не посчитана');
     expect(await text(badge())).toBe('—');
-    const all = await text(home());
-    expect(all).toContain('Готовность появится после теста уровня');
-    expect(all).toContain('Программы ещё нет');
-    expect(all).not.toContain('База ');
-    expect(await home().locator('ol.week-strip > li.free').count()).toBe(7);
-    expect(await home().getByRole('button', { name: /^(Начать|Продолжить)/ }).count()).toBe(0);
+    expect(await text(home().locator('.today-title'))).toBe('Программы ещё нет — составьте её в карточке «Программа».');
+    expect(await text(home())).toContain('готовность — после теста уровня');
+    expect(await home().locator('ol.week-marks > li.free').count()).toBe(7);
+    expect(await home().getByRole('button').count()).toBe(0);
+    await quiet();
   });
 });

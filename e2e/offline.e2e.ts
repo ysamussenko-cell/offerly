@@ -16,7 +16,7 @@ beforeAll(async () => { w = await openWorld(); });
 afterAll(async () => { await closeWorld(w); });
 
 const banner = () => w.page.locator('p.offline');
-const homeHeading = () => heading(w.page, 'Готовность к собеседованию');
+const homeHeading = () => heading(w.page, 'Сегодня');
 const answer = () => w.page.getByRole('button', { name: 'Ответить', exact: true });
 const answersStored = (): number => w.stand.rows<{ n: number }>('SELECT COUNT(*) AS n FROM lesson_steps WHERE answered_at IS NOT NULL')[0].n;
 

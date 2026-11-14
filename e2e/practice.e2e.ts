@@ -12,7 +12,7 @@ beforeAll(async () => {
   await login(w.page, w.stand.url);
   await seed(w.stand, undefined, { format: 'checkpoint' });
   await w.page.reload();
-  await heading(w.page, 'Готовность к собеседованию').waitFor();
+  await heading(w.page, 'Сегодня').waitFor();
 });
 afterAll(async () => { await closeWorld(w); });
 
@@ -84,7 +84,7 @@ describe('репетиция интервью', () => {
     await shot(w.page, 'rehearsal');
 
     await w.page.getByRole('button', { name: 'Прервать — продолжу позже' }).click();
-    await heading(w.page, 'Готовность к собеседованию').waitFor();
+    await heading(w.page, 'Сегодня').waitFor();
     const again = card(w.page, 'Репетиция интервью');
     await again.getByRole('button', { name: 'Продолжить репетицию' }).waitFor();
     await again.locator('.progress').waitFor();
