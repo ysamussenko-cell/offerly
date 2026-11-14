@@ -4,11 +4,11 @@
   "last_deploy": {
     "status": "ok",
     "url": "https://offerly-c8b.pages.dev",
-    "commit": "85be821",
-    "run": 43573055082,
-    "version": "0.27.0",
-    "health": "ok:true version 0.27.0 db:ok ai:ok mail:ok push:db, deep: ai_chat/analysis/voice ok, ai_usage без ошибок — по аннотации run 43573055082; WebFetch из плановой сессии не проходит (нет подтверждения)",
-    "e2e": "10 файлов, 72 проверки; Vitest 575",
+    "commit": "5bcf5db",
+    "run": 43574309880,
+    "version": "0.28.0",
+    "health": "ok:true version 0.28.0 db:ok ai:ok mail:ok push:db, ai_chat ok, analysis ok по аннотации run 43574309880",
+    "e2e": "10 файлов, 72 проверки; Vitest 577",
     "smoke": "run успешен"
   },
   "defects": [
