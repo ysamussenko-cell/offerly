@@ -52,3 +52,29 @@ describe('«Сегодня» на главном (7.1)', () => {
     expect(readFileSync('src/App.tsx', 'utf-8')).not.toContain('LessonCard');
   });
 });
+
+describe('экраны занятия, репетиции, теста и среза без лишнего (7.8)', () => {
+  const screens = ['src/screens/Lesson.tsx', 'src/screens/Rehearsal.tsx', 'src/screens/Assessment.tsx'];
+  it('ни строки клавиш, ни счётчика слов, ни «Прервать»; выход — одна ссылка «Выйти»', () => {
+    for (const f of screens) {
+      const full = readFileSync(f, 'utf-8');
+      const src = full.slice(full.indexOf('export default function')); // карточка на главном не в счёт — «Другой сценарий» живёт там
+      for (const bad of ['<KeyHints', 'WordCount', '· цель', 'Прервать', 'Другой сценарий', 'kindHint']) expect(src, `${f}: ${bad}`).not.toContain(bad);
+      expect(src, f).toContain('>Выйти</button>');
+    }
+    expect(readFileSync('src/screens/Rehearsal.tsx', 'utf-8')).toContain('<h2 style={{ margin: 0 }}>Репетиция</h2>');
+  });
+
+  it('длина ответа называется одной строкой только при отправке слишком короткого', async () => {
+    const { shortAnswerText } = await import('../src/text');
+    expect(shortAnswerText(15, 40, 150)).toBe('Слишком коротко: нужно не меньше 15 слов, лучше 40–150.');
+    expect(shortAnswerText(30, 60, 80)).toBe('Слишком коротко: нужно не меньше 30 слов, лучше 60–80.');
+    expect(shortAnswerText(21, 40, 150)).toBe('Слишком коротко: нужно не меньше 21 слова, лучше 40–150.');
+  });
+
+  it('микрофон и озвучка — значки с подписью в подсказке, без текста на кнопке', () => {
+    const src = readFileSync('src/Recorder.tsx', 'utf-8');
+    expect(src).toContain('aria-label={label} title={label}');
+    expect(src).not.toContain('<span>{processing ?');
+  });
+});

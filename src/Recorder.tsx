@@ -119,30 +119,37 @@ const StopIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
 );
 
-type MicProps = { rec: Recorder; disabled?: boolean; /** Что записываем — для подписи рядом. */ what?: string };
+type MicProps = { rec: Recorder; disabled?: boolean; /** Что записываем — для подписи в подсказке и экранном чтеце. */ what?: string };
 
-/** Кнопка-микрофон у поля ответа: нажать — запись, нажать снова — стоп и распознавание. Счётчик и ошибки — рядом. */
+/** Значок-микрофон у поля ответа (7.8): нажать — запись, нажать снова — стоп и распознавание. Подпись — только в подсказке;
+ *  во время записи рядом секунды, при распознавании — одно слово. */
 export function MicButton({ rec, disabled, what = 'ответ' }: MicProps) {
   if (!rec.available) return null;
   const recording = rec.state === 'recording';
   const processing = rec.state === 'processing';
+  const label = processing ? 'Распознаю речь' : recording ? 'Остановить запись' : `Сказать ${what} голосом`;
   return (
     <div className="mic-row">
-      <button type="button" className={`mic ${rec.state}`} onClick={rec.toggle} disabled={disabled || processing} aria-pressed={recording} aria-keyshortcuts="Space">
+      <button type="button" className={`mic icon ${rec.state}`} onClick={rec.toggle} disabled={disabled || processing} aria-pressed={recording} aria-keyshortcuts="Space" aria-label={label} title={label}>
         {recording ? <StopIcon /> : <MicIcon />}
-        <span>{processing ? 'Распознаю речь…' : recording ? `Остановить · ${formatSeconds(rec.seconds)}` : `Сказать ${what} голосом`}</span>
       </button>
-      {recording && <span className="rec-note"><span className="rec-dot" aria-hidden="true" />Говорите по-английски. Остановить — той же кнопкой или отпустив пробел; предел {formatSeconds(MAX_SECONDS)}.</span>}
-      {processing && <span className="muted hint" style={{ margin: 0 }}>Whisper переводит речь в текст — до полуминуты. Текст можно будет поправить.</span>}
+      {recording && <span className="rec-note"><span className="rec-dot" aria-hidden="true" />{formatSeconds(rec.seconds)}</span>}
+      {processing && <span className="muted hint" style={{ margin: 0 }}>Распознаю…</span>}
       {rec.error && <span className="error" role="alert">{rec.error}</span>}
     </div>
   );
 }
 
+const SpeakIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" />
+  </svg>
+);
+
 type SpeakProps = { text: string; label?: string; className?: string };
 
 /** Озвучка реплики тренера: первая кнопка просит MP3 у MeloTTS, дальше звук играется из памяти. */
-export function SpeakButton({ text, label = 'Озвучить', className = 'link' }: SpeakProps) {
+export function SpeakButton({ text, label = 'Озвучить', className = 'icon-btn' }: SpeakProps) {
   const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle');
   const [error, setError] = useState<string | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -171,10 +178,11 @@ export function SpeakButton({ text, label = 'Озвучить', className = 'lin
   }
 
   if (typeof Audio === 'undefined') return null;
+  const title = state === 'loading' ? 'Озвучиваю' : state === 'playing' ? 'Остановить' : label;
   return (
     <span className="speak">
-      <button type="button" className={className} onClick={play} disabled={state === 'loading'} aria-pressed={state === 'playing'}>
-        {state === 'loading' ? 'Озвучиваю…' : state === 'playing' ? 'Остановить' : label}
+      <button type="button" className={`${className} speak-btn ${state}`} onClick={play} disabled={state === 'loading'} aria-pressed={state === 'playing'} aria-label={title} title={title}>
+        {state === 'playing' ? <StopIcon /> : <SpeakIcon />}
       </button>
       {error && <span className="error" role="alert" style={{ marginLeft: 8 }}>{error}</span>}
     </span>

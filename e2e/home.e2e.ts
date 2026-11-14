@@ -32,7 +32,7 @@ const countdown = () => home().locator('.home-facts .countdown');
 const mark = (date: string) => home().locator('ol.week-marks > li').nth((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${weekStart(today())}T00:00:00Z`)) / 86_400_000);
 const openHome = async () => { await w.page.reload(); await badge().waitFor(); };
 const answerButton = () => w.page.getByRole('button', { name: 'Ответить', exact: true });
-const stepLabel = (n: number) => w.page.locator('.card .muted', { hasText: new RegExp(`^Шаг ${n} из 8 · `) });
+const stepLabel = (n: number) => w.page.locator(`.card .progress[aria-label="Шаг ${n} из 8"]`);
 
 /** Разминка без ошибок, письмо без правок, две карточки журнала верно — до итога и обратно на главный. */
 async function passLesson() {

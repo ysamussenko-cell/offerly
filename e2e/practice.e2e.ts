@@ -53,19 +53,21 @@ const WRITING_EVAL = {
 
 /** Карточка открытого экрана — первая на странице (ниже — служебная карточка «Состояние»). */
 const screen = () => w.page.locator('section.card').first();
-const turnLabel = () => w.page.locator('.card .muted', { hasText: /^Вопрос \d+ из 5/ });
+const turnLabel = (n: number) => w.page.locator(`.card .progress[aria-label="Вопрос ${n} из 5"]`);
 
 describe('репетиция интервью', () => {
-  it('вне плана: встроенный сценарий из пяти вопросов, короткий ответ не принимается, «Прервать» сохраняет прогресс', async () => {
+  it('вне плана: встроенный сценарий из пяти вопросов, короткий ответ не принимается одной строкой, «Выйти» сохраняет прогресс', async () => {
     const rc = card(w.page, 'Репетиция интервью');
     await rc.getByRole('button', { name: 'Начать репетицию' }).waitFor();
     expect(await text(rc)).toMatch(/вне плана/);
     await rc.getByRole('button', { name: 'Начать репетицию' }).click();
     await w.page.waitForURL(/screen=rehearsal/);
-    await turnLabel().waitFor();
-    expect(await text(turnLabel())).toMatch(/^Вопрос 1 из 5 · /);
+    await turnLabel(1).waitFor();
+    // экран без лишнего (7.8): заголовок «Репетиция», ни подсказки под вопросом, ни счётчика слов, ни строки клавиш
+    await heading(w.page, 'Репетиция').waitFor();
+    expect(await w.page.locator('.keys, .hint').count()).toBe(0);
+    await w.page.getByRole('button', { name: 'Озвучить вопрос' }).waitFor();
     // модель отключена — интервьюер берёт встроенный сценарий, вопрос с экрана совпадает с записанным
-    expect(await text(w.page.locator('.hint', { hasText: 'Интервьюер' }))).toMatch(/встроенный сценарий/);
     const turns = w.stand.rows('SELECT * FROM rehearsal_turns ORDER BY position');
     expect(turns.map(t => t.kind)).toEqual(['experience', 'mistake', 'explain', 'star', 'role']);
     expect(await text(w.page.locator('p.task'))).toBe(turns[0].question);
@@ -74,16 +76,16 @@ describe('репетиция интервью', () => {
     const box = w.page.locator('textarea');
     await box.fill('I have fifteen years of experience.');
     await w.page.getByRole('button', { name: 'Ответить', exact: true }).click();
-    await w.page.getByRole('alert').waitFor();
+    expect(await text(w.page.getByRole('alert'))).toBe('Слишком коротко: нужно не меньше 15 слов, лучше 40–150.');
     expect(w.stand.rows('SELECT id FROM rehearsal_turns WHERE answered_at IS NOT NULL')).toHaveLength(0);
 
     await box.fill(ANSWERS[0]);
     await w.page.getByRole('button', { name: 'Ответить', exact: true }).click();
-    await w.page.locator('.card .muted', { hasText: /^Вопрос 2 из 5/ }).waitFor();
+    await turnLabel(2).waitFor();
     expect(await box.inputValue()).toBe('');
     await shot(w.page, 'rehearsal');
 
-    await w.page.getByRole('button', { name: 'Прервать — продолжу позже' }).click();
+    await w.page.locator('section.card').getByRole('button', { name: 'Выйти', exact: true }).click();
     await heading(w.page, 'Сегодня').waitFor();
     const again = card(w.page, 'Репетиция интервью');
     await again.getByRole('button', { name: 'Продолжить репетицию' }).waitFor();
@@ -96,7 +98,7 @@ describe('репетиция интервью', () => {
     await w.page.waitForURL(/screen=rehearsal/);
     const box = w.page.locator('textarea');
     for (let i = 1; i < 5; i++) {
-      await w.page.locator('.card .muted', { hasText: new RegExp(`^Вопрос ${i + 1} из 5`) }).waitFor();
+      await turnLabel(i + 1).waitFor();
       await box.fill(ANSWERS[i]);
       await w.page.getByRole('button', { name: i === 4 ? 'Ответить и завершить' : 'Ответить', exact: true }).click();
     }
@@ -139,11 +141,11 @@ describe('репетиция интервью', () => {
   });
 });
 
-/** Задание среза на экране: вид — из подписи «Задание N из 10 · вид». */
+/** Задание среза на экране: вид — из полосы прогресса «Задание N из 10» (подписи вида на экране нет с 7.8). */
 async function currentTask(n: number) {
-  const label = w.page.locator('.card .muted', { hasText: new RegExp(`^Задание ${n} из 10 · `) });
+  const label = w.page.locator(`.card .progress[aria-label="Задание ${n} из 10"]`);
   await label.waitFor();
-  return (await text(label)).replace(/^Задание \d+ из 10 · /, '');
+  return (await label.getAttribute('data-kind')) ?? '';
 }
 
 describe('контрольный срез', () => {

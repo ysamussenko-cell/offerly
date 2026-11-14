@@ -28,11 +28,11 @@ const WRITING_EVAL = {
   rewrite: 'Thank you for reviewing my heat balance calculation. I used the measured flue gas temperature and the laboratory fuel analysis, so the losses rest on real data. I agree that the radiation loss is an estimate; I will add the method and its source to the appendix. Please let me know if any other part of the calculation needs more detail.',
 };
 
-/** Вид задания на экране — из подписи «Задание N из 14 · вид». */
+/** Вид задания на экране — из полосы прогресса «Задание N из 14» (подписи вида на экране нет с 7.8). */
 async function currentTask(n: number) {
-  const label = w.page.locator('.card .muted', { hasText: new RegExp(`^Задание ${n} из 14 · `) });
+  const label = w.page.locator(`.card .progress[aria-label="Задание ${n} из 14"]`);
   await label.waitFor();
-  return (await text(label)).replace(/^Задание \d+ из 14 · /, '');
+  return (await label.getAttribute('data-kind')) ?? '';
 }
 
 const send = () => w.page.getByRole('button', { name: 'Ответить', exact: true }).click();

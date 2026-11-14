@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorText, type Assessment as View, type AssessmentMode as Mode, type Checkpoint } from '../api';
 import { ComparisonView } from './Checkpoint';
-import { KeyHints, useHotkeys } from '../KeyHints';
+import { useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { MicButton, SpeakButton, useRecorder, type Recorder } from '../Recorder';
 import { mergeTranscript } from '../voice';
 import { useWakeLock } from '../wakeLock';
 import { autoFocusFields } from '../mobile';
-import { longDateAt, plural } from '../text';
+import { longDateAt, plural, shortAnswerText } from '../text';
 import ResultView from './Result';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
+/** Меньше — письмо не примет сервер (ANSWER_WORDS.min). */
+const MIN_WORDS = 30;
 
 type CardProps = { onOpen: (mode: Mode) => void; refreshKey?: number };
 
@@ -170,6 +172,7 @@ export default function Assessment({ onClose, mode = 'test', kind = 'placement' 
   async function send() {
     const v = answerValue();
     if (!cur || v == null || busy) return;
+    if (cur.kind === 'writing' && countWords(String(v)) < MIN_WORDS) { setError(shortAnswerText(MIN_WORDS, cur.words!.min, cur.words!.max)); return; }
     setBusy('answer'); setError(null);
     try {
       setView(await ops.answer(cur.attemptId, v));
@@ -229,13 +232,10 @@ export default function Assessment({ onClose, mode = 'test', kind = 'placement' 
   const progress = view ? (view.answered / view.total) * 100 : 0;
   return (
     <section className="card">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>{titles.test}</h2>
-        {cur && <span className="muted" style={{ fontSize: 14 }}>Задание {cur.position} из {view!.total} · {cur.kindLabel}</span>}
-      </div>
-      <div className="progress" aria-label={view ? `Отвечено ${view.answered} из ${view.total}` : undefined}><span style={{ width: `${progress}%` }} /></div>
+      <h2 style={{ margin: 0 }}>{titles.test}</h2>
+      <div className="progress" aria-label={view && cur ? `Задание ${cur.position} из ${view.total}` : undefined} data-kind={cur?.kindLabel}><span style={{ width: `${progress}%` }} /></div>
 
-      {busy === 'start' && <p className="muted">Подбираю первое задание{kind === 'checkpoint' ? ' со старта с вашего текущего уровня' : ''}… Если банк для вашего уровня пуст, модель напишет его сейчас — это до минуты.</p>}
+      {busy === 'start' && <p className="muted">Подбираю задание — до минуты.</p>}
       {!cur && busy !== 'start' && !error && <p className="muted">Задание не выдано. Вернитесь на главную и начните снова.</p>}
 
       {cur && cur.kind === 'mcq' && (
@@ -254,7 +254,7 @@ export default function Assessment({ onClose, mode = 'test', kind = 'placement' 
         <>
           <p className="task">{cur.prompt}</p>
           <label className="field">
-            <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте — или продиктуйте исправленное предложение целиком.</span>
+            <span>Исправьте одну ошибку.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={busy != null || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="исправление" />
@@ -278,35 +278,28 @@ export default function Assessment({ onClose, mode = 'test', kind = 'placement' 
         </>
       )}
 
-      {cur && cur.kind === 'writing' && <WritingInput prompt={cur.prompt} words={cur.words!} text={text} setText={setText} disabled={busy != null} rec={rec} />}
+      {cur && cur.kind === 'writing' && <WritingInput prompt={cur.prompt} text={text} setText={setText} disabled={busy != null} rec={rec} />}
 
       <div className="row" style={{ marginTop: 20 }}>
         <button className="btn" type="button" onClick={send} disabled={!canSend} aria-keyshortcuts={submitShortcut(textEntry)}>{busy === 'answer' ? (cur?.position === view?.total ? 'Оцениваю…' : 'Принимаю…') : 'Ответить'}</button>
-        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Прервать — продолжу позже</button>
+        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Выйти</button>
       </div>
-      {cur && <KeyHints ctx={{ ...keyCtx, submit: testing, busy: false, recordable: testing && textEntry && rec.available }} textEntry={textEntry} />}
-      {busy === 'answer' && cur?.position !== view?.total && <p className="muted hint">Следующее задание подбирается из банка; если там пусто, модель напишет его — до минуты.</p>}
-      {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">{kind === 'checkpoint' ? 'Письмо проверяется по рубрике и образцу, считаются пять осей и сравнение с прошлым тестом, пересобирается программа — до минуты.' : 'Письмо проверяется по рубрике и образцу, считаются пять осей — до минуты.'}</p>}
+      {busy === 'answer' && cur?.position !== view?.total && <p className="muted hint">Подбираю следующее — до минуты.</p>}
+      {busy === 'answer' && cur?.position === view?.total && <p className="muted hint">Проверяю письмо — до минуты.</p>}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
 }
 
-function WritingInput({ prompt, words, text, setText, disabled, rec }: { prompt: string; words: { min: number; max: number }; text: string; setText: (s: string) => void; disabled: boolean; rec: Recorder }) {
-  const n = countWords(text);
-  const tone = n === 0 ? 'muted' : n < 30 ? 'bad' : n < words.min || n > words.max ? 'warn' : 'ok';
+function WritingInput({ prompt, text, setText, disabled, rec }: { prompt: string; text: string; setText: (s: string) => void; disabled: boolean; rec: Recorder }) {
   return (
     <>
       <div className="task-row">
         <p className="task">{prompt}</p>
         <SpeakButton text={prompt} label="Озвучить задание" />
       </div>
-      <label className="field">
-        <span>Текст на английском, {words.min}–{words.max} слов — наберите или продиктуйте. Отвечайте на задание, а не вокруг него.</span>
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} />
-      </label>
+      <div className="field"><textarea aria-label="Текст письма" value={text} onChange={e => setText(e.target.value)} rows={8} disabled={disabled || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} /></div>
       <MicButton rec={rec} disabled={disabled} what="ответ" />
-      <p className={`hint ${tone}`}>{wordsText(n)} · цель {words.min}–{words.max}{n > 0 && n < 30 ? ' · меньше тридцати не принимается' : ''}</p>
     </>
   );
 }
@@ -354,7 +347,6 @@ function Finished({ view, kind, onClose, onRestart, onRescore, busy, error }: Fi
         <button className="btn" type="button" onClick={onClose} disabled={busy != null} aria-keyshortcuts="Escape">На главную</button>
         {!checkpoint && <button className="link" type="button" onClick={onRestart} disabled={busy != null}>{baseline ? 'Пройти тест уровня' : 'Пройти тест заново'}</button>}
       </div>
-      <KeyHints ctx={keyCtx} />
     </section>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorText, rehearsalErrorText, type Achievement, type Rehearsal as View, type RehearsalToday, type Speech } from '../api';
-import { longDate, minutesText, plural } from '../text';
-import { KeyHints, useHotkeys } from '../KeyHints';
+import { longDate, minutesText, plural, shortAnswerText } from '../text';
+import { useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { Diff } from './Lesson';
 import { MicButton, SpeakButton, useRecorder } from '../Recorder';
@@ -10,6 +10,8 @@ import { useWakeLock } from '../wakeLock';
 import { autoFocusFields } from '../mobile';
 
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
+/** Меньше — сервер не примет ответ на вопрос репетиции. */
+const MIN_WORDS = 15;
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
 const cardsText = (n: number) => `${n} ${plural(n, 'карточка', 'карточки', 'карточек')}`;
 const cap = (s: string) => s ? s[0].toUpperCase() + s.slice(1) : s;
@@ -57,7 +59,10 @@ export function RehearsalCard({ onOpen, refreshKey }: CardProps) {
         <>
           <div className="progress" aria-label={`Отвечено ${r.answered} из ${r.total}`}><span style={{ width: `${(r.answered / r.total) * 100}%` }} /></div>
           <p className="muted" style={{ marginTop: -8, fontSize: 14 }}>Отвечено {r.answered} из {r.total}{r.targetRole ? ` · позиция: ${r.targetRole}` : ''}.</p>
-          <button className="btn" type="button" onClick={onOpen}>Продолжить репетицию</button>
+          <div className="row">
+            <button className="btn" type="button" onClick={onOpen}>Продолжить репетицию</button>
+            {r.answered === 0 && <button className="link" type="button" onClick={() => api.abandonRehearsal().then(onOpen).catch(e => setState(st => ({ ...st, error: errorText(e) })))}>Другой сценарий</button>}
+          </div>
         </>
       )}
       {r?.status === 'finished' && (
@@ -108,6 +113,7 @@ export default function Rehearsal({ onClose }: Props) {
 
   async function send() {
     if (!cur || !text.trim() || busy) return;
+    if (words < MIN_WORDS) { setError(shortAnswerText(MIN_WORDS, cur.words.min, cur.words.max)); return; }
     setBusy('answer'); setError(null);
     try {
       const r = await api.answerRehearsal(cur.turnId, text.trim(), speech?.id ?? null);
@@ -128,15 +134,6 @@ export default function Rehearsal({ onClose }: Props) {
     finally { setBusy(null); }
   }
 
-  /** Другой сценарий: бросить начатую репетицию без ответов и начать заново. */
-  async function restart() {
-    if (busy) return;
-    setBusy('start'); setError(null);
-    try { await api.abandonRehearsal(); const r = await api.startRehearsal(); startedFor.current = null; setView(r.rehearsal); }
-    catch (e) { setError(errorText(e)); }
-    finally { setBusy(null); }
-  }
-
   const finished = view?.status === 'finished';
   const recordable = cur != null && busy == null && rec.available && rec.state !== 'processing';
   const keyCtx = { submit: canSend, cancel: busy !== 'answer' && rec.state === 'idle', busy: busy != null, recordable };
@@ -149,29 +146,20 @@ export default function Rehearsal({ onClose }: Props) {
   const progress = view ? (view.answered / view.total) * 100 : 0;
   return (
     <section className="card">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>Репетиция интервью{view?.targetRole ? ` · ${view.targetRole}` : ''}</h2>
-        {view && cur && <span className="muted" style={{ fontSize: 14 }}>Вопрос {cur.position} из {view.total} · {cur.kindLabel}</span>}
-      </div>
-      <div className="progress" aria-label={view ? `Отвечено ${view.answered} из ${view.total}` : undefined}><span style={{ width: `${progress}%` }} /></div>
+      <h2 style={{ margin: 0 }}>Репетиция</h2>
+      <div className="progress" aria-label={view && cur ? `Вопрос ${cur.position} из ${view.total}` : undefined}><span style={{ width: `${progress}%` }} /></div>
 
-      {busy === 'start' && <p className="muted">Интервьюер готовит сценарий по вашей позиции и резюме — до минуты.</p>}
+      {busy === 'start' && <p className="muted">Готовлю вопросы — до минуты.</p>}
       {!cur && busy !== 'start' && !error && <p className="muted">Вопрос не выдан. Вернитесь на главную и начните снова.</p>}
 
       {cur && (
         <>
-          <p className="muted hint" style={{ margin: '0 0 6px' }}>Интервьюер{view?.level ? ` · ваш уровень ${view.level}` : ''}{view && !view.scripted ? ' · встроенный сценарий' : ''}</p>
           <div className="task-row">
             <p className="task" lang="en">{cur.question}</p>
             <SpeakButton text={cur.question} label="Озвучить вопрос" />
           </div>
-          <label className="field">
-            <span>{kindHint(cur.kind)} Ответ по-английски, {cur.words.min}–{cur.words.max} слов — голосом или текстом, как сказали бы вслух.</span>
-            <textarea value={text} onChange={e => { setText(e.target.value); if (!e.target.value.trim()) setSpeech(null); }} rows={8} disabled={busy != null || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} />
-          </label>
+          <div className="field"><textarea aria-label="Ответ" value={text} onChange={e => { setText(e.target.value); if (!e.target.value.trim()) setSpeech(null); setError(null); }} rows={8} disabled={busy != null || rec.state !== 'idle'} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} /></div>
           <MicButton rec={rec} disabled={busy != null} what="ответ" />
-          {speech && <p className={`speech-line ${fluencyTone(speech.fluency)}`}>С голоса: {speechLine(speech)}. Беглость этой записи войдёт в оси разбора; текст перед отправкой можно поправить.</p>}
-          <WordCount n={words} min={cur.words.min} max={cur.words.max} />
         </>
       )}
 
@@ -179,30 +167,11 @@ export default function Rehearsal({ onClose }: Props) {
         <button className="btn" type="button" onClick={send} disabled={!canSend} aria-keyshortcuts={submitShortcut(true)}>
           {busy === 'answer' ? (isLast ? 'Разбираю разговор…' : 'Записываю…') : isLast ? 'Ответить и завершить' : 'Ответить'}
         </button>
-        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Прервать — продолжу позже</button>
-        {view && view.answered === 0 && cur && busy == null && <button className="link" type="button" onClick={restart}>Другой сценарий</button>}
+        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Выйти</button>
       </div>
-      {busy === 'answer' && isLast && <p className="muted hint">Экзаменатор читает все ответы: пять осей, что сказано хорошо, три фразы заменить — до минуты.</p>}
-      {cur && <KeyHints ctx={{ ...keyCtx, submit: true, busy: false, recordable: rec.available }} textEntry />}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
-}
-
-/** Подсказка к вопросу по его виду — одной строкой, что ждёт интервьюер. */
-function kindHint(kind: View['turns'][number]['kind']): string {
-  switch (kind) {
-    case 'experience': return 'Конкретные проекты, масштаб, результат.';
-    case 'mistake': return 'Что пошло не так, почему и как не допустить снова.';
-    case 'explain': return 'Без жаргона, с примером, и почему это важно для дела.';
-    case 'star': return 'Ситуация, задача, ваши действия, результат.';
-    case 'role': return 'Связь опыта с позицией и план на первые месяцы.';
-  }
-}
-
-function WordCount({ n, min, max }: { n: number; min: number; max: number }) {
-  const tone = n === 0 ? 'muted' : n < 15 ? 'bad' : n < min || n > max ? 'warn' : 'ok';
-  return <p className={`hint ${tone}`}>{wordsText(n)} · цель {min}–{max}{n > 0 && n < 15 ? ' · меньше пятнадцати не принимается' : ''}</p>;
 }
 
 type DebriefProps = { view: View; onClose: () => void; onReview: () => void; busy: boolean; error: string | null; unlocked: Achievement[] };
@@ -305,7 +274,6 @@ function Debrief({ view, onClose, onReview, busy, error, unlocked }: DebriefProp
       <div className="row" style={{ marginTop: 16 }}>
         <button className="btn" type="button" onClick={onClose} aria-keyshortcuts="Escape">На главную</button>
       </div>
-      <KeyHints ctx={keyCtx} />
       {view.day && <p className="muted hint">День репетиции отмечен в программе пройденным{res ? `, вклад в готовность — как у занятия с баллом ${res.overall}` : ''}.</p>}
     </section>
   );

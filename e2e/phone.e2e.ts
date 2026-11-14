@@ -21,7 +21,7 @@ describe('телефон 390 px', () => {
     await shot(w.page, 'phone-home');
   });
 
-  it('занятие на телефоне: варианты на всю ширину, подсказка клавиш скрыта, поле ответа без автофокуса', async () => {
+  it('занятие на телефоне: варианты на всю ширину, строки клавиш нет, поле ответа без автофокуса', async () => {
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Начать занятие' }).tap();
     await w.page.waitForURL(/screen=lesson/);
     const choices = w.page.locator('.choices button');
@@ -30,10 +30,8 @@ describe('телефон 390 px', () => {
     const width = await inPage<number>(w.page, "document.querySelector('.choices button').getBoundingClientRect().width");
     const cardWidth = await inPage<number>(w.page, "document.querySelector('section.card').getBoundingClientRect().width");
     expect(width).toBeGreaterThan(cardWidth * 0.6);
-    // подсказка клавиш показывается только при наведении мышью (hover: hover) — на тач-устройстве её нет
-    const hints = w.page.locator('.keys');
-    expect(await hints.count()).toBe(1);
-    expect(await hints.first().isVisible()).toBe(false);
+    // строки клавиш на экране занятия нет (7.8) — ни на телефоне, ни на компьютере
+    expect(await w.page.locator('.keys').count()).toBe(0);
     await shot(w.page, 'phone-lesson');
     expect(await inPage<string>(w.page, 'document.activeElement && document.activeElement.tagName')).not.toBe('TEXTAREA');
   });

@@ -1,4 +1,4 @@
-/** Ключевые сценарии приложения в настоящем Chromium: вход → резюме → главный экран → занятие → тест (старт и «Прервать»; до результата — `placement.e2e.ts`) → настройки.
+/** Ключевые сценарии приложения в настоящем Chromium: вход → резюме → главный экран → занятие → тест (старт и «Выйти»; до результата — `placement.e2e.ts`) → настройки.
  *  Стенд — собранный dist и API на SQLite в памяти (e2e/server.ts); модель отключена, задания из засеянного банка. */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { openWorld, closeWorld, login, seed, text, heading, card, shot, EMAIL, type World } from './helpers';
@@ -37,11 +37,11 @@ describe('занятие дня', () => {
   it('разминка: выбор клавишами 3 и Enter — «Верно», затем мышью неверный вариант — «Неверно» с эталоном', async () => {
     await card(w.page, 'Сегодня').getByRole('button', { name: 'Начать занятие' }).click();
     await w.page.waitForURL(/screen=lesson/);
-    await heading(w.page, /^Занятие · /).waitFor();
+    await heading(w.page, 'Занятие').waitFor();
     const choices = w.page.locator('.choices button');
     await choices.first().waitFor();
     expect(await choices.count()).toBe(4);
-    expect(await text(w.page.locator('.card .muted', { hasText: 'Шаг 1 из' }))).toMatch(/Шаг 1 из \d+/);
+    expect(await w.page.locator('.card .progress').first().getAttribute('aria-label')).toMatch(/^Шаг 1 из \d+$/);
 
     // шаг 1 — клавишами: 3 выбирает вариант C (ключ засева), Enter отправляет
     await w.page.keyboard.press('3');
@@ -73,14 +73,14 @@ describe('занятие дня', () => {
 });
 
 describe('тест уровня', () => {
-  it('«Пройти тест» выдаёт первое задание из 14, «Прервать» возвращает на главный с кнопкой «Продолжить»', async () => {
+  it('«Пройти тест» выдаёт первое задание из 14, «Выйти» возвращает на главный с кнопкой «Продолжить»', async () => {
     await card(w.page, 'Тест уровня').getByRole('button', { name: 'Пройти тест' }).click();
     await w.page.waitForURL(/screen=test/);
     await heading(w.page, 'Тест уровня').waitFor();
     await w.page.locator('.choices button').first().waitFor();
-    expect(await text(w.page.locator('.card .muted', { hasText: 'Задание 1 из' }))).toMatch(/Задание 1 из 14/);
+    expect(await w.page.locator('.card .progress').first().getAttribute('aria-label')).toBe('Задание 1 из 14');
     await shot(w.page, 'test');
-    await w.page.getByRole('button', { name: 'Прервать — продолжу позже' }).click();
+    await w.page.locator('section.card').getByRole('button', { name: 'Выйти', exact: true }).click();
     await heading(w.page, 'Сегодня').waitFor();
     await card(w.page, 'Тест уровня').getByRole('button', { name: 'Продолжить', exact: true }).waitFor();
     expect(w.stand.rows("SELECT id FROM assessments WHERE kind = 'placement' AND status = 'active'")).toHaveLength(1);

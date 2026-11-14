@@ -120,7 +120,7 @@ const WRITING_EVAL = {
 };
 
 const answerButton = () => w.page.getByRole('button', { name: 'Ответить', exact: true });
-const stepLabel = (n: number) => w.page.locator('.card .muted', { hasText: new RegExp(`^Шаг ${n} из 8 · `) });
+const stepLabel = (n: number) => w.page.locator(`.card .progress[aria-label="Шаг ${n} из 8"]`);
 const fresh = () => w.page.locator('.tag.today', { hasText: 'новое' });
 
 describe('журнал ошибок и достижения', () => {
@@ -160,7 +160,7 @@ describe('журнал ошибок и достижения', () => {
       await w.page.getByRole('button', { name: 'Дальше' }).click();
     }
 
-    expect(await text(stepLabel(6))).toMatch(/письмо$/);
+    expect(await stepLabel(6).getAttribute('data-part')).toMatch(/письмо$/);
     w.stand.ai.reply('examiner of English writing', WRITING_EVAL);
     await w.page.locator('textarea').fill(WRITING);
     await answerButton().click();

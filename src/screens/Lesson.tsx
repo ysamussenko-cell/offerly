@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, errorText, type Achievement, type Lesson as View, type LessonStepDone } from '../api';
-import { longDate, minutesText, plural } from '../text';
+import { longDate, minutesText, plural, shortAnswerText } from '../text';
 import { changedWords, wordDiff } from '../diff';
 import { reviewOutcome } from './Journal';
-import { KeyHints, useHotkeys } from '../KeyHints';
+import { useHotkeys } from '../KeyHints';
 import { submitShortcut } from '../hotkeys';
 import { MicButton, SpeakButton, useRecorder } from '../Recorder';
 import { mergeTranscript } from '../voice';
@@ -14,7 +14,10 @@ const LETTERS = ['A', 'B', 'C', 'D'];
 const wordsText = (n: number) => `${n} ${plural(n, 'слово', 'слова', 'слов')}`;
 const cardsText = (n: number) => `${n} ${plural(n, 'карточка', 'карточки', 'карточек')}`;
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
-const cap = (s: string) => s ? s[0].toUpperCase() + s.slice(1) : s;
+/** Меньше — письмо не примет сервер (ANSWER_WORDS.min в functions/_lib/assessment.ts). */
+const MIN_WORDS = 30;
+/** Подпись полосы прогресса для экранного чтеца: «Шаг 3 из 8» или «Бонусная задача». */
+const stepLabel = (s: { part: string; position: number }, total: number) => (s.part === 'bonus' ? 'Бонусная задача' : `Шаг ${s.position} из ${total}`);
 
 /** Короткая строка о бонусе для итога. */
 export function bonusLine(b: NonNullable<View['bonus']>): string {
@@ -71,6 +74,7 @@ export default function Lesson({ onClose }: Props) {
   async function send() {
     const v = answerValue();
     if (!cur || v == null || busy || last) return;
+    if (cur.kind === 'writing' && countWords(v) < MIN_WORDS) { setError(shortAnswerText(MIN_WORDS, cur.words!.min, cur.words!.max)); return; }
     setBusy('answer'); setError(null);
     try {
       const r = await api.answerLesson(cur.stepId, v);
@@ -122,20 +126,16 @@ export default function Lesson({ onClose }: Props) {
   const progress = view ? (view.answered / view.total) * 100 : 0;
   return (
     <section className="card">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0 }}>{(last ?? cur)?.part === 'bonus' ? 'Бонусная задача' : 'Занятие'}{view ? ` · ${view.topicLabel}` : ''}</h2>
-        {view && (last || cur) && <span className="muted" style={{ fontSize: 14 }}>{(last ?? cur)!.part === 'bonus' ? `после занятия · ступень ${view.bonus?.level ?? ''}` : `Шаг ${(last ?? cur)!.position} из ${view.total} · ${(last ?? cur)!.partLabel}`}</span>}
-      </div>
-      <div className="progress" aria-label={view ? `Пройдено ${view.answered} из ${view.total}` : undefined}><span style={{ width: `${progress}%` }} /></div>
+      <h2 style={{ margin: 0 }}>{(last ?? cur)?.part === 'bonus' ? 'Бонусная задача' : 'Занятие'}</h2>
+      <div className="progress" aria-label={view && (last || cur) ? stepLabel((last ?? cur)!, view.total) : undefined} data-part={(last ?? cur)?.partLabel}><span style={{ width: `${progress}%` }} /></div>
 
-      {busy === 'start' && <p className="muted">Собираю занятие: задания темы дня из банка, письмо формата дня, карточки к повтору. Если в банке по теме пусто, модель напишет задание — до минуты.</p>}
+      {busy === 'start' && <p className="muted">Собираю занятие — до минуты.</p>}
       {!cur && !last && busy !== 'start' && !error && <p className="muted">Шаг не выдан. Вернитесь на главную и начните снова.</p>}
 
       {last && <Review step={last} today={view?.date} />}
 
       {!last && cur && cur.kind === 'mcq' && (
         <>
-          <p className="muted hint" style={{ margin: '0 0 6px' }}>{cur.topicLabel}{cur.level ? ` · ${cur.level}` : ''}</p>
           <p className="task">{cur.prompt}</p>
           <div className="choices" role="radiogroup">
             {cur.options!.map((o, i) => (
@@ -148,11 +148,9 @@ export default function Lesson({ onClose }: Props) {
 
       {!last && cur && cur.kind === 'correction' && (
         <>
-          <p className="muted hint" style={{ margin: '0 0 6px' }}>{cur.topicLabel}{cur.level ? ` · ${cur.level}` : ''}</p>
           <p className="task">{cur.prompt}</p>
-          {cur.part === 'bonus' && <p className="muted hint" style={{ margin: '0 0 8px' }}>Задача ступенью выше вашего уровня. Верно — вклад занятия в готовность ×{view?.bonus?.multiplier ?? 2}; неверно — ничего не отнимается.</p>}
           <label className="field">
-            <span>В предложении одна ошибка. Исправьте её и ничего больше не меняйте — или продиктуйте исправленное предложение целиком.</span>
+            <span>Исправьте одну ошибку.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="исправление" />
@@ -161,10 +159,9 @@ export default function Lesson({ onClose }: Props) {
 
       {!last && cur && cur.kind === 'card' && (
         <>
-          <p className="muted hint" style={{ margin: '0 0 6px' }}>Карточка из журнала · {cur.topicLabel}</p>
           <p className="task">{cur.prompt}</p>
           <label className="field">
-            <span>Так вы написали раньше. Исправьте ошибку — как надо, текстом или голосом.</span>
+            <span>Так вы написали раньше. Исправьте ошибку.</span>
             <textarea className="mono" value={text} onChange={e => setText(e.target.value)} rows={3} style={{ minHeight: 80 }} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </label>
           <MicButton rec={rec} disabled={busy != null} what="исправление" />
@@ -173,17 +170,12 @@ export default function Lesson({ onClose }: Props) {
 
       {!last && cur && cur.kind === 'writing' && (
         <>
-          <p className="muted hint" style={{ margin: '0 0 6px' }}>{view?.writingLabel ? cap(view.writingLabel) : 'Письмо'}{cur.level ? ` · ${cur.level}` : ''}</p>
           <div className="task-row">
             <p className="task">{cur.prompt}</p>
             <SpeakButton text={cur.prompt} label="Озвучить задание" />
           </div>
-          <label className="field">
-            <span>Текст на английском, {cur.words!.min}–{cur.words!.max} слов — наберите или продиктуйте. Отвечайте на задание, а не вокруг него.</span>
-            <textarea value={text} onChange={e => setText(e.target.value)} rows={8} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} />
-          </label>
+          <div className="field"><textarea aria-label="Текст письма" value={text} onChange={e => { setText(e.target.value); setError(null); }} rows={8} disabled={fieldOff} autoFocus={focusOnOpen} lang="en" autoCapitalize="sentences" spellCheck={false} /></div>
           <MicButton rec={rec} disabled={busy != null} what="ответ" />
-          <WordCount n={countWords(text)} min={cur.words!.min} max={cur.words!.max} />
         </>
       )}
 
@@ -193,19 +185,14 @@ export default function Lesson({ onClose }: Props) {
         ) : (
           <button className="btn" type="button" onClick={send} disabled={!canSend} aria-keyshortcuts={submitShortcut(textEntry)}>{busy === 'answer' ? (cur?.kind === 'writing' ? 'Оцениваю…' : 'Проверяю…') : 'Ответить'}</button>
         )}
-        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Прервать — продолжу позже</button>
+        <button className="link" type="button" onClick={onClose} disabled={busy === 'answer'} aria-keyshortcuts="Escape">Выйти</button>
       </div>
       {busy === 'answer' && cur?.kind === 'writing' && <p className="muted hint">Письмо проверяется по рубрике и образцу — до минуты.</p>}
-      {(last || cur) && <KeyHints ctx={{ ...keyCtx, submit: !last && cur != null, busy: false, recordable: !last && textEntry && rec.available }} textEntry={textEntry} />}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
 }
 
-function WordCount({ n, min, max }: { n: number; min: number; max: number }) {
-  const tone = n === 0 ? 'muted' : n < 30 ? 'bad' : n < min || n > max ? 'warn' : 'ok';
-  return <p className={`hint ${tone}`}>{wordsText(n)} · цель {min}–{max}{n > 0 && n < 30 ? ' · меньше тридцати не принимается' : ''}</p>;
-}
 
 /** Подсветка: side = 'written' — что убрать (зачёркнуто), 'correction' — что добавлено (выделено). */
 export function Diff({ from, to, side }: { from: string; to: string; side: 'written' | 'correction' }) {
@@ -357,7 +344,6 @@ function Summary({ view, onClose, onBonus, busy, error, unlocked }: SummaryProps
       <div className="row" style={{ marginTop: 16 }}>
         <button className="btn" type="button" onClick={onClose} aria-keyshortcuts="Escape">На главную</button>
       </div>
-      <KeyHints ctx={keyCtx} />
       <p className="muted hint">Пройденный день отмечен в программе{p.review.total ? `; ${cardsText(p.review.total)} ${p.review.total === 1 ? 'получила' : 'получили'} новый срок повтора` : ''}.</p>
     </section>
   );
